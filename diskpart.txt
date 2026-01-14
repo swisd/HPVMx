@@ -1,0 +1,2 @@
+select vdisk file=C:\RS\HPVMx\boot.vhd
+detach vdisk
