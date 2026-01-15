@@ -1,9 +1,14 @@
+#![feature(str_as_str)]
+#![feature(abi_x86_interrupt)]
 #![no_std]
 #![no_main]
 
 mod ui;
 mod kernel;
 mod filesystem;
+mod graphics;
+mod interrupts;
+mod imx;
 
 extern crate alloc;
 use alloc::string::String;
@@ -20,7 +25,7 @@ use uefi::proto::console::text::{Key, ScanCode};
 use uefi::proto::media::file::{File, FileAttribute, FileMode};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::proto::console::text::{Color, Output as TextOutputTrait};
-use ui::UI;
+//use ui::UI;
 use kernel::KernelLoader;
 use filesystem::FileSystem;
 
@@ -81,10 +86,12 @@ macro_rules! hpvm_warn {
 macro_rules! hpvm_error {
     ($tag:expr, $($arg:tt)*) => { hpvm_log!(Color::Red, $tag, $($arg)*) };
 }
-// #[global_allocator]
-// static ALLOCATOR: LockedHeap<32> = LockedHeap::<32>::empty();
-//
-// static mut HEAP_STORAGE: [u8; 2 * 1024 * 1024] = [0; 2 * 1024 * 1024];
+
+
+//#[global_allocator]
+static ALLOCATOR: LockedHeap<32> = LockedHeap::<32>::empty();
+static mut HEAP_STORAGE: [u8; 2 * 1024 * 1024] = [0; 2 * 1024 * 1024];
+static mut VIRT_STACK: [u8; 1024 * 1024 * 1024] = [0; 1024 * 1024 * 1024];
 
 
 
@@ -108,8 +115,8 @@ fn main() -> Status {
 
     // 2. In uefi 0.36.1 with 'alloc' feature, use boot::memory_map()
     // This returns a MemoryMapOwned object automatically using the heap.
-    // let size = uefi::boot::memory_map_size().map_size;
-    // info!("system required buffer of {} bytes", size);
+    //let size = uefi::boot::memory_map_size().map_size;
+    //info!("system required buffer of {} bytes", size);
 
     // 16KB is usually enough for most servers; 32KB is safe for high-end systems.
     let mut map_buffer = [0u8; 32768];
@@ -146,6 +153,13 @@ fn main() -> Status {
         }
     }
 
+    hpvm_info!("IDT", "initializing idt");
+
+    hpvm_info!("fs", "building drivelist");
+    FileSystem::scan_and_map_devices("DRIVELIST");
+
+    //interrupts::init_idt();
+
     hpvm_info!("HPVMx", "init sequence complete.");
     hpvm_info!("HPVMx", "ready");
     hpvm_warn!("HPVMx", "within spinloop");
@@ -170,9 +184,9 @@ fn main() -> Status {
         let parts = &command;
 
         match command.as_slice()[0] {
-            "help" => message!("\n", "commands available: \n(* means command is not in a working state) \nhelp \nclear \nls \n*cd [directory] \npwd \nmkdir [directory] \ntouch [file] \ncpy [source] [destination] \nmov [source] [destination] \nrm [file] \ncat [file] \nclon [args] \n*upd [**args] [disk] \ninfo \ndevs \nstart [kernel filepath] \nBIOS"),
+            "help" => message!("\n", "commands available: \n(* means command is not in a working state) \nhelp \nclear \nls \n*cd [directory] \npwd \nmkdir [directory] \ntouch [file] \ncpy [source] [destination] \nmov [source] [destination] \nrm [file] \ncat [file] \nclon [args] \nwrite [file] [data] [mode] \n*upd [**args] [disk] \ninfo \ndevs \nstart [kernel filepath] \nBIOS"),
             "clear" => { uefi::system::with_stdout(|s| s.clear().unwrap()); },
-            "ls" => list_files(),
+            "ls" => FileSystem::list_files(),
             "cd" => {},
             "pwd" => { message!("\n", "root") },
             "mkdir" => {
@@ -244,9 +258,22 @@ fn main() -> Status {
                     }
                 }
             },
+            "write" => {
+                if command.len() > 3 {
+                    FileSystem::write_to_file(command[1], command[2], command[3].parse().unwrap());
+                } else {
+                    message!("\n", "Usage: write [file] [data] [mode]")
+                }
+            },
             "upd" => {},
             "info" => {},
-            "devs" => {},
+            "devs" => {
+                if command.len() > 1 {
+                    FileSystem::get_drives("DRIVELIST");
+                } else {
+                    message!(".", "text")
+                }
+            },
             "start" => {
                 if command.len() < 2 {
                     message!("\n", "Usage: start [kernel_path]");
@@ -254,9 +281,9 @@ fn main() -> Status {
                     start_kernel(command[1]);
                 }
             },
-            "enter" => {
-                enter(body.as_slice()[1])
-            },
+            //"enter" => {
+            //    enter(body.as_slice()[1])
+            //},
             "BIOS" => break,
             _ => message!("\n", "unknown command: {:?}", command),
         }
@@ -276,6 +303,7 @@ fn read_line(buf: &mut String) {
                     let ch = char::from(c);
                     if ch == '\r' || ch == '\n' {
                         uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, ch).unwrap());
+                        uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, "\n".parse().unwrap()).unwrap());
                         break;
                     }
                     buf.push(ch);
@@ -293,36 +321,17 @@ fn read_line(buf: &mut String) {
     }
 }
 
-fn list_files() {
-    // Locate the filesystem protocol
-    let handle = uefi::boot::get_handle_for_protocol::<SimpleFileSystem>().unwrap();
-    let mut sfs = uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle).unwrap();
-    let mut root = sfs.open_volume().unwrap();
 
-    message!("\n", "ROOT {:?}", root);
-
-    // Buffer for directory entries
-    let mut buffer = [0u8; 32768];
-    loop {
-        match root.read_entry(&mut buffer) {
-            Ok(Some(entry)) => {
-                message!("\t", "  {} ** {} BYTES", entry.file_name(), entry.file_size());
-            }
-            _ => break,
-        }
-    }
-}
-
-fn enter(itm: &str){
-    match itm {
-        "ui" => {
-            let mut ui = UI::new();
-            ui.run();
-        },
-        _ => {}
-        
-    }
-}
+// fn enter(itm: &str){
+//     match itm {
+//         "ui" => {
+//             let mut ui = UI::new();
+//             ui.run();
+//         },
+//         _ => {}
+//
+//     }
+// }
 
 fn start_kernel(path: &str) {
     hpvm_info!("kernel", "attempting to load kernel from: {}", path);

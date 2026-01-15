@@ -1,3 +1,3 @@
 # HPVMx
 
-A hardware provisioning and virtualization manager written in rust.
+A bare-metal (+BIOS&EFI) hardware provisioning and virtualization manager written in rust.

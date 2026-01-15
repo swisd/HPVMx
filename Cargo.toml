@@ -20,3 +20,4 @@ gpt = "4.1.0"
 fatfs = { version = "0.3.6"}
 log = "0.4.29"
 getrandom = { version = "0.3.4", default-features = false }
+lazy_static = "1.5.0"
