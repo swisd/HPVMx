@@ -3,6 +3,7 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::ffi::CStr;
 use core::fmt::Write;
 use uefi::boot::{ScopedProtocol, SearchType};
 use uefi::data_types::CStr16;
@@ -342,5 +343,12 @@ impl FileSystem {
                 }
             }
         }
+    }
+
+    pub fn get_cwd() -> Result<(), ()> {
+        let state = Self::get_state();
+        let current_path = &state.cwd;
+        message!("\n", "CWD: {}", current_path);
+        Ok(())
     }
 }

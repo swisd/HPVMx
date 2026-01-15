@@ -187,8 +187,8 @@ fn main() -> Status {
             "help" => message!("\n", "commands available: \n(* means command is not in a working state) \nhelp \nclear \nls \n*cd [directory] \npwd \nmkdir [directory] \ntouch [file] \ncpy [source] [destination] \nmov [source] [destination] \nrm [file] \ncat [file] \nclon [args] \nwrite [file] [data] [mode] \n*upd [**args] [disk] \ninfo \ndevs \nstart [kernel filepath] \nBIOS"),
             "clear" => { uefi::system::with_stdout(|s| s.clear().unwrap()); },
             "ls" => FileSystem::list_files(),
-            "cd" => {},
-            "pwd" => { message!("\n", "root") },
+            "cd" => { FileSystem::cd(command[1]) },
+            "pwd" => { FileSystem::get_cwd(); },
             "mkdir" => {
                 if parts.len() < 2 {
                     message!("\n", "Usage: mkdir [directory]");
