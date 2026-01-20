@@ -1,291 +1,272 @@
-use alloc::string::{String, ToString};
+#![allow(dead_code)]
+
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::Write;
-use uefi::proto::console::text::{Key, ScanCode};
-use uefi::proto::console::text::Color;
+use uefi::proto::console::text::{Color, Key, ScanCode};
+use uefi::system;
 
-pub struct UI {
-    selected_menu_index: usize,
-    selected_row_index: usize,
-    menu_items: Vec<MenuItem>,
-    vms: Vec<VMInfo>,
-    cursor_x: usize,
-    cursor_y: usize,
+mod graphics;
+pub use graphics::{Graphics, Rect, WinNTColors};
+
+pub struct Window {
+    pub title: String,
+    pub rect: Rect,
+    pub active: bool,
 }
 
-struct MenuItem {
-    name: &'static str,
-    icon: &'static str,
+impl Window {
+    pub fn new(title: &str, x: usize, y: usize, width: usize, height: usize) -> Self {
+        Window {
+            title: String::from(title),
+            rect: Rect::new(x, y, width, height),
+            active: true,
+        }
+    }
+
+    pub fn draw(&self) {
+        Graphics::draw_box(&self.rect, &self.title, self.active);
+    }
 }
 
-struct VMInfo {
-    id: u32,
-    name: &'static str,
-    status: &'static str,
-    cpu_usage: f32,
-    mem_usage: f32,
-    uptime: &'static str,
+pub struct Button {
+    pub label: String,
+    pub rect: Rect,
+    pub focused: bool,
+    pub clicked: bool,
 }
 
-impl UI {
+impl Button {
+    pub fn new(label: &str, x: usize, y: usize, width: usize, height: usize) -> Self {
+        Button {
+            label: String::from(label),
+            rect: Rect::new(x, y, width, height),
+            focused: false,
+            clicked: false,
+        }
+    }
+
+    pub fn draw(&self) {
+        Graphics::draw_button(&self.rect, &self.label, self.focused);
+    }
+
+    pub fn contains(&self, x: usize, y: usize) -> bool {
+        self.rect.contains(x, y)
+    }
+}
+
+pub struct TextBox {
+    pub text: String,
+    pub rect: Rect,
+    pub focused: bool,
+    pub max_length: usize,
+}
+
+impl TextBox {
+    pub fn new(x: usize, y: usize, width: usize, max_length: usize) -> Self {
+        TextBox {
+            text: String::new(),
+            rect: Rect::new(x, y, width, 3),
+            focused: false,
+            max_length,
+        }
+    }
+
+    pub fn draw(&self) {
+        Graphics::draw_textbox(&self.rect, &self.text, self.focused);
+    }
+
+    pub fn add_char(&mut self, ch: char) {
+        if self.text.len() < self.max_length {
+            self.text.push(ch);
+        }
+    }
+
+    pub fn backspace(&mut self) {
+        self.text.pop();
+    }
+}
+
+pub struct ListBox {
+    pub items: Vec<String>,
+    pub rect: Rect,
+    pub selected: usize,
+}
+
+impl ListBox {
+    pub fn new(x: usize, y: usize, width: usize, height: usize) -> Self {
+        ListBox {
+            items: Vec::new(),
+            rect: Rect::new(x, y, width, height),
+            selected: 0,
+        }
+    }
+
+    pub fn add_item(&mut self, item: &str) {
+        self.items.push(String::from(item));
+    }
+
+    pub fn draw(&self) {
+        let items_str: Vec<&str> = self.items.iter().map(|s| s.as_str()).collect();
+        Graphics::draw_list(&self.rect, &items_str, self.selected);
+    }
+
+    pub fn select_next(&mut self) {
+        if self.selected < self.items.len().saturating_sub(1) {
+            self.selected += 1;
+        }
+    }
+
+    pub fn select_prev(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn get_selected(&self) -> Option<&str> {
+        self.items.get(self.selected).map(|s| s.as_str())
+    }
+}
+
+pub struct WinNTShell {
+    pub windows: Vec<Window>,
+    pub buttons: Vec<Button>,
+    pub textboxes: Vec<TextBox>,
+    pub listbox: Option<ListBox>,
+    pub focused_button: usize,
+    pub focused_textbox: usize,
+}
+
+impl WinNTShell {
     pub fn new() -> Self {
-        let mut menu_items = Vec::new();
-        menu_items.push(MenuItem { name: "Datacenter", icon: "📊" });
-        menu_items.push(MenuItem { name: "Summary", icon: "📋" });
-        menu_items.push(MenuItem { name: "Search", icon: "🔍" });
-        menu_items.push(MenuItem { name: "Cluster", icon: "🔗" });
-        menu_items.push(MenuItem { name: "Storage", icon: "💾" });
-        menu_items.push(MenuItem { name: "Backup", icon: "📦" });
-        menu_items.push(MenuItem { name: "Permissions", icon: "🔐" });
-        menu_items.push(MenuItem { name: "Options", icon: "⚙️" });
-
-        let mut vms = Vec::new();
-        vms.push(VMInfo {
-            id: 102,
-            name: "web-server-01",
-            status: "running",
-            cpu_usage: 2.5,
-            mem_usage: 45.2,
-            uptime: "45d 12h",
-        });
-        vms.push(VMInfo {
-            id: 103,
-            name: "db-server-01",
-            status: "running",
-            cpu_usage: 15.3,
-            mem_usage: 72.8,
-            uptime: "30d 5h",
-        });
-        vms.push(VMInfo {
-            id: 104,
-            name: "app-server-01",
-            status: "stopped",
-            cpu_usage: 0.0,
-            mem_usage: 0.0,
-            uptime: "-",
-        });
-        vms.push(VMInfo {
-            id: 105,
-            name: "test-machine",
-            status: "running",
-            cpu_usage: 8.5,
-            mem_usage: 32.1,
-            uptime: "7d 3h",
-        });
-
-        UI {
-            selected_menu_index: 0,
-            selected_row_index: 0,
-            menu_items,
-            vms,
-            cursor_x: 0,
-            cursor_y: 0,
+        WinNTShell {
+            windows: Vec::new(),
+            buttons: Vec::new(),
+            textboxes: Vec::new(),
+            listbox: None,
+            focused_button: 0,
+            focused_textbox: 0,
         }
     }
 
-    pub fn run(&mut self) {
-        uefi::system::with_stdout(|s| {
-            let _ = s.clear();
-        });
+    pub fn init_desktop(&mut self) {
+        // Clear screen with gray background
+        Graphics::clear_screen(Color::LightGray);
 
-        loop {
-            self.render();
+        // Draw menu bar
+        Graphics::draw_menu_bar(&["File", "Edit", "View", "Help"]);
 
-            if !self.handle_input() {
-                break;
-            }
+        // Draw taskbar
+        Graphics::draw_taskbar("12:00");
+
+        // Create main shell window
+        let shell_window = Window::new("HPVMx Shell", 5, 3, 70, 18);
+        self.windows.push(shell_window);
+
+        // Create OK and Cancel buttons
+        let ok_button = Button::new("OK", 35, 20, 8, 2);
+        let cancel_button = Button::new("Cancel", 45, 20, 10, 2);
+
+        self.buttons.push(ok_button);
+        self.buttons.push(cancel_button);
+
+        // Create a command input textbox
+        let input_box = TextBox::new(7, 5, 66, 50);
+        self.textboxes.push(input_box);
+
+        // Create output listbox
+        let mut output_list = ListBox::new(7, 8, 66, 10);
+        output_list.add_item("HPVMx v0.1.0 - Shell Interface");
+        output_list.add_item("Type 'help' for available commands");
+        self.listbox = Some(output_list);
+    }
+
+    pub fn draw(&self) {
+        for window in &self.windows {
+            window.draw();
         }
 
-        uefi::system::with_stdout(|s| {
-            let _ = s.clear();
-        });
-    }
-
-    fn render(&self) {
-        uefi::system::with_stdout(|stdout| {
-            let _ = stdout.clear();
-            let _ = stdout.set_color(Color::White, Color::Black);
-
-            // Header
-            self.render_header(stdout);
-
-            // Main layout: sidebar + content
-            self.render_sidebar(stdout);
-            self.render_content(stdout);
-
-            // Status bar at bottom
-            self.render_status_bar(stdout);
-
-            // Render cursor
-            self.render_cursor(stdout);
-        });
-    }
-
-    fn render_header(&self, stdout: &mut uefi::proto::console::text::Output) {
-        let _ = stdout.set_color(Color::White, Color::Black);
-        let _ = write!(stdout, "┌────────────────────────────────────────────────────────────────────────────────────────┐\n");
-        let _ = write!(stdout, "│  🔷 HPVMx Virtual Environment 1.0.0                          [Datacenter] [Summary]  │\n");
-        let _ = write!(stdout, "└────────────────────────────────────────────────────────────────────────────────────────┘\n");
-    }
-
-    fn render_sidebar(&self, stdout: &mut uefi::proto::console::text::Output) {
-        let _ = write!(stdout, "┌──────────────────────┐ ┌──────────────────────────────────────────────────────────────────┐\n");
-
-        for (idx, item) in self.menu_items.iter().enumerate() {
-            if idx == self.selected_menu_index {
-                let _ = stdout.set_color(Color::Black, Color::LightGray);
-                let _ = write!(stdout, "│ ► {:<1} {:<17} │ │", item.icon, item.name);
-            } else {
-                let _ = stdout.set_color(Color::White, Color::Black);
-                let _ = write!(stdout, "│   {:<1} {:<17} │ │", item.icon, item.name);
-            }
-
-            match idx {
-                0 => { let _ = write!(stdout, " Datacenter View                                       │                              \n"); }
-                1 => { let _ = write!(stdout, " Summary Information                                   │                              \n"); }
-                _ => { let _ = write!(stdout, "                                                          │                              \n"); }
-            }
+        for button in &self.buttons {
+            button.draw();
         }
 
-        // Remaining sidebar space
-        for _ in self.menu_items.len()..20 {
-            let _ = stdout.set_color(Color::White, Color::Black);
-            let _ = write!(stdout, "│                      │ │                                                          │                              \n");
+        for textbox in &self.textboxes {
+            textbox.draw();
         }
 
-        let _ = write!(stdout, "└──────────────────────┘ └──────────────────────────────────────────────────────────────────┘                              \n");
-    }
-
-    fn render_content(&self, stdout: &mut uefi::proto::console::text::Output) {
-        let _ = stdout.set_color(Color::White, Color::Black);
-
-        // Table header
-        let _ = write!(stdout, "┌──────────────────────┬──────────┬─────────────┬──────────────┬──────────┬──────────────┐\n");
-        let _ = write!(stdout, "│ Name                 │ Status   │ CPU Usage   │ Memory (%)   │ CPU (%)  │ Uptime       │\n");
-        let _ = write!(stdout, "├──────────────────────┼──────────┼─────────────┼──────────────┼──────────┼──────────────┤\n");
-
-        // VM rows
-        for (idx, vm) in self.vms.iter().enumerate() {
-            if idx == self.selected_row_index {
-                let _ = stdout.set_color(Color::Black, Color::LightGray);
-            } else {
-                let _ = stdout.set_color(Color::White, Color::Black);
-            }
-
-            let status_icon = if vm.status == "running" { "🟢" } else { "🔴" };
-
-            let _ = write!(
-                stdout,
-                "│ {:<20} │ {} {:<6} │ {:<11.1} │ {:<12.1} │ {:<8.1} │ {:<12} │\n",
-                vm.name, status_icon, vm.status, vm.cpu_usage, vm.mem_usage, vm.cpu_usage, vm.uptime
-            );
+        if let Some(ref listbox) = self.listbox {
+            listbox.draw();
         }
-
-        let _ = stdout.set_color(Color::White, Color::Black);
-        let _ = write!(stdout, "└──────────────────────┴──────────┴─────────────┴──────────────┴──────────┴──────────────┘\n");
     }
 
-    fn render_status_bar(&self, stdout: &mut uefi::proto::console::text::Output) {
-        let _ = stdout.set_color(Color::Black, Color::LightGray);
-        let _ = write!(
-            stdout,
-            " HPVMx v{} │ Selected: VM #{} │ Cursor: ({},{}) │ ↑↓: Navigate │ Q: Quit ",
-            env!("CARGO_PKG_VERSION"),
-            if self.selected_row_index < self.vms.len() {
-                self.vms[self.selected_row_index].id
-            } else {
-                0
-            },
-            self.cursor_x,
-            self.cursor_y
-        );
-        let _ = stdout.set_color(Color::White, Color::Black);
+    pub fn focus_button(&mut self, idx: usize) {
+        for (i, button) in self.buttons.iter_mut().enumerate() {
+            button.focused = i == idx;
+        }
+        self.focused_button = idx;
     }
 
-    fn render_cursor(&self, stdout: &mut uefi::proto::console::text::Output) {
-        let _ = write!(stdout, "\x1b[{};{}H▶", self.cursor_y + 1, self.cursor_x + 1);
+    pub fn focus_textbox(&mut self, idx: usize) {
+        for (i, textbox) in self.textboxes.iter_mut().enumerate() {
+            textbox.focused = i == idx;
+        }
+        self.focused_textbox = idx;
     }
 
-    fn handle_input(&mut self) -> bool {
-        loop {
-            let mut events = [uefi::system::with_stdin(|i| i.wait_for_key_event().unwrap())];
-            uefi::boot::wait_for_event(&mut events).unwrap();
-
-            if let Some(key) = uefi::system::with_stdin(|i| i.read_key().unwrap()) {
-                match key {
-                    Key::Printable(c) => {
-                        let ch = char::from(c);
-                        match ch {
-                            'q' | 'Q' => return false,
-                            _ => {}
-                        }
+    pub fn handle_input(&mut self, key: Key) {
+        match key {
+            Key::Printable(c) => {
+                if self.focused_textbox < self.textboxes.len() {
+                    let ch = char::from(c);
+                    if ch != '\r' && ch != '\n' {
+                        self.textboxes[self.focused_textbox].add_char(ch);
                     }
-                    Key::Special(ScanCode::UP) => {
-                        if self.selected_row_index > 0 {
-                            self.selected_row_index -= 1;
-                        }
-                        return true;
-                    }
-                    Key::Special(ScanCode::DOWN) => {
-                        if self.selected_row_index < self.vms.len() - 1 {
-                            self.selected_row_index += 1;
-                        }
-                        return true;
-                    }
-                    Key::Special(ScanCode::LEFT) => {
-                        if self.selected_menu_index > 0 {
-                            self.selected_menu_index -= 1;
-                        }
-                        return true;
-                    }
-                    Key::Special(ScanCode::RIGHT) => {
-                        if self.selected_menu_index < self.menu_items.len() - 1 {
-                            self.selected_menu_index += 1;
-                        }
-                        return true;
-                    }
-                    Key::Printable(c) if char::from(c) == '\r' || char::from(c) == '\n' => {
-                        self.execute_selection();
-                        return true;
-                    }
-                    _ => {}
                 }
             }
-        }
-    }
-
-    fn execute_selection(&mut self) {
-        match self.selected_menu_index {
-            0 => {
-                uefi::system::with_stdout(|stdout| {
-                    let _ = stdout.clear();
-                    let _ = write!(stdout, "\nDatacenter View - Selected VM: {}\n", self.vms[self.selected_row_index].name);
-                    let _ = write!(stdout, "Press any key to return...\n");
-                });
-                self.wait_for_key();
+            Key::Special(ScanCode::DELETE) => {
+                if self.focused_textbox < self.textboxes.len() {
+                    self.textboxes[self.focused_textbox].backspace();
+                }
             }
-            1 => {
-                uefi::system::with_stdout(|stdout| {
-                    let _ = stdout.clear();
-                    let _ = write!(stdout, "\nSummary Information\n");
-                    let _ = write!(stdout, "Total VMs: {}\n", self.vms.len());
-                    let _ = write!(stdout, "Running: {}\n", self.vms.iter().filter(|v| v.status == "running").count());
-                    let _ = write!(stdout, "Press any key to return...\n");
-                });
-                self.wait_for_key();
+            Key::Special(ScanCode::UP) => {
+                if let Some(ref mut listbox) = self.listbox {
+                    listbox.select_prev();
+                }
+            }
+            Key::Special(ScanCode::DOWN) => {
+                if let Some(ref mut listbox) = self.listbox {
+                    listbox.select_next();
+                }
+            }
+            Key::Special(ScanCode::RIGHT) => {
+                let next_button = (self.focused_button + 1) % self.buttons.len();
+                self.focus_button(next_button);
             }
             _ => {}
         }
     }
 
-    fn wait_for_key(&self) {
-        loop {
-            let mut events = [uefi::system::with_stdin(|i| i.wait_for_key_event().unwrap())];
-            uefi::boot::wait_for_event(&mut events).unwrap();
-
-            if uefi::system::with_stdin(|i| i.read_key().unwrap()).is_some() {
-                break;
-            }
+    pub fn get_input(&self) -> Option<String> {
+        if self.textboxes.len() > 0 {
+            Some(self.textboxes[0].text.clone())
+        } else {
+            None
         }
+    }
+
+    pub fn clear_input(&mut self) {
+        if self.textboxes.len() > 0 {
+            self.textboxes[0].text.clear();
+        }
+    }
+
+    pub fn add_output(&mut self, text: &str) {
+        if let Some(ref mut listbox) = self.listbox {
+            listbox.add_item(text);
+        }
+    }
+    
+    pub  fn process_mouse(){
+        Graphics::
     }
 }

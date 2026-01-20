@@ -1,2 +1,3 @@
 copy %cd%\src\graphics.rs %cd%\src\ui\graphics.rs
+copy %cd%\src\hardware\vmx.rs %cd%\src\hardware\cpu\vmx.rs
 cargo build --target x86_64-unknown-uefi --release

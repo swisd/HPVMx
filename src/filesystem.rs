@@ -89,28 +89,56 @@ impl FileSystem {
     /// Resolves path based on Aliases (dev0:), Root-relative (/), or CWD
     fn resolve_path(path: &str) -> String {
         let state = Self::get_state();
-        let mut resolved = path.to_string();
+        let mut input = path.replace('/', "\\");
+        let mut base_path: String;
 
-        // 1. Handle Device Aliases (ex: dev0:/file)
-        for (alias, full_path) in &state.device_map {
-            let prefix = format!("{}:", alias);
-            if resolved.starts_with(&prefix) {
-                return resolved.replace(&prefix, full_path).replace('/', "\\");
+        // 1. Determine the starting point (Base)
+        if input.contains(':') {
+            // Handle Device Aliases (ex: dev0:path)
+            base_path = input.clone();
+            for (alias, full_path) in &state.device_map {
+                let prefix = format!("{}:", alias);
+                if base_path.starts_with(&prefix) {
+                    base_path = base_path.replace(&prefix, full_path);
+                    break;
+                }
+            }
+        } else if input.starts_with('\\') {
+            // Root-relative
+            base_path = input.clone();
+        } else {
+            // Relative to CWD
+            base_path = state.cwd.clone();
+            if !base_path.ends_with('\\') {
+                base_path.push('\\');
+            }
+            base_path.push_str(&input);
+        }
+
+        // 2. Normalize the path (Handle ".." and ".")
+        let mut components = Vec::new();
+        // Split by backslash and filter out empty strings (caused by double slashes)
+        for part in base_path.split('\\') {
+            if part.is_empty() || part == "." {
+                continue;
+            } else if part == ".." {
+                // Pop the last element to "jump up" a level
+                components.pop();
+            } else {
+                components.push(part);
             }
         }
 
-        // 2. Handle Root-relative (starts with /)
-        if resolved.starts_with('/') || resolved.starts_with('\\') {
-            return resolved.replace('/', "\\");
+        // 3. Reconstruct the final UEFI string
+        let mut final_path = String::from("\\");
+        for (i, comp) in components.iter().enumerate() {
+            final_path.push_str(comp);
+            if i < components.len() - 1 {
+                final_path.push('\\');
+            }
         }
 
-        // 3. Handle Relative Path (append to CWD)
-        let mut new_path = state.cwd.clone();
-        if !new_path.ends_with('\\') {
-            new_path.push('\\');
-        }
-        new_path.push_str(&resolved.replace('/', "\\"));
-        new_path
+        final_path
     }
 
     /// Change current directory
@@ -123,27 +151,33 @@ impl FileSystem {
     pub fn scan_and_map_devices(map_file_path: &str) -> Result<(), &'static str> {
         let handles = uefi::boot::locate_handle_buffer(SearchType::ByProtocol(&SimpleFileSystem::GUID))
             .map_err(|_| "Failed to locate FS handles")?;
+        hpvm_info!("fs", "obtaining FS handles");
 
         let mut map_contents = String::new();
         let state = Self::get_state();
+        hpvm_info!("fs", "pulling state");
         state.device_map.clear();
+        hpvm_info!("fs", "clearing device map");
 
         for (i, handle) in handles.as_slice().iter().enumerate() {
             let device_path_res: Result<ScopedProtocol<DevicePath>, _> = uefi::boot::open_protocol_exclusive(*handle);
-
+            hpvm_info!("fs", "device_path_res {:#?}", device_path_res);
             if let Ok(device_path) = device_path_res {
                 let full_path = device_path
                     .to_string(DisplayOnly(false), AllowShortcuts(false))
                     .map_err(|_| "Path string error")?
                     .to_string();
+                hpvm_info!("fs", "device full_path {:#?}", full_path);
 
                 let alias = format!("dev{}", i);
+                hpvm_info!("fs", "device alias {:#?}", alias);
                 state.device_map.push((alias.clone(), full_path.clone()));
+                hpvm_info!("fs", "push {} to device map", alias);
                 map_contents.push_str(&format!("{} -> {}\n", alias, full_path));
                 hpvm_info!("fs", "mapped device {} at {}", alias, full_path);
             }
         }
-
+        hpvm_info!("fs", "writing dev registers to {:#?}", map_file_path);
         Self::write_to_file(map_file_path, &map_contents, 'w')
     }
 
