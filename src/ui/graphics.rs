@@ -148,8 +148,8 @@ impl Graphics {
         });
     }
 
-    pub fn get_cursor(cursor: Cursor) {
-        Cursor::try_update_relative(cursor)
+    pub fn get_cursor(mut cursor: Cursor) {
+        Cursor::try_update_relative(&mut cursor)
     }
 
     /// Draw a titled box (window frame)
