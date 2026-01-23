@@ -40,6 +40,7 @@ impl Cursor {
 
     pub fn update_from_mouse(&mut self) {
         // Strategy: Try Absolute Pointer first, then fall back to Simple (Relative) Pointer
+
         if !self.try_update_absolute() {
             self.try_update_relative();
         }
@@ -49,7 +50,9 @@ impl Cursor {
         if let Ok(handle) = uefi::boot::get_handle_for_protocol::<Pointer>() {
             if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) {
                 let mode = &mut mouse.mode();
-                let Ok(mut mouse2) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) else { todo!() };
+                let Ok(mut mouse2) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) else {
+                    return false;
+                };
                 if let Ok(Some(state)) = mouse2.read_state() {
                     // Map absolute hardware coordinates to our 120x40 text grid
                     if mode.resolution[0] > 0 {
@@ -87,13 +90,16 @@ impl Cursor {
     }
 
     pub fn render(&self, stdout: &mut uefi::proto::console::text::Output) {
-        let cursor_char = if self.left_button { "✔" } else { "▶" };
-        let _ = write!(stdout, "\x1b[{};{}H{}", self.y + 1, self.x + 1, cursor_char);
+        let cursor_char = if self.left_button { "+" } else { "*" };
+        stdout.enable_cursor(true).expect("cursor issue 0");
+        stdout.set_cursor_position(self.x as usize, self.y as usize).expect("cursor issue 1");
+        //let _ = write!(stdout, "[{};{}H{}", self.y + 1, self.x + 1, cursor_char);
     }
 }
 
 #[allow(dead_code)]
 use uefi::system;
+use uefi::system::with_stdout;
 use uefi_raw::protocol::console::GraphicsOutputModeInformation;
 use uefi_raw::table::boot::BootServices;
 use uefi_raw::table::system::SystemTable;
@@ -146,10 +152,6 @@ impl Graphics {
         system::with_stdout(|stdout| {
             let _ = stdout.set_cursor_position(col, row);
         });
-    }
-
-    pub fn get_cursor(mut cursor: Cursor) {
-        Cursor::try_update_relative(&mut cursor)
     }
 
     /// Draw a titled box (window frame)

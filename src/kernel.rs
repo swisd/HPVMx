@@ -1,7 +1,22 @@
+use alloc::format;
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::Write;
+use uefi::{data_types, CStr16, CString16};
 use uefi::proto::media::file::{File, FileMode, FileAttribute};
 use uefi::proto::media::fs::SimpleFileSystem;
+
+macro_rules! message {
+    ($start:expr, $($arg:tt)*) => {
+        uefi::system::with_stdout(|stdout| {
+            use core::fmt::Write;
+            let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
+            let _ = write!(stdout, $start);
+            let _ = write!(stdout, $($arg)*);
+            let _ = write!(stdout, "\n");
+        })
+    }
+}
 
 pub struct KernelLoader;
 
@@ -20,8 +35,12 @@ impl KernelLoader {
 
         // Convert path to CStr16
         let path_u16: Vec<u16> = path.encode_utf16().collect();
-        let path_cstr = uefi::data_types::CStr16::from_u16_with_nul(&path_u16)
-            .map_err(|_| "Invalid kernel path")?;
+        message!("", "n: {:#?}", String::from_utf16_lossy(&path_u16));
+        let path_cstr = data_types::CStr16::from_u16_with_nul(&path_u16)
+            .map_err(move |_| {
+                "Invalid kernel path"
+            })?;
+
 
         // Open the kernel file
         let kernel_handle = root.open(
@@ -39,6 +58,58 @@ impl KernelLoader {
         let file_info = kernel_file.get_info::<uefi::proto::media::file::FileInfo>(&mut buffer)
             .map_err(|_| "Failed to get file info")?;
         
+        let file_size = file_info.file_size() as usize;
+
+        if file_size == 0 {
+            return Err("Kernel file is empty");
+        }
+
+        // Allocate buffer and read
+        let mut kernel_data = Vec::new();
+        kernel_data.resize(file_size, 0u8);
+        kernel_file.read(&mut kernel_data)
+            .map_err(|_| "Failed to read kernel file")?;
+
+        Ok(kernel_data)
+    }
+
+    pub fn load_kernel_dangerous(path: &str) -> Result<alloc::vec::Vec<u8>, &'static str> {
+        // Get the filesystem
+        let handle = uefi::boot::get_handle_for_protocol::<SimpleFileSystem>()
+            .map_err(|_| "Failed to get filesystem handle")?;
+
+        let mut fs = uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle)
+            .map_err(|_| "Failed to open filesystem")?;
+
+        let mut root = fs.open_volume()
+            .map_err(|_| "Failed to open root volume")?;
+
+        // Convert path to CStr16
+        let path_u16: Vec<u16> = path.encode_utf16().collect();
+        message!("", "n: {:#?}", String::from_utf16_lossy(&path_u16));
+        let path_cstr = Self::u16_to_cstr16_unsafe(&*path_u16) // danger
+            .map_err(move |_| {
+                "Invalid kernel path"
+            })?;
+        message!("\n", "{}", path_cstr);
+
+
+        // Open the kernel file
+        let kernel_handle = root.open(
+            &*path_cstr,
+            FileMode::Read,
+            FileAttribute::empty(),
+        ).map_err(|_| "Failed to open kernel file")?;
+
+        // Convert FileHandle to RegularFile
+        let mut kernel_file = kernel_handle.into_regular_file()
+            .ok_or("Kernel file is not a regular file")?;
+
+        // Read file size
+        let mut buffer = [0u8; 4096];
+        let file_info = kernel_file.get_info::<uefi::proto::media::file::FileInfo>(&mut buffer)
+            .map_err(|_| "Failed to get file info")?;
+
         let file_size = file_info.file_size() as usize;
 
         if file_size == 0 {
@@ -87,4 +158,35 @@ impl KernelLoader {
         // You'll need proper ELF parsing for production use
         Ok(0x400000)
     }
+
+    pub fn u16_to_cstr16_unsafe(data: &[u16]) -> Result<CString16, &'static str> {
+
+        // Method 2: Manually building a CStr16 (More direct for slices)
+        // CStr16 is essentially a view over a null-terminated &[u16].
+        // If your slice *already* has the null, you can cast.
+
+
+        match data_types::CStr16::from_u16_with_nul(data) {
+            Ok(..) => {
+                let cstr16_direct_cast = unsafe {
+                    CStr16::from_ptr(data.as_ptr() as *const _)
+                };
+                Ok(CString16::from(cstr16_direct_cast))
+            }
+            Err(..) => {
+                // If your slice *doesn't* have the null, you'd need a temporary buffer (or unsafe with careful checks):
+                let mut data_with_null: Vec<u16> = data.to_vec();
+                if data_with_null.last() != Some(&0u16) {
+                    data_with_null.push(0u16); // Add the null terminator
+                }
+                let cstr16_manual_vec = unsafe {
+                    CStr16::from_ptr(data_with_null.as_ptr() as *const _)
+                };
+                Ok(CString16::from(cstr16_manual_vec))
+            }
+        }
+
+    }
+
 }
+

@@ -7,6 +7,10 @@ use uefi::proto::console::text::{Color, Key, ScanCode};
 use uefi::system;
 
 mod graphics;
+mod dashboard;
+mod vm_manager;
+mod terminal;
+
 pub use graphics::{Graphics, Rect, WinNTColors};
 
 pub struct Window {
@@ -267,6 +271,329 @@ impl WinNTShell {
     }
     
     pub  fn process_mouse(){
-        Graphics::
+        //Graphics::get_cursor()
+        return;
     }
 }
+
+// Add new UI module structure
+pub mod resource_monitor;
+pub mod console;
+
+
+pub struct DashboardUI {
+    selected_tab: DashboardTab,
+    vms: Vec<VmDisplayInfo>,
+    resources: SystemResources,
+    scroll_offset: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum DashboardTab {
+    Overview,
+    VirtualMachines,
+    Resources,
+    Storage,
+    Network,
+    Console,
+}
+
+pub struct VmDisplayInfo {
+    pub id: u32,
+    pub name: String,
+    pub state: String,
+    pub cpu_usage: u32,
+    pub memory_usage_mb: u32,
+    pub disk_usage_mb: u32,
+    pub uptime_seconds: u64,
+}
+
+pub struct SystemResources {
+    pub total_memory_mb: u32,
+    pub used_memory_mb: u32,
+    pub cpu_count: u32,
+    pub cpu_usage: u32,
+}
+
+impl DashboardUI {
+    pub fn new() -> Self {
+        Self {
+            selected_tab: DashboardTab::Overview,
+            vms: alloc::vec::Vec::new(),
+            resources: SystemResources {
+                total_memory_mb: 0,
+                used_memory_mb: 0,
+                cpu_count: 0,
+                cpu_usage: 0,
+            },
+            scroll_offset: 0,
+        }
+    }
+
+    pub fn add_vm(&mut self, vm: VmDisplayInfo) {
+        self.vms.push(vm);
+    }
+
+    pub fn set_resources(&mut self, resources: SystemResources) {
+        self.resources = resources;
+    }
+
+    pub fn draw(&self) {
+        self.draw_header();
+        self.draw_navigation_bar();
+
+        match self.selected_tab {
+            DashboardTab::Overview => self.draw_overview(),
+            DashboardTab::VirtualMachines => self.draw_vms_list(),
+            DashboardTab::Resources => self.draw_resources(),
+            DashboardTab::Storage => self.draw_storage(),
+            DashboardTab::Network => self.draw_network(),
+            DashboardTab::Console => self.draw_console(),
+        }
+
+        self.draw_footer();
+    }
+
+    fn draw_header(&self) {
+        uefi::system::with_stdout(|stdout| {
+            let _ = stdout.set_color(Color::Cyan, Color::Black);
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "╔════════════════════════════════════════════════════════════╗\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "║           HPVMx - Hypervisor Management Console            ║\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "╚════════════════════════════════════════════════════════════╝\n"
+            );
+            let _ = stdout.set_color(Color::White, Color::Black);
+        });
+    }
+
+    fn draw_navigation_bar(&self) {
+        uefi::system::with_stdout(|stdout| {
+            let _ = stdout.set_color(Color::LightGray, Color::Black);
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                " [O]verview │ [V]Ms │ [R]esources │ [S]torage │ [N]etwork │ [C]onsole\n"
+            );
+            let _ = stdout.set_color(Color::White, Color::Black);
+        });
+    }
+
+    fn draw_overview(&self) {
+        uefi::system::with_stdout(|stdout| {
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "\n┌─ System Overview ────────────────────────────────────────┐\n"
+            );
+            let _ = core::fmt::Write::write_fmt(
+                stdout,
+                format_args!("│ CPU Usage:    {:3}%                                    │\n",
+                             self.resources.cpu_usage)
+            );
+            let _ = core::fmt::Write::write_fmt(
+                stdout,
+                format_args!("│ Memory:       {}/{} MB                          │\n",
+                             self.resources.used_memory_mb,
+                             self.resources.total_memory_mb)
+            );
+            let _ = core::fmt::Write::write_fmt(
+                stdout,
+                format_args!("│ VMs Running:  {}                                      │\n",
+                             self.count_running_vms())
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "└──────────────────────────────────────────────────────────┘\n"
+            );
+        });
+    }
+
+    fn draw_vms_list(&self) {
+        uefi::system::with_stdout(|stdout| {
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "\n┌─ Virtual Machines ───────────────────────────────────────┐\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "│ ID │ Name       │ State    │ CPU │ Memory │ Uptime    │\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "├────┼────────────┼──────────┼─────┼────────┼───────────┤\n"
+            );
+
+            let end = core::cmp::min(
+                self.scroll_offset + 10,
+                self.vms.len()
+            );
+
+            for vm in &self.vms[self.scroll_offset..end] {
+                let name_len = core::cmp::min(10, vm.name.len());
+                let _ = core::fmt::Write::write_fmt(
+                    stdout,
+                    format_args!(
+                        "│ {:2} │ {:<10} │ {:<8} │ {:3}% │ {:5} MB │ {:>4}h {:>2}m │\n",
+                        vm.id,
+                        &vm.name[..name_len],
+                        &vm.state,
+                        vm.cpu_usage,
+                        vm.memory_usage_mb,
+                        vm.uptime_seconds / 3600,
+                        (vm.uptime_seconds % 3600) / 60
+                    )
+                );
+            }
+
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "└────┴────────────┴──────────┴─────┴────────┴───────────┘\n"
+            );
+        });
+    }
+
+    fn draw_resources(&self) {
+        uefi::system::with_stdout(|stdout| {
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "\n┌─ System Resources ───────────────────────────────────────┐\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "│ Processor: 8 cores @ 3.2 GHz                             │\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "│ Memory: 16 GB total, 12 GB allocated to VMs              │\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "│ Thermal: CPU 45°C, Host 38°C                             │\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "└──────────────────────────────────────────────────────────┘\n"
+            );
+        });
+    }
+
+    fn draw_storage(&self) {
+        uefi::system::with_stdout(|stdout| {
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "\n┌─ Storage ────────────────────────────────────────────────┐\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "│ /dev/sda   500 GB   [████████░░] 80% used               │\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "│ /dev/sdb   1.0 TB   [██████░░░░] 60% used               │\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "│ /dev/sdc   2.0 TB   [███░░░░░░░] 30% used               │\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "└──────────────────────────────────────────────────────────┘\n"
+            );
+        });
+    }
+
+    fn draw_network(&self) {
+        uefi::system::with_stdout(|stdout| {
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "\n┌─ Network ────────────────────────────────────────────────┐\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "│ eth0: 192.168.1.100  RX: 125 MB/s   TX: 87 MB/s          │\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "│ eth1: 10.0.0.50      RX: 12 MB/s    TX: 34 MB/s          │\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "└──────────────────────────────────────────────────────────┘\n"
+            );
+        });
+    }
+
+    fn draw_console(&self) {
+        uefi::system::with_stdout(|stdout| {
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "\n┌─ Console Output ─────────────────────────────────────────┐\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "│ [Connected to VM console]                                │\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "│                                                          │\n"
+            );
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                "└──────────────────────────────────────────────────────────┘\n"
+            );
+        });
+    }
+
+    fn draw_footer(&self) {
+        uefi::system::with_stdout(|stdout| {
+            let _ = stdout.set_color(Color::LightGray, Color::Black);
+            let _ = core::fmt::Write::write_str(
+                stdout,
+                " [↑↓] Navigate  [Enter] Select  [Q] Quit  [?] Help\n"
+            );
+            let _ = stdout.set_color(Color::White, Color::Black);
+        });
+    }
+
+    fn count_running_vms(&self) -> usize {
+        self.vms.iter()
+            .filter(|vm| vm.state.contains("running"))
+            .count()
+    }
+
+    pub fn handle_input(&mut self, key: Key) {
+        use uefi::proto::console::text::ScanCode;
+
+        match key {
+            Key::Printable(c) => {
+                let ch = char::from(c).to_ascii_lowercase();
+                match ch {
+                    'o' => self.selected_tab = DashboardTab::Overview,
+                    'v' => self.selected_tab = DashboardTab::VirtualMachines,
+                    'r' => self.selected_tab = DashboardTab::Resources,
+                    's' => self.selected_tab = DashboardTab::Storage,
+                    'n' => self.selected_tab = DashboardTab::Network,
+                    'c' => self.selected_tab = DashboardTab::Console,
+                    _ => {}
+                }
+            }
+            Key::Special(ScanCode::UP) => {
+                if self.scroll_offset > 0 {
+                    self.scroll_offset -= 1;
+                }
+            }
+            Key::Special(ScanCode::DOWN) => {
+                if self.scroll_offset < self.vms.len().saturating_sub(1) {
+                    self.scroll_offset += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+

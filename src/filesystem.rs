@@ -368,7 +368,7 @@ impl FileSystem {
                     let is_dir = attr.contains(FileAttribute::DIRECTORY);
                     let suffix = if is_dir { "/" } else { "" };
 
-                    message!("\t", "  {}{:<20} ** {} BYTES", name, suffix, size);
+                    message!("\t", "  {}{:<30} ** {} BYTES", name, suffix, size);
                 }
                 Ok(None) => break, // End of directory
                 Err(_) => {
@@ -385,4 +385,58 @@ impl FileSystem {
         message!("\n", "CWD: {}", current_path);
         Ok(())
     }
+
+    /// Read a file and return its contents as a Vec<u8>
+    pub fn read_file(path: &str) -> Result<alloc::vec::Vec<u8>, &'static str> {
+        use uefi::proto::media::file::FileMode;
+
+        // Get boot services
+
+        // Find the SimpleFileSystem protocol
+        let handle = uefi::boot::get_handle_for_protocol::<uefi::proto::media::fs::SimpleFileSystem>()
+            .map_err(|_| "failed to get SimpleFileSystem")?;
+
+        let mut file_system = uefi::boot::open_protocol_exclusive::<uefi::proto::media::fs::SimpleFileSystem>(handle)
+            .map_err(|_| "failed to open SimpleFileSystem")?;
+
+        let mut root = file_system
+            .open_volume()
+            .map_err(|_| "failed to open root volume")?;
+
+        // Open the file
+        let mut file = root
+            .open(
+                Self::path_to_cstr16(path)?,
+                FileMode::Read,
+                uefi::proto::media::file::FileAttribute::empty(),
+            )
+            .map_err(|_| "failed to open file")?;
+
+        // Get file info to determine size
+        let mut info_buffer = [0u8; 256];
+        let file_info = file
+            .get_info::<uefi::proto::media::file::FileInfo>(&mut info_buffer)
+            .map_err(|_| "failed to get file info")?;
+
+        let file_size = file_info.file_size() as usize;
+
+        // Read file contents
+        let mut buffer = alloc::vec::Vec::with_capacity(file_size);
+        buffer.resize(file_size, 0u8);
+
+        let mut regular_file = file.into_regular_file().ok_or("not a regular file")?;
+        regular_file.read(&mut buffer)
+            .map_err(|_| "failed to read file")?;
+
+        Ok(buffer)
+    }
+
+    /// Read a file as a string
+    pub fn read_file_to_string(path: &str) -> Result<alloc::string::String, &'static str> {
+        let data = Self::read_file(path)?;
+        alloc::string::String::from_utf8(data)
+            .map_err(|_| "file is not valid UTF-8")
+    }
+
+
 }

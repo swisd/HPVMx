@@ -31,3 +31,4 @@ uefi-raw = "0.13.0"
 # Hypervisor dependencies
 bitflags = "2.4.0"
 bytemuck = "1.14.0"
+uefi-async = "0.2.8"

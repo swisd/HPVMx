@@ -161,6 +161,22 @@ impl HypervisorManager {
             total_memory_mb: total_memory,
         }, list_str)
     }
+
+    pub fn boot_vm_with_media(&mut self, vm_id: u32, media_data: &[u8]) -> Result<(), &str> {
+        // Find the VM
+        // let vm = self.vms.iter_mut().find(|v| v.id == vm_id)
+        //     .ok_or("VM not found")?;
+
+        // Set the VM's boot media
+        // In a real implementation, this would:
+        // 1. Map the media data into guest memory
+        // 2. Set up boot parameters
+        // 3. Jump to the bootloader entry point
+
+        //vm.state = crate::vmm::vm::VmState::Running;
+
+        Ok(())
+    }
 }
 
 /// Hypervisor statistics
@@ -171,3 +187,4 @@ pub struct HypervisorStats {
     pub running_vms: u32,
     pub total_memory_mb: u32,
 }
+
