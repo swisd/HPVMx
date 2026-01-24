@@ -4,12 +4,15 @@
 
 #![allow(dead_code)]
 
+use crate::{hpvm_info, Color};
+use crate::hpvm_log;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
 use log::{info, warn, error};
-
+use crate::{hpvm_error, hpvm_warn};
 use super::net_hw;
+use super::net_stack;
 
 static HTTPD_RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -23,6 +26,8 @@ fn ensure_hw() {
 /// Print simple NIC status to the console (MAC/MTU/link).
 pub fn status() {
     ensure_hw();
+    let backend = net_stack::backend_name();
+    let stats = net_stack::stats();
     match net_hw::get_info() {
         Some(info) => {
             uefi::system::with_stdout(|s| {
@@ -32,23 +37,34 @@ pub fn status() {
                     let _ = write!(s, "{:02x}{}", info.mac[i], if i < 5 { ":" } else { "" });
                 }
                 let _ = write!(s, " MTU={} Link={}\n", info.mtu, if info.media_present { "up" } else { "down" });
+                let _ = write!(s, "Backend: {}  RX {} pkts/{} bytes  TX {} pkts/{} bytes\n", backend, stats.rx_pkts, stats.rx_bytes, stats.tx_pkts, stats.tx_bytes);
             });
         }
         None => {
-            warn!("net: no NIC detected (SNP not found)");
+            uefi::system::with_stdout(|s| {
+                use core::fmt::Write as _;
+                let _ = write!(s, "\nnet: no NIC detected (SNP not found)\n");
+                let _ = write!(s, "Backend: {}  RX {} pkts/{} bytes  TX {} pkts/{} bytes\n", backend, stats.rx_pkts, stats.rx_bytes, stats.tx_pkts, stats.tx_bytes);
+            });
         }
     }
 }
 
-/// Attempt to ping an IP address. Placeholder implementation.
+/// Attempt to ping an IP address.
+/// For now, supports loopback (127.0.0.1/localhost) via the internal smoltcp stack.
 /// Returns Ok(rtt_ms) on success, Err(message) on failure.
 pub fn ping(ip: &str, _count: usize, _timeout_ms: u64) -> Result<u32, &'static str> {
     ensure_hw();
+    // Try loopback first (available regardless of NIC)
+    if ip == "127.0.0.1" || ip.eq_ignore_ascii_case("localhost") {
+        return net_stack::ping_loopback(ip);
+    }
+
     if net_hw::get_info().is_some() {
-        warn!("net: NIC present but network stack not yet implemented; cannot ping '{}" , ip);
-        Err("network stack not implemented")
+        hpvm_warn!("NET", "NIC present but non-loopback networking not yet implemented; cannot ping '{}'", ip);
+        Err("network stack (NIC) not implemented yet")
     } else {
-        warn!("net: ping to '{}' not available: no NIC detected", ip);
+        hpvm_warn!("NET", "ping to '{}' not available: no NIC detected", ip);
         Err("no nic")
     }
 }
@@ -58,12 +74,12 @@ pub fn ping(ip: &str, _count: usize, _timeout_ms: u64) -> Result<u32, &'static s
 pub fn lanscan(prefix: &str) {
     // Validate prefix ends with a dot and has 3 octets.
     if !prefix.ends_with('.') {
-        error!("net: prefix must end with '.' e.g. 192.168.1.");
+        hpvm_error!("NET", "prefix must end with '.' e.g. 192.168.1.");
         return;
     }
     let octets: Vec<&str> = prefix.trim_end_matches('.').split('.').collect();
     if octets.len() != 3 {
-        error!("net: prefix must have 3 octets, e.g. 10.0.0.");
+        hpvm_error!("NET", "prefix must have 3 octets, e.g. 10.0.0.");
         return;
     }
 
@@ -120,27 +136,23 @@ pub fn lanscan(prefix: &str) {
             });
         }
     }
-    info!("net: scan complete. hosts detected: {}", found.len());
+    hpvm_info!("NET", "scan complete. hosts detected: {}", found.len());
 }
 
 /// Start a very small management HTTP server on a separate thread (placeholder).
 /// In UEFI context, we simulate a background loop.
 pub fn httpd_start(port: u16) {
     if HTTPD_RUNNING.swap(true, Ordering::SeqCst) {
-        warn!("httpd: already running");
+        hpvm_warn!("HTTPD", "already running");
         return;
     }
-    info!("httpd: starting on port {} (placeholder)", port);
-
-    // Spawn a background timer using UEFI's timer events to simulate a running server.
-    // We cannot handle real sockets yet.
-    // No background thread support here; simply set the flag and log.
-    // A future implementation can integrate with an async executor to accept HTTP connections.
-    let _ = port;
+    net_stack::httpd_start(port);
 }
 
 pub fn httpd_stop() {
     if !HTTPD_RUNNING.swap(false, Ordering::SeqCst) {
-        warn!("httpd: not running");
+        hpvm_warn!("HTTPD", "not running");
+        return;
     }
+    net_stack::httpd_stop();
 }

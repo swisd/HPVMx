@@ -4,10 +4,16 @@
 #![allow(dead_code)]
 
 use core::sync::atomic::{AtomicBool, Ordering};
+use crate::Color;
+use crate::hpvm_log;
+use crate::hpvm_info;
+use crate::hpvm_warn;
+use crate::hpvm_error;
+use crate::message;
 use log::{info, warn, error};
 use uefi::boot::{self, ScopedProtocol, SearchType};
 use uefi::proto::network::snp::SimpleNetwork;
-use uefi::Identify;
+use uefi::{Identify, Handle};
 
 static NET_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -23,12 +29,58 @@ pub struct NetHwInfo {
 
 // Keep minimal and avoid extra deps; use a simple static mut for single-writer init()
 static mut NET_INFO: Option<NetHwInfo> = None;
+static mut NIC_HANDLE: Option<Handle> = None;
 
 #[inline]
 pub fn is_initialized() -> bool { NET_INITIALIZED.load(Ordering::SeqCst) }
 
 pub fn get_info() -> Option<NetHwInfo> {
     unsafe { NET_INFO }
+}
+
+#[inline]
+pub fn nic_handle() -> Option<Handle> { unsafe { NIC_HANDLE } }
+
+/// Convenience helper to open the SNP protocol on the selected NIC.
+pub fn snp_open() -> Option<ScopedProtocol<SimpleNetwork>> {
+    if let Some(h) = nic_handle() {
+        match boot::open_protocol_exclusive::<SimpleNetwork>(h) {
+            Ok(p) => Some(p),
+            Err(_) => None,
+        }
+    } else {
+        None
+    }
+}
+
+/// Current link status (best-effort).
+pub fn link_up() -> bool {
+    if let Some(mut snp) = snp_open() {
+        let m = snp.mode();
+        let present: bool = m.media_present.into();
+        present
+    } else {
+        get_info().map(|i| i.media_present).unwrap_or(false)
+    }
+}
+
+/// Transmit a raw Ethernet frame via SNP (best-effort).
+pub fn tx(frame: &[u8]) -> Result<(), &'static str> {
+    let Some(mut snp) = snp_open() else { return Err("no snp"); };
+    // Safety: UEFI SNP expects DMA-safe buffer; firmware copies internally.
+    match snp.transmit(0, frame, None, None, None) {
+        Ok(_) => Ok(()),
+        Err(_) => Err("tx failed"),
+    }
+}
+
+/// Receive a raw Ethernet frame into the provided buffer. Returns length if a packet was received.
+pub fn rx(buf: &mut [u8]) -> Result<usize, &'static str> {
+    let Some(mut snp) = snp_open() else { return Err("no snp"); };
+    match snp.receive(buf, None, None, None, None) {
+        Ok(sz) => Ok(sz),
+        Err(_) => Err("rx none"),
+    }
 }
 
 /// Try to locate a NIC via UEFI SNP and initialize it (Start + Initialize).
@@ -41,7 +93,7 @@ pub fn init() -> Result<(), &'static str> {
     let handles = match boot::locate_handle_buffer(SearchType::ByProtocol(&SimpleNetwork::GUID)) {
         Ok(buf) => buf,
         Err(_) => {
-            warn!("net-hw: no SNP handles present");
+            hpvm_warn!("NETHW", "net-hw: no SNP handles present");
             return Err("no nic found");
         }
     };
@@ -62,18 +114,21 @@ pub fn init() -> Result<(), &'static str> {
             let mtu = mode.max_packet_size as u32;
             let media_present: bool = mode.media_present.into();
 
-            unsafe { NET_INFO = Some(NetHwInfo { mac, mac_len, mtu, media_present, state: 2 }); }
+            unsafe {
+                NET_INFO = Some(NetHwInfo { mac, mac_len, mtu, media_present, state: 2 });
+                NIC_HANDLE = Some(h);
+            }
             NET_INITIALIZED.store(true, Ordering::SeqCst);
 
-            info!(
-                "net-hw: SNP initialized: MAC={} MTU={} media_present={:?}",
+            hpvm_info!("NETHW",
+                "SNP initialized: MAC={} MTU={} media_present={:?}",
                 format_mac(&mac, mac_len), mtu, media_present
             );
             return Ok(());
         }
     }
 
-    error!("net-hw: SNP handles found but none could be initialized");
+    hpvm_error!("NETHW", ": SNP handles found but none could be initialized");
     Err("no usable nic")
 }
 

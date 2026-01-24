@@ -1,3 +1,8 @@
+use crate::hpvm_log;
+use crate::hpvm_info;
+use crate::hpvm_warn;
+use crate::hpvm_error;
+use crate::message;
 use core::fmt::Write;
 use core::ptr::null_mut;
 use uefi::proto::console::text::Color;
@@ -13,18 +18,6 @@ pub struct Cursor {
     pub visible: bool,
     pub left_button: bool,
     pub right_button: bool,
-}
-
-macro_rules! message {
-    ($start:expr, $($arg:tt)*) => {
-        uefi::system::with_stdout(|stdout| {
-            use core::fmt::Write;
-            let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
-            let _ = write!(stdout, $start);
-            let _ = write!(stdout, $($arg)*);
-            let _ = write!(stdout, "\n");
-        })
-    }
 }
 
 impl Cursor {

@@ -19,11 +19,10 @@ raw-cpuid = "11.6.0"
 spinning = "0.1.0"
 buddy_system_allocator = "0.12.0"
 uefi = { version = "0.36.1", features = ["alloc", "logger", "panic_handler", "unstable", "default", "global_allocator"] }
-smoltcp = "0.12.0"
+smoltcp = { version = "0.12.0", default-features = false, features = ["proto-ipv4", "medium-ip", "socket-raw"] }
 virtio-drivers = "0.12.0"
 # ixgbe/e1000 drivers needed
 gpt = "4.1.0"
-fatfs = { version = "0.3.6"}
 log = "0.4.29"
 getrandom = { version = "0.3.4", default-features = false }
 lazy_static = "1.5.0"
