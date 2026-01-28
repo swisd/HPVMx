@@ -166,7 +166,7 @@ pub fn ping_loopback(dst: &str) -> Result<u32, &'static str> {
     //init(/* [u8; 4] */, /* [u8; 4] */);
     if dst == "127.0.0.1" || dst.eq_ignore_ascii_case("localhost") {
         // Pretend we sent an ICMP echo and received it immediately.
-        hpvm_info!("PING", "loopback echo reply from {}: bytes=56 time=1ms TTL=64", dst);
+        hpvm_info!("PING", "loopback echo reply from {}: bytes=32 time=1ms TTL=64", dst);
         Ok(1)
     } else {
         hpvm_warn!("PING", "only loopback is available currently; cannot reach {}", dst);
