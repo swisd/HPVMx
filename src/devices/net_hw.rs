@@ -11,9 +11,10 @@ use crate::hpvm_warn;
 use crate::hpvm_error;
 use crate::message;
 use log::{info, warn, error};
-use uefi::boot::{self, ScopedProtocol, SearchType};
+use uefi::boot::{self, HandleBuffer, ScopedProtocol, SearchType};
 use uefi::proto::network::snp::SimpleNetwork;
 use uefi::{Identify, Handle};
+use uefi_raw::MacAddress;
 
 static NET_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -140,4 +141,8 @@ fn format_mac(mac: &[u8;32], len: usize) -> alloc::string::String {
         out.push_str(&alloc::format!("{:02x}", mac[i]));
     }
     out
+}
+
+pub(crate) fn get_mac() -> [u8; 6] {
+    todo!()
 }
