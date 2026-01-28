@@ -129,8 +129,14 @@ fn main() -> Status {
     hpvm_info!("page", "setting active paging mapper");
     let mut mapper = unsafe { PagingManager::get_active_mapper(x86_64::VirtAddr::new(16384)) };
 
-    hpvm_info!("fs", "building drivelist");
-    FileSystem::scan_and_map_devices("DRIVELIST").expect("TODO: panic message");
+    hpvm_info!("fs", "building devicelist");
+
+    while !(FileSystem::is_handle()) {
+        // wait
+        hpvm_warn!("fs", "waiting for file handle")
+    }
+
+    FileSystem::scan_and_map_devices("DEVICELIST").unwrap();
 
     //interrupts::init_idt();
 
@@ -282,7 +288,7 @@ fn main() -> Status {
             "info" => {}
             "devs" => {
                 if command.len() > 0 {
-                    FileSystem::get_drives("DRIVELIST");
+                    FileSystem::get_drives("DEVICELIST");
                 } else {
                     message!(".", "text")
                 }
@@ -561,7 +567,35 @@ fn start_kernel(path: &str) {
             }
         }
         Err(e) => {
-            hpvm_error!("kernel", "failed to load kernel: {}", e);
+            hpvm_error!("FileIO", "failed to load file '{}': {}", path, e);
+            hpvm_warn!("FileIO", "attempting to load in dangerous mode '{}'", path);
+
+            match KernelLoader::load_kernel_dangerous(path) {
+                Ok(kernel_data) => {
+                    hpvm_info!("kernel", "kernel loaded, {} bytes", kernel_data.len());
+
+                    match KernelLoader::validate_kernel(&kernel_data) {
+                        Ok(entry_point) => {
+                            hpvm_info!("kernel", "kernel validated, entry point: {:#x}", entry_point);
+                            hpvm_warn!("kernel", "jumping to kernel... goodbye!");
+
+                            unsafe {
+                                KernelLoader::execute_kernel(&kernel_data, entry_point);
+                            }
+                        }
+                        Err(e) => {
+                            hpvm_error!("kernel", "kernel validation failed: {}", e);
+                            hpvm_warn!("kernel", "loading kernel in dangerous mode -- invalidated elf header");
+                            unsafe {
+                                KernelLoader::execute_kernel(&kernel_data, 5);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    hpvm_error!("FileIO", "failed to load file '{}': {}", path, e);
+                }
+            }
         }
     }
 }
@@ -726,9 +760,8 @@ fn handle_vmm_command(command: &[&str]) {
     }
 }
 
-// ============================================
+
 // NEW FUNCTIONS FOR VM BOOT AND EFI SUPPORT
-// ============================================
 
 #[allow(static_mut_refs)]
 /// Boot a VM with an ISO, EFI file, or disk image

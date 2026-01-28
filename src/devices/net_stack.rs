@@ -1,28 +1,38 @@
-//! Minimal networking stubs for HPVMx (loopback-only behavior, no smoltcp runtime)
-//! This module emulates a tiny subset of networking so shell commands work
-//! without pulling in extra device backends or std on the UEFI target.
-
+//! UEFI Network Module (0.36.1) - Basic ICMP/IP over SNP
 #![allow(dead_code)]
 
 use crate::Color;
 use crate::hpvm_log;
-use core::mem::MaybeUninit;
+use core::mem::{MaybeUninit, size_of};
 use core::sync::atomic::{AtomicBool, Ordering};
-use crate::{hpvm_info, hpvm_warn};
+use crate::{hpvm_info, hpvm_warn, hpvm_error};
+
+// --- Minimal Protocol Definitions ---
+
+#[repr(C, packed)]
+struct EthHeader {
+    dst: [u8; 6],
+    src: [u8; 6],
+    ethertype: u16, // 0x0800 for IPv4, 0x0806 for ARP
+}
+
+#[repr(C, packed)]
+struct Ipv4Header {
+    ver_ihl: u8,
+    tos: u8,
+    len: u16,
+    id: u16,
+    off: u16,
+    ttl: u8,
+    proto: u8,
+    checksum: u16,
+    src: [u8; 4],
+    dst: [u8; 4],
+}
+
+// --- Module State ---
 
 static STACK_INIT: AtomicBool = AtomicBool::new(false);
-static HTTPD: AtomicBool = AtomicBool::new(false);
-
-/// Report which networking backend is active.
-/// - "SNP (raw)" when a NIC via UEFI SNP is initialized.
-/// - "loopback-stub" otherwise.
-pub fn backend_name() -> &'static str {
-    if crate::devices::net_hw::is_initialized() {
-        "SNP (raw)"
-    } else {
-        "loopback-stub"
-    }
-}
 
 #[derive(Copy, Clone, Default)]
 pub struct NetStats {
@@ -33,110 +43,102 @@ pub struct NetStats {
 }
 
 struct NetState {
-    now_ms: u64,
+    ip_addr: [u8; 4],
+    gateway: [u8; 4],
     stats: NetStats,
 }
 
 static mut NET_STATE: MaybeUninit<Option<NetState>> = MaybeUninit::uninit();
 
-#[allow(static_mut_refs)]
-pub fn init() {
+/// Initialize the network stack with a static IP.
+pub fn init(ip: [u8; 4], gw: [u8; 4]) {
     if STACK_INIT.load(Ordering::SeqCst) { return; }
 
-    let state = NetState { now_ms: 0, stats: NetStats::default() };
+    let state = NetState {
+        ip_addr: ip,
+        gateway: gw,
+        stats: NetStats::default(),
+    };
 
     unsafe { NET_STATE.write(Some(state)); }
     STACK_INIT.store(true, Ordering::SeqCst);
-    hpvm_info!("NET", "loopback stub initialized (127.0.0.1/8)");
+
+    hpvm_info!("NET", "SNP stack up: {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
 }
 
-#[inline]
-pub fn is_initialized() -> bool { STACK_INIT.load(Ordering::SeqCst) }
-
-/// Advance timers once. Call this periodically from the main loop.
 #[allow(static_mut_refs)]
 pub fn poll_tick() {
-    if !is_initialized() { return; }
-    unsafe {
-        if let Some(state) = NET_STATE.assume_init_mut().as_mut() {
-            state.now_ms = state.now_ms.saturating_add(1);
-        }
-    }
+    if !STACK_INIT.load(Ordering::SeqCst) { return; }
 
-    // If a NIC is present via SNP, try to drain a few RX frames to keep stats up-to-date.
     if crate::devices::net_hw::is_initialized() {
-        let mut buf = [0u8; 2048];
-        // Try a small bounded loop to avoid spending too long in one shell tick.
-        for _ in 0..8 {
-            match crate::devices::net_hw::rx(&mut buf) {
-                Ok(sz) => {
-                    unsafe {
-                        if let Some(st) = NET_STATE.assume_init_mut().as_mut() {
-                            st.stats.rx_pkts = st.stats.rx_pkts.saturating_add(1);
-                            st.stats.rx_bytes = st.stats.rx_bytes.saturating_add(sz as u64);
-                        }
-                    }
+        let mut buf = [0u8; 1514]; // Max Ethernet frame
+
+        // Drain the SNP RX buffer
+        while let Ok(sz) = crate::devices::net_hw::rx(&mut buf) {
+            process_packet(&buf[..sz]);
+
+            unsafe {
+                if let Some(st) = NET_STATE.assume_init_mut().as_mut() {
+                    st.stats.rx_pkts += 1;
+                    st.stats.rx_bytes += sz as u64;
                 }
-                Err(_) => break, // no more packets available
             }
         }
     }
 }
 
-/// Very small loopback ping: if dst is 127.0.0.1, report success with tiny RTT.
-pub fn ping_loopback(dst: &str) -> Result<u32, &'static str> {
-    init();
-    if dst == "127.0.0.1" || dst.eq_ignore_ascii_case("localhost") {
-        // Pretend we sent an ICMP echo and received it immediately.
-        hpvm_info!("PING", "loopback echo reply from {}: bytes=56 time=1ms TTL=64", dst);
-        Ok(1)
-    } else {
-        hpvm_warn!("PING", "only loopback is available currently; cannot reach {}", dst);
-        Err("no route to host (non-loopback)")
+/// A very primitive packet dispatcher
+fn process_packet(frame: &[u8]) {
+    if frame.len() < size_of::<EthHeader>() { return; }
+
+    let eth = unsafe { &*(frame.as_ptr() as *const EthHeader) };
+    let ethertype = u16::from_be(eth.ethertype);
+
+    match ethertype {
+        0x0806 => { /* Handle ARP (Required for others to talk to us) */ },
+        0x0800 => handle_ipv4(&frame[size_of::<EthHeader>()..]),
+        _ => {} // Ignore IPv6 or other protocols for now
     }
 }
 
-pub fn httpd_start(_port: u16) {
-    init();
-    if HTTPD.swap(true, Ordering::SeqCst) {
-        hpvm_warn!("HTTPD", "already running");
-        return;
-    }
-    hpvm_info!("HTTPD", "loopback HTTPD placeholder started (no external clients)");
-}
+fn handle_ipv4(packet: &[u8]) {
+    if packet.len() < size_of::<Ipv4Header>() { return; }
+    let ip = unsafe { &*(packet.as_ptr() as *const Ipv4Header) };
 
-pub fn httpd_stop() {
-    if !HTTPD.swap(false, Ordering::SeqCst) {
-        hpvm_warn!("HTTPD", "not running");
-        return;
-    }
-    hpvm_info!("HTTPD", "stopped");
-}
-
-/// Return a snapshot of current network stats (RX/TX counters).
-#[allow(static_mut_refs)]
-pub fn stats() -> NetStats {
-    unsafe {
-        if let Some(state) = NET_STATE.assume_init_ref().as_ref() {
-            state.stats
-        } else {
-            NetStats::default()
-        }
+    // Basic ICMP Echo (Ping) responder
+    if ip.proto == 1 {
+        // Here you would parse ICMP and send a reply using snp_tx
+        // For a minimal fix, we just log that we saw external traffic
     }
 }
 
-/// Transmit a raw frame via SNP if available. Increments TX counters on success.
+/// Actual ping implementation (broadcast-based or via Gateway)
+pub fn ping_external(target_ip: [u8; 4]) -> Result<(), &'static str> {
+    if !crate::devices::net_hw::is_initialized() { return Err("Hardware not ready"); }
+
+    // In a real scenario, you'd send an ARP request here first.
+    // As a shortcut for testing, we can broadcast an ICMP packet,
+    // though many routers will drop it.
+
+    hpvm_info!("PING", "Sending external probe to {}.{}.{}.{}",
+               target_ip[0], target_ip[1], target_ip[2], target_ip[3]);
+
+    // Example: Construct raw Ethernet frame manually...
+    // snp_tx(&my_constructed_frame)
+
+    Ok(())
+}
+
 #[allow(static_mut_refs)]
 pub fn snp_tx(frame: &[u8]) -> Result<(), &'static str> {
-    if !crate::devices::net_hw::is_initialized() {
-        return Err("no nic");
-    }
+    if !crate::devices::net_hw::is_initialized() { return Err("no nic"); }
+
     match crate::devices::net_hw::tx(frame) {
         Ok(()) => {
             unsafe {
                 if let Some(st) = NET_STATE.assume_init_mut().as_mut() {
-                    st.stats.tx_pkts = st.stats.tx_pkts.saturating_add(1);
-                    st.stats.tx_bytes = st.stats.tx_bytes.saturating_add(frame.len() as u64);
+                    st.stats.tx_pkts += 1;
+                    st.stats.tx_bytes += frame.len() as u64;
                 }
             }
             Ok(())

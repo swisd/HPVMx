@@ -17,13 +17,14 @@ use uefi::proto::device_path::DevicePath;
 use uefi::proto::device_path::text::{AllowShortcuts, DisplayOnly};
 use uefi::proto::media::file::{File, FileMode, FileAttribute, FileType, FileInfo};
 use uefi::proto::media::fs::SimpleFileSystem;
+use uefi_raw::protocol::device_path::{DeviceSubType, DeviceType};
 use crate::hpvmlog::*;
 
 
 /// Internal global state for CWD and Device Aliases
-struct State {
+pub struct State {
     cwd: String,
-    device_map: Vec<(String, String)>,
+    pub device_map: Vec<(String, String)>,
 }
 
 static mut STATE: Option<State> = None;
@@ -31,9 +32,18 @@ static mut STATE: Option<State> = None;
 pub struct FileSystem;
 
 impl FileSystem {
+    pub fn is_handle() -> bool {
+        match uefi::boot::get_handle_for_protocol::<SimpleFileSystem>().map_err(|_| "No FS handle") {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+}
+
+impl FileSystem {
     #[allow(static_mut_refs)]
     /// Internal helper to access global state
-    fn get_state() -> &'static mut State {
+    pub fn get_state() -> &'static mut State {
         unsafe {
             if STATE.is_none() {
                 STATE = Some(State {
@@ -108,35 +118,95 @@ impl FileSystem {
 
     /// Scans all drives and writes "alias -> path" to a file
     pub fn scan_and_map_devices(map_file_path: &str) -> Result<(), &'static str> {
-        let handles = uefi::boot::locate_handle_buffer(SearchType::ByProtocol(&SimpleFileSystem::GUID))
-            .map_err(|_| "Failed to locate FS handles")?;
-        hpvm_info!("fs", "obtaining FS handles");
+        // 1. ONLY locate handles that explicitly support the DevicePath protocol.
+        // This skips "ghost" PCI handles and internal firmware handles that cause hangs.
+        let handles = uefi::boot::locate_handle_buffer(SearchType::ByProtocol(&DevicePath::GUID))
+            .map_err(|_| "Failed to locate device path handles")?;
 
         let mut map_contents = String::new();
         let state = Self::get_state();
-        hpvm_info!("fs", "pulling state");
         state.device_map.clear();
-        hpvm_info!("fs", "clearing device map");
 
-        for (i, handle) in handles.as_slice().iter().enumerate() {
-            let device_path_res: Result<ScopedProtocol<DevicePath>, _> = uefi::boot::open_protocol_exclusive(*handle);
-            hpvm_info!("fs", "device_path_res {:#?}", device_path_res);
+        let mut dsk_i = 0; let mut net_i = 0; let mut usb_i = 0;
+        let mut com_i = 0; let mut lpt_i = 0; let mut pci_i = 0;
+
+        for handle in handles.as_slice() {
+            // Use open_protocol with GetProtocol attribute - safest non-locking method
+            let device_path_res = unsafe {
+                uefi::boot::open_protocol::<DevicePath>(
+                    uefi::boot::OpenProtocolParams {
+                        handle: *handle,
+                        agent: uefi::boot::image_handle(),
+                        controller: None,
+                    },
+                    uefi::boot::OpenProtocolAttributes::GetProtocol,
+                )
+            };
+
+            // Inside the for handle in handles.as_slice() loop...
             if let Ok(device_path) = device_path_res {
-                let full_path = device_path
+                let full_path: String = device_path
                     .to_string(DisplayOnly(false), AllowShortcuts(false))
                     .map_err(|_| "Path string error")?
                     .to_string();
-                hpvm_info!("fs", "device full_path {:#?}", full_path);
 
-                let alias = format!("dev{}", i);
-                hpvm_info!("fs", "device alias {:#?}", alias);
+                let mut alias = String::new();
+
+                // Iterate through all nodes. The LAST match will define the alias.
+                // This ensures /Pci/Sata/HD is called 'dsk' instead of 'pci'.
+                for node in device_path.node_iter() {
+                    let d_type = node.device_type();
+                    let d_sub = node.sub_type();
+
+                    match (d_type, d_sub) {
+                        // Hard Drives / Partitions
+                        (DeviceType::MEDIA, DeviceSubType::MEDIA_HARD_DRIVE) => {
+                            alias = format!("dsk{}", dsk_i);
+                            hpvm_info!("fs", "found disk {}", dsk_i);
+                        }
+                        // Network (MAC address)
+                        (DeviceType::MESSAGING, DeviceSubType::MESSAGING_MAC_ADDRESS) => {
+                            alias = format!("net{}", net_i);
+                            hpvm_info!("fs", "found network {}", net_i);
+                        }
+                        // USB Controllers/Devices
+                        (DeviceType::MESSAGING, DeviceSubType::MESSAGING_USB) => {
+                            alias = format!("usb{}", usb_i);
+                            hpvm_info!("fs", "found usb {}", usb_i);
+                        }
+                        // Serial Ports (COM)
+                        (DeviceType::MESSAGING, DeviceSubType::MESSAGING_UART) => {
+                            alias = format!("com{}", com_i);
+                            hpvm_info!("fs", "found com {}", com_i);
+                        }
+                        // PCI - Only set this if we haven't found a more specific alias yet
+                        (DeviceType::HARDWARE, DeviceSubType::HARDWARE_PCI) if alias.is_empty() => {
+                            alias = format!("pci{}", pci_i);
+                            hpvm_info!("fs", "found pci {}", pci_i);
+                        }
+                        _ => continue,
+                    }
+                }
+
+                // Increment the counters ONLY for the final chosen alias
+                if alias.starts_with("dsk") { dsk_i += 1; }
+                else if alias.starts_with("net") { net_i += 1; }
+                else if alias.starts_with("usb") { usb_i += 1; }
+                else if alias.starts_with("com") { com_i += 1; }
+                else if alias.starts_with("pci") { pci_i += 1; }
+
+                // If still empty after the full path, use the generic dev counter
+                if alias.is_empty() {
+                    alias = format!("dev{}", state.device_map.len());
+                    hpvm_info!("fs", "found device {}", state.device_map.len());
+                }
+
                 state.device_map.push((alias.clone(), full_path.clone()));
-                hpvm_info!("fs", "push {} to device map", alias);
                 map_contents.push_str(&format!("{} -> {}\n", alias, full_path));
-                hpvm_info!("fs", "mapped device {} at {}", alias, full_path);
             }
         }
-        hpvm_info!("fs", "writing dev registers to {:#?}", map_file_path);
+
+        // Now write_to_file can execute because no handles are locked
         Self::write_to_file(map_file_path, &map_contents, 'w')
     }
 
@@ -396,6 +466,4 @@ impl FileSystem {
         alloc::string::String::from_utf8(data)
             .map_err(|_| "file is not valid UTF-8")
     }
-
-
 }
