@@ -2,7 +2,6 @@
 
 use raw_cpuid::CpuId;
 use bitflags::bitflags;
-use log::info;
 use uefi::proto::console::text::Color;
 
 macro_rules! hpvm_log {
@@ -93,7 +92,7 @@ impl VtxCapabilities {
 
         let available = cpuid
             .get_feature_info()
-            .map(|info| true) // true for testing only. Change to info.has_vmx()
+            .map(|_info| true) // true for testing only. Change to info.has_vmx()
             .unwrap_or(false);
 
         hpvm_info!("vmx", "hypervisor capabilities available: {}", available);
@@ -111,7 +110,7 @@ impl VtxCapabilities {
         // Check for EPT (Extended Page Tables) support
         let ept_supported = cpuid
             .get_extended_feature_info()
-            .map(|info| true)
+            .map(|_info| true)
             .unwrap_or(false);
 
         hpvm_info!("vmx", "ept capabilities available: {}", ept_supported);
@@ -119,7 +118,7 @@ impl VtxCapabilities {
         // Check for VPID support
         let vpid_supported = cpuid
             .get_extended_feature_info()
-            .map(|info| true)
+            .map(|_info| true)
             .unwrap_or(false);
 
         hpvm_info!("vmx", "virtual network capabilities available: {}", vpid_supported);
@@ -131,7 +130,7 @@ impl VtxCapabilities {
             vpid_supported,
             unrestricted_guest: cpuid
                 .get_extended_feature_info()
-                .map(|info| false)
+                .map(|_info| false)
                 .unwrap_or(false),
         }
     }

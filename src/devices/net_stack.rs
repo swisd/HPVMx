@@ -5,7 +5,7 @@ use crate::Color;
 use crate::hpvm_log;
 use core::mem::{MaybeUninit, size_of};
 use core::sync::atomic::{AtomicBool, Ordering};
-use crate::{hpvm_info, hpvm_warn, hpvm_error};
+use crate::{hpvm_info, hpvm_warn};
 
 // --- Protocol Constants & Headers ---
 
@@ -155,7 +155,7 @@ pub fn is_initialized() -> bool { STACK_INIT.load(Ordering::SeqCst) }
 #[allow(static_mut_refs)]
 pub fn poll_tick() {
     if !STACK_INIT.load(Ordering::SeqCst) { return; }
-    let mut buf = [0u8; 1514];
+    let _buf = [0u8; 1514];
 
     if crate::devices::net_hw::is_initialized() {
         let mut buf = [0u8; 1514]; // Max Ethernet frame
@@ -336,10 +336,10 @@ fn handle_tcp(src_ip: [u8; 4], src_mac: [u8; 6], packet: &[u8]) {
     }
 }
 
-fn send_tcp_packet(dst_ip: [u8; 4], dst_mac: [u8; 6], src_port: u16, dst_port: u16,
+fn send_tcp_packet(_dst_ip: [u8; 4], _dst_mac: [u8; 6], src_port: u16, dst_port: u16,
                    seq: u32, ack: u32, flags: u8, data: &[u8]) {
     #[allow(static_mut_refs)]
-    let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
+    let _state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
     let mut frame = [0u8; 1514];
 
     let tcp_len = size_of::<TcpHeader>() + data.len();

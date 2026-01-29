@@ -1,4 +1,3 @@
-use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::Write;
@@ -130,13 +129,13 @@ impl KernelLoader {
     /// - Set up GDT/IDT
     /// - Configure memory mappings
     /// - Exit boot services before jumping
-    pub unsafe fn execute_kernel(kernel_data: &[u8], entry_point: u64) -> ! {
+    pub unsafe fn execute_kernel(_kernel_data: &[u8], entry_point: u64) -> ! { unsafe {
         // Type cast the kernel data pointer to a function pointer
         let kernel_entry: extern "C" fn() -> ! = core::mem::transmute(entry_point as *const ());
         
         // Jump to kernel entry point
         kernel_entry()
-    }
+    }}
 
     pub fn validate_kernel(data: &[u8]) -> Result<u64, &'static str> {
         // Basic ELF validation

@@ -57,8 +57,6 @@ macro_rules! hpvm_error {
     ($tag:expr, $($arg:tt)*) => { hpvm_log!(Color::Red, $tag, $($arg)*) };
 }
 
-use alloc::boxed::Box;
-use crate::Color;
 use alloc::string::String;
 use alloc::vec::Vec;
 use crate::logiclang_int::{Lexer, LogicError, Parser};
@@ -107,8 +105,8 @@ impl LogicInterpreter {
     //     }
     // }
 
-    fn interpret_query(&self, tokens: &[String]) -> HashMap<String, String> {
-        let mut result = HashMap::new();
+    fn interpret_query(&self, _tokens: &[String]) -> HashMap<String, String> {
+        let result = HashMap::new();
 
         result
     }

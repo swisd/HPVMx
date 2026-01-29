@@ -9,10 +9,7 @@ pub mod interpreter;
 pub mod builtins;
 pub mod error;
 
-pub use interpreter::LogicInterpreter;
 pub use error::LogicError;
 pub use lexer::Lexer;
 pub use parser::Parser;
 
-use alloc::vec::Vec;
-use alloc::string::String;

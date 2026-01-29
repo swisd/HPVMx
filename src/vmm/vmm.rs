@@ -7,7 +7,6 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::vmm::vm::{VirtualMachine, VmState};
-use crate::vmm::vcpu::VirtualCpu;
 
 static VM_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -162,7 +161,7 @@ impl HypervisorManager {
         }, list_str)
     }
 
-    pub fn boot_vm_with_media(&mut self, vm_id: u32, media_data: &[u8]) -> Result<(), &str> {
+    pub fn boot_vm_with_media(&mut self, _vm_id: u32, _media_data: &[u8]) -> Result<(), &str> {
         // Find the VM
         // let vm = self.vms.iter_mut().find(|v| v.id == vm_id)
         //     .ok_or("VM not found")?;

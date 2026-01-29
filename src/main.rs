@@ -17,39 +17,28 @@ mod logiclang_int;
 mod devices;
 mod hpvmlog;
 
-use alloc::boxed::Box;
-use tools::dsk;
 
 extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
-use core::panic::PanicInfo;
-use core::ptr::addr_of_mut;
 use uefi::prelude::*;
-use log::{error, info, warn};
+use log::error;
 use uefi::boot;
 use buddy_system_allocator::LockedHeap;
 use uefi::boot::{MemoryType};
 use uefi::mem::memory_map::MemoryMap;
 use uefi::proto::console::text::{Key, ScanCode};
-use uefi::proto::media::file::{File, FileAttribute, FileMode};
-use uefi::proto::media::fs::SimpleFileSystem;
-use uefi::proto::console::text::{Color, Output as TextOutputTrait};
+use uefi::proto::console::text::Color;
 use uefi::runtime::ResetType;
 use uefi_raw::table::system::SystemTable;
-use uefi_async::*;
-use uefi_async::nano_alloc::{executor, Executor, TaskNode};
-use uefi_async::nano_alloc::time::_WaitTimer;
 //use ui::UI;
 use kernel::KernelLoader;
 use filesystem::FileSystem;
 use vmm::HypervisorManager;
 use ui::WinNTShell;
 use ui::DashboardUI;
-use vmm::bootloader::BootLoader;
 
-use hpvmlog::*;
 
 //#[global_allocator]
 static ALLOCATOR: LockedHeap<32> = LockedHeap::<32>::empty();
@@ -57,7 +46,6 @@ static mut HEAP_STORAGE: [u8; 2 * 1024 * 1024] = [0; 2 * 1024 * 1024];
 static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
 
 use paging::PagingManager;
-use crate::graphics::Graphics;
 
 static mut HYPERVISOR: Option<HypervisorManager> = None;
 
@@ -464,7 +452,7 @@ fn read_line(buf: &mut String) {
                 }
                 Key::Printable(c) => {
                     let ch = char::from(c);
-                    if (ch == '\r' || ch == '\n') {
+                    if ch == '\r' || ch == '\n' {
                         uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, ch).unwrap());
                         uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, "\n".parse().unwrap()).unwrap());
                         break;
@@ -501,7 +489,7 @@ fn read_line_int(buf: &mut String) -> i32 {
                 }
                 Key::Printable(c) => {
                     let ch = char::from(c);
-                    if (ch == '\r' || ch == '\n') {
+                    if ch == '\r' || ch == '\n' {
                         uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, ch).unwrap());
                         uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, "\n".parse().unwrap()).unwrap());
                         if buf.contains("run") {
@@ -989,7 +977,7 @@ fn load_boot_media(path: &str) -> Result<Vec<u8>, &'static str> {
 
 /// Helper function to read a file from the filesystem
 fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
-    use alloc::vec::Vec;
+    
 
     // Use KernelLoader's file loading capability
     match KernelLoader::load_kernel(path) {

@@ -20,25 +20,25 @@ impl BootLoader {
         Self { boot_type }
     }
 
-    pub fn load_efi_firmware(&self, path: &str) -> Result<Vec<u8>, &str> {
+    pub fn load_efi_firmware(&self, _path: &str) -> Result<Vec<u8>, &str> {
         // Load EFI firmware/bootloader from disk
         Ok(Vec::new())
     }
 
-    pub fn load_kernel(&self, path: &str) -> Result<Vec<u8>, &str> {
+    pub fn load_kernel(&self, _path: &str) -> Result<Vec<u8>, &str> {
         // Load kernel image
         Ok(Vec::new())
     }
 
-    pub fn load_initrd(&self, path: &str) -> Result<Vec<u8>, &str> {
+    pub fn load_initrd(&self, _path: &str) -> Result<Vec<u8>, &str> {
         // Load initial ramdisk
         Ok(Vec::new())
     }
 
     pub fn prepare_boot_environment(
         &self,
-        kernel: &[u8],
-        initrd: Option<&[u8]>,
+        _kernel: &[u8],
+        _initrd: Option<&[u8]>,
         cmdline: &str,
     ) -> Result<BootEnvironment, &str> {
         Ok(BootEnvironment {

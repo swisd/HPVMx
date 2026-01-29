@@ -9,7 +9,6 @@ use crate::hpvm_log;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
-use log::{info, warn, error};
 use crate::{hpvm_error, hpvm_warn};
 use super::net_hw;
 use super::net_stack;
@@ -114,7 +113,7 @@ pub fn lanscan(prefix: &str) {
         return;
     }
 
-    let mut found: Vec<String> = Vec::new();
+    let found: Vec<String> = Vec::new();
     let mut lines: [String; 11] = [
         String::from("1   "), String::from("26  "), String::from("51  "), String::from("76  "),
         String::from("101 "), String::from("126 "), String::from("151 "), String::from("176 "),
@@ -125,7 +124,7 @@ pub fn lanscan(prefix: &str) {
 
     for host in 1..=255u16 {
         let ip_str = alloc::format!("{}{}", prefix, host);
-        let target_ip = parse_ip(&ip_str).unwrap();
+        let _target_ip = parse_ip(&ip_str).unwrap();
 
         // In this manual stack, "lanscan" can work by broadcasting
         // a small UDP probe or an ARP request.

@@ -2,7 +2,7 @@
 
 extern crate alloc;
 use crate::Color;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use raw_cpuid::CpuId;
 
 #[cfg(target_arch = "x86_64")]
@@ -61,7 +61,7 @@ impl CpuInfo {
 
         let brand = cpuid
             .get_extended_feature_info()
-            .and_then(|info| Some("Intel"))
+            .and_then(|_info| Some("Intel"))
             .map(|s: &str| {
                 let mut result = String::new();
                 for c in s.chars() {

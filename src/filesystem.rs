@@ -1,24 +1,20 @@
 use crate::Color;
 use crate::hpvm_log;
 use crate::hpvm_info;
-use crate::hpvm_warn;
-use crate::hpvm_error;
 use crate::message;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use core::ffi::CStr;
 use core::fmt::Write;
-use uefi::boot::{ScopedProtocol, SearchType};
+use uefi::boot::SearchType;
 use uefi::data_types::CStr16;
-use uefi::{Handle, Identify};
+use uefi::Identify;
 use uefi::proto::device_path::DevicePath;
 use uefi::proto::device_path::text::{AllowShortcuts, DisplayOnly};
-use uefi::proto::media::file::{File, FileMode, FileAttribute, FileType, FileInfo};
+use uefi::proto::media::file::{File, FileMode, FileAttribute, FileInfo};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi_raw::protocol::device_path::{DeviceSubType, DeviceType};
-use crate::hpvmlog::*;
 
 
 /// Internal global state for CWD and Device Aliases
@@ -58,7 +54,7 @@ impl FileSystem {
     /// Resolves path based on Aliases (dev0:), Root-relative (/), or CWD
     fn resolve_path(path: &str) -> String {
         let state = Self::get_state();
-        let mut input = path.replace('/', "\\");
+        let input = path.replace('/', "\\");
         let mut base_path: String;
 
         // 1. Determine the starting point (Base)
@@ -128,7 +124,7 @@ impl FileSystem {
         state.device_map.clear();
 
         let mut dsk_i = 0; let mut net_i = 0; let mut usb_i = 0;
-        let mut com_i = 0; let mut lpt_i = 0; let mut pci_i = 0;
+        let mut com_i = 0; let _lpt_i = 0; let mut pci_i = 0;
 
         for handle in handles.as_slice() {
             // Use open_protocol with GetProtocol attribute - safest non-locking method
@@ -258,7 +254,7 @@ impl FileSystem {
 
         let handle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
             .map_err(|_| "Open for delete failed")?;
-        let mut file = handle.into_regular_file().ok_or("Not a file")?;
+        let file = handle.into_regular_file().ok_or("Not a file")?;
 
         file.delete().map_err(|_| "Delete failed")?;
         Ok(())

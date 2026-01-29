@@ -1,16 +1,9 @@
-use crate::hpvm_log;
-use crate::hpvm_info;
-use crate::hpvm_warn;
-use crate::hpvm_error;
-use crate::message;
 use core::fmt::Write;
-use core::ptr::null_mut;
 use uefi::proto::console::text::Color;
 // Import both protocols
 use uefi::proto::console::pointer::Pointer;
 use uefi::proto::console::pointer::Pointer as SimplePointer;
-use uefi::proto::console::gop; // Assuming you're using uefi-services for simplicity
-use uefi::proto::console::gop::{GraphicsOutput, ModeInfo};
+ // Assuming you're using uefi-services for simplicity
 
 pub struct Cursor {
     pub x: i32,
@@ -41,7 +34,7 @@ impl Cursor {
 
     fn try_update_absolute(&mut self) -> bool {
         if let Ok(handle) = uefi::boot::get_handle_for_protocol::<Pointer>() {
-            if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) {
+            if let Ok(mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) {
                 let mode = &mut mouse.mode();
                 let Ok(mut mouse2) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) else {
                     return false;
@@ -83,7 +76,7 @@ impl Cursor {
     }
 
     pub fn render(&self, stdout: &mut uefi::proto::console::text::Output) {
-        let cursor_char = if self.left_button { "+" } else { "*" };
+        let _cursor_char = if self.left_button { "+" } else { "*" };
         stdout.enable_cursor(true).expect("cursor issue 0");
         stdout.set_cursor_position(self.x as usize, self.y as usize).expect("cursor issue 1");
         //let _ = write!(stdout, "[{};{}H{}", self.y + 1, self.x + 1, cursor_char);
@@ -92,10 +85,6 @@ impl Cursor {
 
 #[allow(dead_code)]
 use uefi::system;
-use uefi::system::with_stdout;
-use uefi_raw::protocol::console::GraphicsOutputModeInformation;
-use uefi_raw::table::boot::BootServices;
-use uefi_raw::table::system::SystemTable;
 
 // Windows NT Color Palette
 pub struct WinNTColors;

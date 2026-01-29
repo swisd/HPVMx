@@ -9,12 +9,9 @@ use crate::hpvm_log;
 use crate::hpvm_info;
 use crate::hpvm_warn;
 use crate::hpvm_error;
-use crate::message;
-use log::{info, warn, error};
-use uefi::boot::{self, HandleBuffer, ScopedProtocol, SearchType};
+use uefi::boot::{self, ScopedProtocol, SearchType};
 use uefi::proto::network::snp::SimpleNetwork;
 use uefi::{Identify, Handle};
-use uefi_raw::MacAddress;
 
 static NET_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
@@ -56,7 +53,7 @@ pub fn snp_open() -> Option<ScopedProtocol<SimpleNetwork>> {
 
 /// Current link status (best-effort).
 pub fn link_up() -> bool {
-    if let Some(mut snp) = snp_open() {
+    if let Some(snp) = snp_open() {
         let m = snp.mode();
         let present: bool = m.media_present.into();
         present
@@ -67,7 +64,7 @@ pub fn link_up() -> bool {
 
 /// Transmit a raw Ethernet frame via SNP (best-effort).
 pub fn tx(frame: &[u8]) -> Result<(), &'static str> {
-    let Some(mut snp) = snp_open() else { return Err("no snp"); };
+    let Some(snp) = snp_open() else { return Err("no snp"); };
     // Safety: UEFI SNP expects DMA-safe buffer; firmware copies internally.
     match snp.transmit(0, frame, None, None, None) {
         Ok(_) => Ok(()),
@@ -77,7 +74,7 @@ pub fn tx(frame: &[u8]) -> Result<(), &'static str> {
 
 /// Receive a raw Ethernet frame into the provided buffer. Returns length if a packet was received.
 pub fn rx(buf: &mut [u8]) -> Result<usize, &'static str> {
-    let Some(mut snp) = snp_open() else { return Err("no snp"); };
+    let Some(snp) = snp_open() else { return Err("no snp"); };
     match snp.receive(buf, None, None, None, None) {
         Ok(sz) => Ok(sz),
         Err(_) => Err("rx none"),

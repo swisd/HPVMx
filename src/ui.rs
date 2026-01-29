@@ -4,14 +4,13 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::Write;
 use uefi::proto::console::text::{Color, Key, ScanCode};
-use uefi::system;
 
 mod graphics;
 mod dashboard;
 mod vm_manager;
 mod terminal;
 
-pub use graphics::{Graphics, Rect, WinNTColors};
+pub use graphics::{Graphics, Rect};
 
 pub struct Window {
     pub title: String,
