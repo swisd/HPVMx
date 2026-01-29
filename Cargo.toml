@@ -24,7 +24,6 @@ virtio-drivers = "0.12.0"
 # ixgbe/e1000 drivers needed
 gpt = "4.1.0"
 log = "0.4.29"
-getrandom = { version = "0.3.4", default-features = false }
 lazy_static = "1.5.0"
 uefi-raw = "0.13.0"
 # Hypervisor dependencies
