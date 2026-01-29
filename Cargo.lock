@@ -8,7 +8,6 @@ version = "0.1.0"
 dependencies = [
  "bitflags 2.10.0",
  "buddy_system_allocator",
- "bytemuck",
  "log",
  "raw-cpuid",
  "smoltcp",
@@ -56,12 +55,6 @@ checksum = "b672b945a3e4f4f40bfd4cd5ee07df9e796a42254ce7cd6d2599ad969244c44a"
 dependencies = [
  "spin",
 ]
-
-[[package]]
-name = "bytemuck"
-version = "1.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
 
 [[package]]
 name = "byteorder"

@@ -61,6 +61,7 @@ use crate::graphics::Graphics;
 
 static mut HYPERVISOR: Option<HypervisorManager> = None;
 
+#[allow(dead_code, unused, unused_must_use)]
 #[entry]
 fn main() -> Status {
     uefi::helpers::init().unwrap();
