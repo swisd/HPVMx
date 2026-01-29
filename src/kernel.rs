@@ -1,21 +1,9 @@
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::fmt::Write;
 use uefi::{data_types, CStr16, CString16};
 use uefi::proto::media::file::{File, FileMode, FileAttribute};
 use uefi::proto::media::fs::SimpleFileSystem;
-
-macro_rules! message {
-    ($start:expr, $($arg:tt)*) => {
-        uefi::system::with_stdout(|stdout| {
-            use core::fmt::Write;
-            let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
-            let _ = write!(stdout, $start);
-            let _ = write!(stdout, $($arg)*);
-            let _ = write!(stdout, "\n");
-        })
-    }
-}
+use crate::message;
 
 pub struct KernelLoader;
 

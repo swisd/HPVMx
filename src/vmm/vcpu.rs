@@ -15,6 +15,7 @@ bitflags! {
 
 /// Virtual CPU state
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct VirtualCpu {
     pub id: u32,
     pub flags: VCpuFlags,
@@ -24,6 +25,7 @@ pub struct VirtualCpu {
     pub interrupt_pending: bool,
 }
 
+#[allow(dead_code)]
 impl VirtualCpu {
     /// Create a new virtual CPU
     pub fn new(id: u32) -> Self {
@@ -80,6 +82,7 @@ impl VirtualCpu {
 
 /// Simplified vCPU register state
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct VCpuRegisters {
     pub rip: u64,
     pub rsp: u64,

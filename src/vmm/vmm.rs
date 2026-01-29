@@ -19,6 +19,7 @@ pub struct HypervisorManager {
     pub vm_count: u32,
 }
 
+#[allow(dead_code)]
 impl HypervisorManager {
     /// Create a new hypervisor manager instance
     pub fn new() -> Self {

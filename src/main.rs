@@ -41,15 +41,20 @@ use ui::DashboardUI;
 
 
 //#[global_allocator]
+#[allow(dead_code, unused)]
 static ALLOCATOR: LockedHeap<32> = LockedHeap::<32>::empty();
+
+#[allow(dead_code, unused)]
 static mut HEAP_STORAGE: [u8; 2 * 1024 * 1024] = [0; 2 * 1024 * 1024];
+
+#[allow(dead_code, unused)]
 static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
 
 use paging::PagingManager;
 
 static mut HYPERVISOR: Option<HypervisorManager> = None;
 
-#[allow(dead_code, unused, unused_must_use, non_camel_case_types)]
+#[allow(dead_code, unused, unused_must_use, non_camel_case_types, nonstandard_style)]
 #[entry]
 fn main() -> Status {
     uefi::helpers::init().unwrap();
@@ -896,7 +901,7 @@ fn show_dashboard_ui() {
     }
 }
 
-#[allow(static_mut_refs)]
+#[allow(static_mut_refs, dead_code)]
 /// Attach to a VM's console for interaction
 fn attach_vm_console(vm_id: u32) {
     hpvm_info!("Console", "attaching to VM {} console", vm_id);
@@ -921,9 +926,9 @@ fn attach_vm_console(vm_id: u32) {
                 // Simple console loop
                 let mut console_input = String::new();
                 loop {
-                    uefi::system::with_stdout(|s| {
-                        let _ = core::fmt::Write::write_fmt(s,
-                                                            format_args!("vm{}> ", vm_id)).ok();
+                    system::with_stdout(|s| {
+                        let _ = Write::write_fmt(s,
+                                                 format_args!("vm{}> ", vm_id)).ok();
                     });
 
                     console_input.clear();
@@ -964,7 +969,6 @@ fn load_boot_media(path: &str) -> Result<Vec<u8>, &'static str> {
                 Ok(data) => {
                     hpvm_info!("FileIO", "loaded {} bytes from '{}' in dangerous mode", data.len(), path);
                     Ok(data)
-
                 }
                 Err(e) => {
                     hpvm_error!("FileIO", "failed to load file '{}': {}", path, e);
@@ -976,6 +980,7 @@ fn load_boot_media(path: &str) -> Result<Vec<u8>, &'static str> {
 }
 
 /// Helper function to read a file from the filesystem
+#[allow(dead_code)]
 fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
     
 

@@ -4,6 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 
 /// Virtual I/O device trait
+#[allow(dead_code)]
 pub trait VirtioDevice {
     fn device_name(&self) -> &str;
     fn handle_io_read(&self, port: u16, size: u32) -> u32;
@@ -11,12 +12,14 @@ pub trait VirtioDevice {
 }
 
 /// Virtual Serial Console device
+#[allow(dead_code)]
 pub struct VirtualConsole {
     pub name: String,
     pub data_buffer: [u8; 256],
     pub buffer_pos: usize,
 }
 
+#[allow(dead_code)]
 impl VirtualConsole {
     pub fn new() -> Self {
         Self {
@@ -51,10 +54,12 @@ impl VirtioDevice for VirtualConsole {
 }
 
 /// Virtual device manager
+#[allow(dead_code)]
 pub struct IoManager {
     devices: BTreeMap<String, usize>,
 }
 
+#[allow(dead_code)]
 impl IoManager {
     pub fn new() -> Self {
         Self {

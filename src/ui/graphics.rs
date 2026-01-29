@@ -5,6 +5,7 @@ use uefi::proto::console::pointer::Pointer;
 use uefi::proto::console::pointer::Pointer as SimplePointer;
  // Assuming you're using uefi-services for simplicity
 
+#[allow(dead_code)]
 pub struct Cursor {
     pub x: i32,
     pub y: i32,
@@ -13,6 +14,7 @@ pub struct Cursor {
     pub right_button: bool,
 }
 
+#[allow(dead_code)]
 impl Cursor {
     pub fn new() -> Self {
         Cursor {
@@ -89,6 +91,7 @@ use uefi::system;
 // Windows NT Color Palette
 pub struct WinNTColors;
 
+#[allow(dead_code)]
 impl WinNTColors {
     pub const TITLE_BAR: (Color, Color) = (Color::White, Color::Blue);
     pub const DIALOG_BG: (Color, Color) = (Color::Black, Color::LightGray);
@@ -108,6 +111,7 @@ pub struct Rect {
     pub height: usize,
 }
 
+#[allow(dead_code)]
 impl Rect {
     pub fn new(x: usize, y: usize, width: usize, height: usize) -> Self {
         Rect { x, y, width, height }
@@ -118,8 +122,10 @@ impl Rect {
     }
 }
 
+#[allow(dead_code)]
 pub struct Graphics;
 
+#[allow(dead_code)]
 impl Graphics {
     /// Clear screen with background color
     pub fn clear_screen(bg: Color) {

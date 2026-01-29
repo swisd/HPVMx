@@ -36,6 +36,7 @@ impl FileSystem {
     }
 }
 
+#[allow(dead_code)]
 impl FileSystem {
     #[allow(static_mut_refs)]
     /// Internal helper to access global state

@@ -2,58 +2,12 @@
 
 use raw_cpuid::CpuId;
 use bitflags::bitflags;
-use log::info;
 use uefi::proto::console::text::Color;
-
-macro_rules! hpvm_log {
-    ($color:expr, $prefix:expr, $($arg:tt)*) => {
-        uefi::system::with_stdout(|stdout| {
-            // Bring the trait into scope INSIDE the closure
-            //use uefi::proto::console::text::Output;
-            use core::fmt::Write;
-
-            // let old_attribute = stdout.get_attribute().ok();
-
-            // Set prefix color
-            let _ = stdout.set_color($color, uefi::proto::console::text::Color::Black);
-            let _ = write!(stdout, "[{}] ", $prefix);
-
-            // Reset to white for message
-            match $color {
-                Color::Yellow => {}
-                Color::Red => {}
-                _ => {let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);}
-            }
-            let _ = write!(stdout, $($arg)*);
-            let _ = write!(stdout, "\n");
-            let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
-
-            // Restore original attributes if they existed
-            // if let Some(attr) = old_attribute {
-            //     let _ = stdout.set_attribute(attr);
-            // }
-        })
-    };
-}
-
-macro_rules! hpvm_info {
-    ($tag:expr, $($arg:tt)*) => { hpvm_log!(Color::LightCyan, $tag, $($arg)*) };
-}
-
-macro_rules! message {
-    ($start:expr, $($arg:tt)*) => {
-        uefi::system::with_stdout(|stdout| {
-            use core::fmt::Write;
-            let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
-            let _ = write!(stdout, $start);
-            let _ = write!(stdout, $($arg)*);
-            let _ = write!(stdout, "\n");
-        })
-    }
-}
+use crate::{hpvm_log, hpvm_info};
 
 /// VT-x capability flags
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct VtxCapabilities {
     pub available: bool,
     pub vmxon_supported: bool,
@@ -86,6 +40,7 @@ bitflags! {
     }
 }
 
+#[allow(dead_code, unused)]
 impl VtxCapabilities {
     /// Detect VT-x capabilities on this CPU
     pub fn detect() -> Self {
@@ -149,6 +104,7 @@ impl VtxCapabilities {
 
 /// VMXON region structure (4KB aligned)
 #[repr(C, align(4096))]
+#[allow(dead_code)]
 pub struct VmxonRegion {
     pub revision_id: u32,
     pub data: [u8; 4092],
@@ -156,11 +112,13 @@ pub struct VmxonRegion {
 
 /// VMCS (Virtual Machine Control Structure) region
 #[repr(C, align(4096))]
+#[allow(dead_code)]
 pub struct VmcsRegion {
     pub revision_id: u32,
     pub data: [u8; 4092],
 }
 
+#[allow(dead_code)]
 impl VmcsRegion {
     /// Create a new VMCS region with proper revision ID
     pub fn new(revision_id: u32) -> Self {

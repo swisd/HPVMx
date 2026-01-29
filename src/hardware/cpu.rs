@@ -9,6 +9,7 @@ use raw_cpuid::CpuId;
 pub mod vmx;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CpuInfo {
     pub brand: String,
     pub cores: u32,
@@ -17,7 +18,7 @@ pub struct CpuInfo {
     pub supports_vmx: bool,
 }
 
-
+#[allow(dead_code)]
 macro_rules! hpvm_log {
     ($color:expr, $prefix:expr, $($arg:tt)*) => {
         uefi::system::with_stdout(|stdout| {
@@ -53,7 +54,7 @@ macro_rules! hpvm_info {
     ($tag:expr, $($arg:tt)*) => { hpvm_log!(Color::LightCyan, $tag, $($arg)*) };
 }
 
-
+#[allow(dead_code)]
 impl CpuInfo {
     /// Detect CPU capabilities
     pub fn detect() -> Self {

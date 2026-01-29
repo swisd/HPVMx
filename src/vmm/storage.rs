@@ -3,10 +3,12 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+#[allow(dead_code)]
 pub struct StorageManager {
     disks: Vec<VirtualDisk>,
 }
 
+#[allow(dead_code)]
 pub struct VirtualDisk {
     pub id: u32,
     pub vm_id: u32,
@@ -17,6 +19,7 @@ pub struct VirtualDisk {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
 pub enum DiskType {
     Qcow2,
     RawImage,
@@ -24,6 +27,7 @@ pub enum DiskType {
     VMDK,
 }
 
+#[allow(dead_code)]
 impl StorageManager {
     pub fn new() -> Self {
         Self {

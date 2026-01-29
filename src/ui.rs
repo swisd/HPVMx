@@ -2,7 +2,6 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::fmt::Write;
 use uefi::proto::console::text::{Color, Key, ScanCode};
 
 mod graphics;

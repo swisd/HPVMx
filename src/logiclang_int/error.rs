@@ -1,8 +1,7 @@
 //! Error types for LogicLang
-
 use alloc::format;
 use alloc::string::{String, ToString};
-
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum LogicError {
     SyntaxError(String),
@@ -17,6 +16,7 @@ pub enum LogicError {
     Error(String),
 }
 
+#[allow(unused)]
 impl LogicError {
     pub fn message(&self) -> String {
         match self {

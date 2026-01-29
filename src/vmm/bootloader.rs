@@ -3,10 +3,12 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+#[allow(dead_code)]
 pub struct BootLoader {
     pub boot_type: BootType,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub enum BootType {
     BIOS,
@@ -15,6 +17,7 @@ pub enum BootType {
     Multiboot2,
 }
 
+#[allow(dead_code)]
 impl BootLoader {
     pub fn new(boot_type: BootType) -> Self {
         Self { boot_type }
@@ -49,6 +52,7 @@ impl BootLoader {
     }
 }
 
+#[allow(dead_code)]
 pub struct BootEnvironment {
     pub kernel_addr: u64,
     pub initrd_addr: u64,

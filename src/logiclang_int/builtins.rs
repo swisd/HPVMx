@@ -1,15 +1,18 @@
 
 //! Built-in predicates and command execution for LogicLang
+#[allow(dead_code, unused, unused_must_use, non_camel_case_types, nonstandard_style)]
 
 use alloc::format;
 use super::parser::Term;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+#[allow(unused)]
 pub trait CommandExecutor {
     fn execute(&self, cmd: &str, args: &[Term]) -> Result<String, String>;
 }
 
+#[allow(dead_code)]
 pub struct HPVMxCommandExecutor;
 
 impl CommandExecutor for HPVMxCommandExecutor {
@@ -87,7 +90,7 @@ impl CommandExecutor for HPVMxCommandExecutor {
         }
     }
 }
-
+#[allow(dead_code)]
 fn term_to_string(term: &Term) -> String {
     match term {
         Term::Atom(a) => a.clone(),

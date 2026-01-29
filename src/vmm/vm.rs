@@ -6,6 +6,7 @@ use crate::vmm::vcpu::VirtualCpu;
 
 /// Virtual Machine state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum VmState {
     Created,
     Running,
@@ -37,6 +38,7 @@ pub struct VirtualMachine {
     pub guest_memory_base: Option<usize>,
 }
 
+#[allow(dead_code)]
 impl VirtualMachine {
     /// Create a new virtual machine
     pub fn new(id: u32, name: &str, memory_mb: u32, vcpu_count: u32) -> Result<Self, &'static str> {

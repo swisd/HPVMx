@@ -1,6 +1,8 @@
 
 //! Parser for LogicLang - converts tokens to AST
 
+#[allow(dead_code, unused, unused_must_use, non_camel_case_types, nonstandard_style)]
+
 use alloc::{format, vec};
 use super::lexer::Token;
 use super::error::LogicError;
@@ -19,12 +21,14 @@ pub enum Term {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Clause {
     pub head: Term,
     pub body: Vec<Goal>,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Goal {
     Predicate(Term),
     Comparison(CompOp, Term, Term),

@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 
 /// Guest memory page entry
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MemoryPage {
     pub gpa: u64,           // Guest physical address
     pub hpa: u64,           // Host physical address
@@ -13,11 +14,13 @@ pub struct MemoryPage {
 }
 
 /// Guest memory manager
+#[allow(dead_code)]
 pub struct MemoryManager {
     pages: Vec<MemoryPage>,
     total_size: usize,
 }
 
+#[allow(dead_code)]
 impl MemoryManager {
     /// Create a new memory manager for guest memory
     pub fn new(total_size: usize) -> Self {
@@ -75,6 +78,7 @@ impl MemoryManager {
 }
 
 /// Extended Page Tables (EPT) support for VT-x
+#[allow(dead_code)]
 #[cfg(target_arch = "x86_64")]
 pub mod ept {
     use bitflags::bitflags;

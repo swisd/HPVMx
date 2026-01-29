@@ -6,19 +6,20 @@ use x86_64::{
 
 pub struct PagingManager;
 
+#[allow(dead_code)]
 impl PagingManager {
     #[allow(dead_code)]
     #[allow(unsafe_code)]
     /// Returns a mapper for the current active level 4 page table.
     /// In UEFI, the physical memory is often identity mapped or at a known offset.
     pub unsafe fn get_active_mapper(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> { unsafe {
-        let (level_4_table_frame, _) = Cr3::read();
-        let phys = level_4_table_frame.start_address();
-        let virt = physical_memory_offset + phys.as_u64(); // Simple offset mapping
-        let page_table_ptr: *mut PageTable = virt.as_mut_ptr();
+            let (level_4_table_frame, _) = Cr3::read();
+            let phys = level_4_table_frame.start_address();
+            let virt = physical_memory_offset + phys.as_u64(); // Simple offset mapping
+            let page_table_ptr: *mut PageTable = virt.as_mut_ptr();
 
-        OffsetPageTable::new(&mut *page_table_ptr, physical_memory_offset)
-    }}
+            OffsetPageTable::new(&mut *page_table_ptr, physical_memory_offset)
+        }}
 
     /// Example: Map a specific virtual address to a physical address
     pub fn map_address(
