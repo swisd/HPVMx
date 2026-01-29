@@ -143,6 +143,32 @@ fn format_mac(mac: &[u8;32], len: usize) -> alloc::string::String {
     out
 }
 
-pub(crate) fn get_mac() -> [u8; 6] {
-    todo!()
+pub(crate) fn get_mac() -> [u8; 32] {
+    let handles = match boot::locate_handle_buffer(SearchType::ByProtocol(&SimpleNetwork::GUID)) {
+        Ok(buf) => buf,
+        Err(_) => {
+            hpvm_warn!("NETHW", "net-hw: no SNP handles present");
+            return [0; 32];
+        }
+    };
+    let mut mc: [u8;32] = [0; 32];
+
+    for &h in handles.as_slice().iter() {
+        let snp_scoped: Result<ScopedProtocol<SimpleNetwork>, _> = boot::open_protocol_exclusive(h);
+        if let Ok(snp) = snp_scoped {
+            let snp_ref: &SimpleNetwork = &snp;
+            // Best-effort start/initialize
+            let _ = snp_ref.start();
+            let _ = snp_ref.initialize(0, 0);
+
+            let mode = snp_ref.mode();
+            let mut mac = [0u8; 32];
+            let mac_len = (mode.hw_address_size as usize).min(32);
+            let src = &mode.current_address.0[..mac_len];
+            mac[..mac_len].copy_from_slice(src);
+            //mac
+            mc = mac;
+        } else { return [0; 32] }
+    }
+    mc
 }
