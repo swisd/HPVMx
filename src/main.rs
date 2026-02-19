@@ -31,7 +31,7 @@ use uefi::mem::memory_map::MemoryMap;
 use uefi::proto::console::text::{Key, ScanCode};
 use uefi::proto::console::text::Color;
 use uefi::runtime::ResetType;
-use uefi::system::with_stdout;
+//use uefi::system::with_stdout;
 use uefi_raw::table::system::SystemTable;
 //use ui::UI;
 use kernel::KernelLoader;
@@ -51,8 +51,8 @@ static mut HEAP_STORAGE: [u8; 2 * 1024 * 1024] = [0; 2 * 1024 * 1024];
 #[allow(dead_code, unused)]
 static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
 
-use paging::PagingManager;
-use crate::graphics::Cursor;
+use crate::paging::PagingManager;
+//use crate::graphics::Cursor;
 
 static mut HYPERVISOR: Option<HypervisorManager> = None;
 

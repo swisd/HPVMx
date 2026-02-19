@@ -131,6 +131,7 @@ impl VmcsRegion {
 
 #[cfg(test)]
 mod tests {
+    use crate::message;
     use super::*;
 
     #[test]

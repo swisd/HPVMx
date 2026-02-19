@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use uefi::proto::console::text::{Color, Key, ScanCode};
 
 mod graphics;
+pub mod pixel_graphics;
 mod dashboard;
 mod vm_manager;
 mod terminal;
@@ -27,7 +28,12 @@ impl Window {
     }
 
     pub fn draw(&self) {
-        Graphics::draw_box(&self.rect, &self.title, self.active);
+        if let Some(mut pg) = pixel_graphics::PixelGraphics::new() {
+            pg.fill_rect(self.rect.x * 8, self.rect.y * 16, self.rect.width * 8, self.rect.height * 16, 0xCCCCCC);
+            pg.draw_text(self.rect.x * 8 + 4, self.rect.y * 16 + 4, &self.title, 0x000000);
+        } else {
+            Graphics::draw_box(&self.rect, &self.title, self.active);
+        }
     }
 }
 
@@ -49,7 +55,13 @@ impl Button {
     }
 
     pub fn draw(&self) {
-        Graphics::draw_button(&self.rect, &self.label, self.focused);
+        if let Some(mut pg) = pixel_graphics::PixelGraphics::new() {
+            let bg = if self.focused { 0xFFFFFF } else { 0xBBBBBB };
+            pg.fill_rect(self.rect.x * 8, self.rect.y * 16, self.rect.width * 8, self.rect.height * 16, bg);
+            pg.draw_text(self.rect.x * 8 + 10, self.rect.y * 16 + 8, &self.label, 0x000000);
+        } else {
+            Graphics::draw_button(&self.rect, &self.label, self.focused);
+        }
     }
 
     pub fn contains(&self, x: usize, y: usize) -> bool {
@@ -337,19 +349,49 @@ impl DashboardUI {
     }
 
     pub fn draw(&self) {
-        self.draw_header();
-        self.draw_navigation_bar();
+        if let Some(mut pg) = pixel_graphics::PixelGraphics::new() {
+            // Draw background
+            pg.clear(0x000000);
 
-        match self.selected_tab {
-            DashboardTab::Overview => self.draw_overview(),
-            DashboardTab::VirtualMachines => self.draw_vms_list(),
-            DashboardTab::Resources => self.draw_resources(),
-            DashboardTab::Storage => self.draw_storage(),
-            DashboardTab::Network => self.draw_network(),
-            DashboardTab::Console => self.draw_console(),
+            // Draw header
+            pg.fill_rect(0, 0, 800, 48, 0x008080); // Cyan-ish
+            pg.draw_text(100, 16, "HPVMx - Hypervisor Management Console", 0xFFFFFF);
+
+            // Draw navigation
+            pg.fill_rect(0, 48, 800, 32, 0x808080); // Gray
+            pg.draw_text(10, 56, "O Overview | V VMs | R Resources | S Storage | N Network | C Console", 0xFFFFFF);
+
+            // Content area based on selected tab
+            match self.selected_tab {
+                DashboardTab::Overview => {
+                    pg.draw_text(20, 100, "System Overview", 0x00FF00);
+                    pg.draw_text(20, 130, "CPU: 35%", 0xFFFFFF);
+                    pg.draw_text(20, 150, "Memory: 4096 / 8192 MB", 0xFFFFFF);
+                }
+                _ => {
+                    pg.draw_text(20, 100, "Tab implementation in progress...", 0x888888);
+                }
+            }
+
+            // Draw footer
+            pg.fill_rect(0, 552, 800, 48, 0x000080); // Blue
+            pg.draw_text(10, 568, "Press 'Q' to exit dashboard", 0xFFFFFF);
+
+        } else {
+            self.draw_header();
+            self.draw_navigation_bar();
+
+            match self.selected_tab {
+                DashboardTab::Overview => self.draw_overview(),
+                DashboardTab::VirtualMachines => self.draw_vms_list(),
+                DashboardTab::Resources => self.draw_resources(),
+                DashboardTab::Storage => self.draw_storage(),
+                DashboardTab::Network => self.draw_network(),
+                DashboardTab::Console => self.draw_console(),
+            }
+
+            self.draw_footer();
         }
-
-        self.draw_footer();
     }
 
     fn draw_header(&self) {
