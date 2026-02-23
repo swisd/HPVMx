@@ -857,6 +857,7 @@ fn run_efi_application(efi_path: &str, args: &[&str]) {
 fn show_dashboard_ui() {
     let mut dashboard = DashboardUI::new();
     dashboard.refresh_storage();
+    dashboard.refresh_devices();
 
     // Populate dashboard with VM information
     unsafe {
@@ -921,6 +922,7 @@ fn show_dashboard_ui() {
                 }
             }
             dashboard.refresh_storage();
+            dashboard.refresh_devices();
             last_refresh = 0;
         }
 

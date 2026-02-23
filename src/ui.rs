@@ -300,6 +300,20 @@ pub struct FileEntry {
     pub is_dir: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct DeviceEntry {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct DeviceCategory {
+    pub name: String,
+    pub devices: Vec<DeviceEntry>,
+    pub expanded: bool,
+    pub icon: String,
+}
+
 pub struct DashboardUI {
     selected_tab: DashboardTab,
     pub vms: Vec<VmDisplayInfo>,
@@ -309,6 +323,8 @@ pub struct DashboardUI {
     pub current_path: String,
     pub files: Vec<FileEntry>,
     pub selected_file_idx: usize,
+    pub categories: Vec<DeviceCategory>,
+    pub selected_device_idx: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -319,6 +335,7 @@ pub enum DashboardTab {
     Storage,
     Network,
     Console,
+    Devices,
 }
 
 pub struct VmDisplayInfo {
@@ -354,6 +371,8 @@ impl DashboardUI {
             current_path: String::from("\\"),
             files: Vec::new(),
             selected_file_idx: 0,
+            categories: Vec::new(),
+            selected_device_idx: 0,
         }
     }
 
@@ -377,9 +396,15 @@ impl DashboardUI {
             pg.fill_rect(0, 0, width, 48, 0x008080); // Cyan-ish
             pg.draw_text(width / 2 - 160, 16, "HPVMx - Hypervisor Management Console", 0xFFFFFF);
 
+            // Draw clock in top right
+            if let Ok(time) = uefi::runtime::get_time() {
+                let time_str = alloc::format!("{:02}:{:02}:{:02}", time.hour(), time.minute(), time.second());
+                pg.draw_text(width - 100, 16, &time_str, 0xFFFF00); // Yellow clock
+            }
+
             // Draw navigation
             pg.fill_rect(0, 48, width, 32, 0x444444); // Dark Gray
-            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | C Console";
+            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console";
             pg.draw_text(10, 56, nav_text, 0xFFFFFF);
 
             // Content area based on selected tab
@@ -406,10 +431,65 @@ impl DashboardUI {
                 }
                 DashboardTab::Resources => {
                     pg.draw_text(20, 100, "Resource Monitor", 0x00FF00);
-                    pg.draw_text(20, 130, "CPU Usage per Core:", 0xFFFFFF);
-                    // Mock cores
+                    pg.draw_text(20, 130, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
+                    pg.draw_text(20, 150, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
+                    pg.draw_text(20, 170, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
+                    
+                    // Draw memory usage bar
+                    pg.draw_text(20, 200, "Memory Usage:", 0xCCCCCC);
+                    pg.fill_rect(150, 200, 200, 20, 0x444444);
+                    let usage_width = (200 * self.resources.used_memory_mb) / self.resources.total_memory_mb.max(1);
+                    pg.fill_rect(150, 200, usage_width as usize, 20, 0x00FF00);
+
+                    pg.draw_text(20, 240, "CPU Usage per Core (Mocked):", 0xFFFFFF);
                     for i in 0..self.resources.cpu_count {
-                        pg.draw_text(40, 150 + (i as usize * 20), &alloc::format!("Core {}: 25%", i), 0xCCCCCC);
+                        pg.draw_text(40, 260 + (i as usize * 20), &alloc::format!("Core {}: 25%", i), 0xCCCCCC);
+                    }
+                }
+                DashboardTab::Network => {
+                    pg.draw_text(20, 100, "Network Status", 0x00FF00);
+                    let net_stats = crate::devices::net_stack::stats();
+                    pg.draw_text(20, 130, &alloc::format!("Backend: {}", crate::devices::net_stack::backend_name()), 0xFFFFFF);
+                    pg.draw_text(20, 160, "Statistics:", 0xAAAAAA);
+                    pg.draw_text(40, 180, &alloc::format!("RX Packets: {}", net_stats.rx_pkts), 0xCCCCCC);
+                    pg.draw_text(40, 200, &alloc::format!("TX Packets: {}", net_stats.tx_pkts), 0xCCCCCC);
+                    pg.draw_text(40, 220, &alloc::format!("RX Bytes:   {}", net_stats.rx_bytes), 0xCCCCCC);
+                    pg.draw_text(40, 240, &alloc::format!("TX Bytes:   {}", net_stats.tx_bytes), 0xCCCCCC);
+                }
+                DashboardTab::Console => {
+                    pg.draw_text(20, 100, "System Log", 0x00FF00);
+                    pg.draw_text(20, 130, "[Note: Historical log viewing implementation in progress]", 0x888888);
+                    pg.draw_text(20, 150, "Latest Messages:", 0xAAAAAA);
+                    
+                    // Mock some recent logs since we don't have a global log buffer yet
+                    pg.draw_text(20, 180, "[INFO] Hypervisor initialized successfully", 0x00FF00);
+                    pg.draw_text(20, 200, "[INFO] Filesystem mounted", 0x00FF00);
+                    pg.draw_text(20, 220, "[WARN] No external network detected", 0xFFFF00);
+                    pg.draw_text(20, 240, "[INFO] Dashboard UI started", 0x00FF00);
+                }
+                DashboardTab::Devices => {
+                    pg.draw_text(20, 100, "Device Manager", 0x00FF00);
+                    
+                    let mut y = 130;
+                    let mut current_idx = 0;
+                    
+                    for cat in &self.categories {
+                        let expanded_icon = if cat.expanded { "[-] " } else { "[+] " };
+                        let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xAAAAAA };
+                        pg.draw_text(20, y, &alloc::format!("{}{}{} ({})", expanded_icon, cat.icon, cat.name, cat.devices.len()), color);
+                        y += 20;
+                        current_idx += 1;
+                        
+                        if cat.expanded {
+                            for dev in &cat.devices {
+                                let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xFFFFFF };
+                                pg.draw_text(40, y, &alloc::format!("└─ {}: {}", dev.name, dev.path), color);
+                                y += 20;
+                                current_idx += 1;
+                                if y > height - 60 { break; }
+                            }
+                        }
+                        if y > height - 60 { break; }
                     }
                 }
                 DashboardTab::Storage => {
@@ -431,14 +511,11 @@ impl DashboardUI {
                         if y > height - 100 { break; }
                     }
                 }
-                _ => {
-                    pg.draw_text(20, 100, &alloc::format!("{:?} implementation in progress...", self.selected_tab), 0x888888);
-                }
             }
 
             // Draw footer
             pg.fill_rect(0, height - 48, width, 48, 0x000080); // Blue
-            pg.draw_text(10, height - 32, "Press 'Q' to exit dashboard | Use keys O, V, R, S, N, C to switch tabs", 0xFFFFFF);
+            pg.draw_text(10, height - 32, "Press 'Q' to exit dashboard | Use keys O, V, R, S, N, D, C to switch tabs", 0xFFFFFF);
 
             // Update and draw cursor
             self.cursor.update_from_mouse(width, height);
@@ -457,6 +534,7 @@ impl DashboardUI {
                 DashboardTab::Storage => self.draw_storage(),
                 DashboardTab::Network => self.draw_network(),
                 DashboardTab::Console => self.draw_console(),
+                DashboardTab::Devices => {},
             }
 
             self.draw_footer();
@@ -675,6 +753,84 @@ impl DashboardUI {
             .count()
     }
 
+    pub fn refresh_devices(&mut self) {
+        let device_map = &crate::filesystem::FileSystem::get_state().device_map;
+        
+        // Group devices by categories
+        let mut disks = Vec::new();
+        let mut nets = Vec::new();
+        let mut usbs = Vec::new();
+        let mut coms = Vec::new();
+        let mut pcis = Vec::new();
+        let mut others = Vec::new();
+        
+        for (alias, path) in device_map {
+            let entry = DeviceEntry { name: alias.clone(), path: path.clone() };
+            if alias.starts_with("dsk") { disks.push(entry); }
+            else if alias.starts_with("net") { nets.push(entry); }
+            else if alias.starts_with("usb") { usbs.push(entry); }
+            else if alias.starts_with("com") { coms.push(entry); }
+            else if alias.starts_with("pci") { pcis.push(entry); }
+            else { others.push(entry); }
+        }
+        
+        // Preserve expansion state if categories already exist
+        let mut expanded_map = alloc::collections::BTreeMap::new();
+        for cat in &self.categories {
+            expanded_map.insert(cat.name.clone(), cat.expanded);
+        }
+        
+        self.categories.clear();
+        if !disks.is_empty() {
+            self.categories.push(DeviceCategory {
+                name: String::from("Disk Drives"),
+                devices: disks,
+                expanded: *expanded_map.get("Disk Drives").unwrap_or(&true),
+                icon: String::from("[D] "),
+            });
+        }
+        if !nets.is_empty() {
+            self.categories.push(DeviceCategory {
+                name: String::from("Network Adapters"),
+                devices: nets,
+                expanded: *expanded_map.get("Network Adapters").unwrap_or(&true),
+                icon: String::from("[N] "),
+            });
+        }
+        if !usbs.is_empty() {
+            self.categories.push(DeviceCategory {
+                name: String::from("USB Controllers"),
+                devices: usbs,
+                expanded: *expanded_map.get("USB Controllers").unwrap_or(&true),
+                icon: String::from("[U] "),
+            });
+        }
+        if !coms.is_empty() {
+            self.categories.push(DeviceCategory {
+                name: String::from("Serial Ports"),
+                devices: coms,
+                expanded: *expanded_map.get("Serial Ports").unwrap_or(&true),
+                icon: String::from("[C] "),
+            });
+        }
+        if !pcis.is_empty() {
+            self.categories.push(DeviceCategory {
+                name: String::from("PCI Devices"),
+                devices: pcis,
+                expanded: *expanded_map.get("PCI Devices").unwrap_or(&false),
+                icon: String::from("[P] "),
+            });
+        }
+        if !others.is_empty() {
+            self.categories.push(DeviceCategory {
+                name: String::from("Other Devices"),
+                devices: others,
+                expanded: *expanded_map.get("Other Devices").unwrap_or(&false),
+                icon: String::from("[?] "),
+            });
+        }
+    }
+
     pub fn refresh_storage(&mut self) {
         use uefi::proto::media::file::{File, FileMode, FileAttribute};
         use uefi::proto::media::fs::SimpleFileSystem;
@@ -755,6 +911,7 @@ impl DashboardUI {
                     'r' => self.selected_tab = DashboardTab::Resources,
                     's' => self.selected_tab = DashboardTab::Storage,
                     'n' => self.selected_tab = DashboardTab::Network,
+                    'd' => self.selected_tab = DashboardTab::Devices,
                     'c' => self.selected_tab = DashboardTab::Console,
                     '\r' | '\n' => {
                         if matches!(self.selected_tab, DashboardTab::Storage) {
@@ -783,6 +940,28 @@ impl DashboardUI {
                                     self.refresh_storage();
                                 }
                             }
+                        } else if matches!(self.selected_tab, DashboardTab::Devices) {
+                             // Toggle expansion
+                             let mut current_idx = 0;
+                             let mut found = false;
+                             for i in 0..self.categories.len() {
+                                 if current_idx == self.selected_device_idx {
+                                     self.categories[i].expanded = !self.categories[i].expanded;
+                                     break;
+                                 }
+                                 current_idx += 1;
+                                 if self.categories[i].expanded {
+                                     for _ in &self.categories[i].devices {
+                                         if current_idx == self.selected_device_idx {
+                                             // Can't toggle a device, only categories
+                                             found = true;
+                                             break;
+                                         }
+                                         current_idx += 1;
+                                     }
+                                 }
+                                 if found { break; }
+                             }
                         }
                     }
                     _ => {}
@@ -792,6 +971,10 @@ impl DashboardUI {
                 if matches!(self.selected_tab, DashboardTab::Storage) {
                     if self.selected_file_idx > 0 {
                         self.selected_file_idx -= 1;
+                    }
+                } else if matches!(self.selected_tab, DashboardTab::Devices) {
+                    if self.selected_device_idx > 0 {
+                        self.selected_device_idx -= 1;
                     }
                 } else {
                     if self.scroll_offset > 0 {
@@ -803,6 +986,17 @@ impl DashboardUI {
                 if matches!(self.selected_tab, DashboardTab::Storage) {
                     if self.selected_file_idx < self.files.len().saturating_sub(1) {
                         self.selected_file_idx += 1;
+                    }
+                } else if matches!(self.selected_tab, DashboardTab::Devices) {
+                    let mut total_rows = 0;
+                    for cat in &self.categories {
+                        total_rows += 1;
+                        if cat.expanded {
+                            total_rows += cat.devices.len();
+                        }
+                    }
+                    if self.selected_device_idx < total_rows.saturating_sub(1) {
+                        self.selected_device_idx += 1;
                     }
                 } else {
                     if self.scroll_offset < self.vms.len().saturating_sub(1) {
@@ -823,7 +1017,8 @@ impl DashboardUI {
                 else if x < 280 { self.selected_tab = DashboardTab::Resources; }
                 else if x < 380 { self.selected_tab = DashboardTab::Storage; }
                 else if x < 480 { self.selected_tab = DashboardTab::Network; }
-                else if x < 580 { self.selected_tab = DashboardTab::Console; }
+                else if x < 580 { self.selected_tab = DashboardTab::Devices; }
+                else if x < 680 { self.selected_tab = DashboardTab::Console; }
             }
         }
     }
