@@ -4,3 +4,6 @@ A bare-metal (+BIOS&EFI) hardware provisioning and virtualization manager writte
 
 ![image](/src/hpvmx_image.png)
 
+
+![img](img.png)
+![img1](img_1.png)
