@@ -856,6 +856,7 @@ fn run_efi_application(efi_path: &str, args: &[&str]) {
 /// Display the dashboard UI
 fn show_dashboard_ui() {
     let mut dashboard = DashboardUI::new();
+    dashboard.refresh_storage();
 
     // Populate dashboard with VM information
     unsafe {
@@ -887,13 +888,52 @@ fn show_dashboard_ui() {
     }
 
     // Enter dashboard interaction loop
+    let mut last_refresh = 0;
     loop {
+        // Limit frame rate to ~60Hz (16,666 microseconds)
+        boot::stall(core::time::Duration::from_micros(16_666));
+
+        // Periodically refresh data from hypervisor
+        last_refresh += 1;
+        if last_refresh >= 60 { // Refresh roughly every second
+            unsafe {
+                if let Some(ref hv) = HYPERVISOR {
+                    dashboard.vms.clear();
+                    let vms = hv.list_vms();
+                    for (id, name, state) in vms {
+                        dashboard.add_vm(ui::VmDisplayInfo {
+                            id,
+                            name: name.to_string(),
+                            state: state.to_string(),
+                            cpu_usage: 25,
+                            memory_usage_mb: 512,
+                            disk_usage_mb: 10240,
+                            uptime_seconds: 3600,
+                        });
+                    }
+                    let stats = hv.get_stats();
+                    dashboard.set_resources(ui::SystemResources {
+                        total_memory_mb: stats.total_memory_mb,
+                        used_memory_mb: stats.total_memory_mb / 2,
+                        cpu_count: 8,
+                        cpu_usage: 35,
+                    });
+                }
+            }
+            dashboard.refresh_storage();
+            last_refresh = 0;
+        }
+
         dashboard.draw();
 
-        let mut events = [uefi::system::with_stdin(|i| i.wait_for_key_event().unwrap())];
-        uefi::boot::wait_for_event(&mut events).unwrap();
+        let key = uefi::system::with_stdin(|i| {
+            match i.read_key() {
+                Ok(Some(key)) => Some(key),
+                _ => None,
+            }
+        });
 
-        if let Some(key) = uefi::system::with_stdin(|i| i.read_key().unwrap()) {
+        if let Some(key) = key {
             dashboard.handle_input(key);
 
             // Check if user wants to exit dashboard

@@ -26,15 +26,15 @@ impl Cursor {
         }
     }
 
-    pub fn update_from_mouse(&mut self) {
+    pub fn update_from_mouse(&mut self, screen_width: usize, screen_height: usize) {
         // Strategy: Try Absolute Pointer first, then fall back to Simple (Relative) Pointer
 
-        if !self.try_update_absolute() {
-            self.try_update_relative();
+        if !self.try_update_absolute(screen_width, screen_height) {
+            self.try_update_relative(screen_width, screen_height);
         }
     }
 
-    fn try_update_absolute(&mut self) -> bool {
+    fn try_update_absolute(&mut self, screen_width: usize, screen_height: usize) -> bool {
         if let Ok(handle) = uefi::boot::get_handle_for_protocol::<Pointer>() {
             if let Ok(mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) {
                 let mode = &mut mouse.mode();
@@ -42,12 +42,12 @@ impl Cursor {
                     return false;
                 };
                 if let Ok(Some(state)) = mouse2.read_state() {
-                    // Map absolute hardware coordinates to our 120x40 text grid
+                    // Map absolute hardware coordinates to our screen pixels
                     if mode.resolution[0] > 0 {
-                        self.x = ((state.relative_movement[0] as u64 * 120) / mode.resolution[0]) as i32;
+                        self.x = ((state.relative_movement[0] as u64 * screen_width as u64) / mode.resolution[0]) as i32;
                     }
                     if mode.resolution[1] > 0 {
-                        self.y = ((state.relative_movement[1] as u64 * 40) / mode.resolution[1]) as i32;
+                        self.y = ((state.relative_movement[1] as u64 * screen_height as u64) / mode.resolution[1]) as i32;
                     }
                     self.left_button = state.button[0];
                     self.right_button = state.button[1];
@@ -58,7 +58,7 @@ impl Cursor {
         false
     }
 
-    fn try_update_relative(&mut self) {
+    fn try_update_relative(&mut self, screen_width: usize, screen_height: usize) {
         if let Ok(handle) = uefi::boot::get_handle_for_protocol::<SimplePointer>() {
             if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<SimplePointer>(handle) {
                 if let Ok(Some(state)) = mouse.read_state() {
@@ -66,9 +66,9 @@ impl Cursor {
                     self.x = self.x.saturating_add(state.relative_movement[0]);
                     self.y = self.y.saturating_add(state.relative_movement[1]);
 
-                    // Clamp to the 120x40 grid
-                    self.x = self.x.max(0).min(640);
-                    self.y = self.y.max(0).min(480);
+                    // Clamp to the screen pixels
+                    self.x = self.x.max(0).min(screen_width as i32);
+                    self.y = self.y.max(0).min(screen_height as i32);
 
                     self.left_button = state.button[0];
                     self.right_button = state.button[1];

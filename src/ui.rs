@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::proto::console::text::{Color, Key, ScanCode};
 
@@ -28,7 +28,8 @@ impl Window {
     }
 
     pub fn draw(&self) {
-        if let Some(mut pg) = pixel_graphics::PixelGraphics::new() {
+        if let Some(pg) = pixel_graphics::PixelGraphics::new() {
+            let mut pg = pg;
             pg.fill_rect(self.rect.x * 8, self.rect.y * 16, self.rect.width * 8, self.rect.height * 16, 0xCCCCCC);
             pg.draw_text(self.rect.x * 8 + 4, self.rect.y * 16 + 4, &self.title, 0x000000);
         } else {
@@ -55,7 +56,8 @@ impl Button {
     }
 
     pub fn draw(&self) {
-        if let Some(mut pg) = pixel_graphics::PixelGraphics::new() {
+        if let Some(pg) = pixel_graphics::PixelGraphics::new() {
+            let mut pg = pg;
             let bg = if self.focused { 0xFFFFFF } else { 0xBBBBBB };
             pg.fill_rect(self.rect.x * 8, self.rect.y * 16, self.rect.width * 8, self.rect.height * 16, bg);
             pg.draw_text(self.rect.x * 8 + 10, self.rect.y * 16 + 8, &self.label, 0x000000);
@@ -291,11 +293,22 @@ pub mod resource_monitor;
 pub mod console;
 
 
+#[derive(Clone, Debug)]
+pub struct FileEntry {
+    pub name: String,
+    pub size: u64,
+    pub is_dir: bool,
+}
+
 pub struct DashboardUI {
     selected_tab: DashboardTab,
-    vms: Vec<VmDisplayInfo>,
-    resources: SystemResources,
+    pub vms: Vec<VmDisplayInfo>,
+    pub resources: SystemResources,
     scroll_offset: usize,
+    cursor: crate::graphics::Cursor,
+    pub current_path: String,
+    pub files: Vec<FileEntry>,
+    pub selected_file_idx: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -337,6 +350,10 @@ impl DashboardUI {
                 cpu_usage: 0,
             },
             scroll_offset: 0,
+            cursor: crate::graphics::Cursor::new(),
+            current_path: String::from("\\"),
+            files: Vec::new(),
+            selected_file_idx: 0,
         }
     }
 
@@ -348,34 +365,86 @@ impl DashboardUI {
         self.resources = resources;
     }
 
-    pub fn draw(&self) {
-        if let Some(mut pg) = pixel_graphics::PixelGraphics::new() {
+    pub fn draw(&mut self) {
+        if let Some(pg) = pixel_graphics::PixelGraphics::new() {
+            let mut pg = pg.with_backbuffer();
+            let (width, height) = pg.resolution();
+            
             // Draw background
-            pg.clear(0x000000);
+            pg.clear(0x222222);
 
             // Draw header
-            pg.fill_rect(0, 0, 800, 48, 0x008080); // Cyan-ish
-            pg.draw_text(100, 16, "HPVMx - Hypervisor Management Console", 0xFFFFFF);
+            pg.fill_rect(0, 0, width, 48, 0x008080); // Cyan-ish
+            pg.draw_text(width / 2 - 160, 16, "HPVMx - Hypervisor Management Console", 0xFFFFFF);
 
             // Draw navigation
-            pg.fill_rect(0, 48, 800, 32, 0x808080); // Gray
-            pg.draw_text(10, 56, "O Overview | V VMs | R Resources | S Storage | N Network | C Console", 0xFFFFFF);
+            pg.fill_rect(0, 48, width, 32, 0x444444); // Dark Gray
+            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | C Console";
+            pg.draw_text(10, 56, nav_text, 0xFFFFFF);
 
             // Content area based on selected tab
             match self.selected_tab {
                 DashboardTab::Overview => {
                     pg.draw_text(20, 100, "System Overview", 0x00FF00);
-                    pg.draw_text(20, 130, "CPU: 35%", 0xFFFFFF);
-                    pg.draw_text(20, 150, "Memory: 4096 / 8192 MB", 0xFFFFFF);
+                    pg.draw_text(20, 130, &alloc::format!("CPU Count: {}", self.resources.cpu_count), 0xFFFFFF);
+                    pg.draw_text(20, 150, &alloc::format!("CPU Usage: {}%", self.resources.cpu_usage), 0xFFFFFF);
+                    pg.draw_text(20, 170, &alloc::format!("Memory: {} / {} MB", self.resources.used_memory_mb, self.resources.total_memory_mb), 0xFFFFFF);
+                    pg.draw_text(20, 190, &alloc::format!("Total VMs: {}", self.vms.len()), 0xFFFFFF);
+                }
+                DashboardTab::VirtualMachines => {
+                    pg.draw_text(20, 100, "Virtual Machines", 0x00FF00);
+                    let mut y = 130;
+                    pg.draw_text(20, y, "ID   NAME             STATE        CPU  MEM", 0xAAAAAA);
+                    y += 20;
+                    for vm in &self.vms {
+                        let info = alloc::format!("{:<4} {:<16} {:<12} {:>3}% {:>5}MB", 
+                            vm.id, vm.name, vm.state, vm.cpu_usage, vm.memory_usage_mb);
+                        pg.draw_text(20, y, &info, 0xFFFFFF);
+                        y += 20;
+                        if y > height - 60 { break; }
+                    }
+                }
+                DashboardTab::Resources => {
+                    pg.draw_text(20, 100, "Resource Monitor", 0x00FF00);
+                    pg.draw_text(20, 130, "CPU Usage per Core:", 0xFFFFFF);
+                    // Mock cores
+                    for i in 0..self.resources.cpu_count {
+                        pg.draw_text(40, 150 + (i as usize * 20), &alloc::format!("Core {}: 25%", i), 0xCCCCCC);
+                    }
+                }
+                DashboardTab::Storage => {
+                    pg.draw_text(20, 100, "File Explorer", 0x00FF00);
+                    pg.draw_text(20, 130, &alloc::format!("Path: {}", self.current_path), 0xAAAAAA);
+                    
+                    let mut y = 160;
+                    pg.draw_text(20, y, "NAME                           SIZE (BYTES)  ATTR", 0x888888);
+                    y += 20;
+                    
+                    for (i, entry) in self.files.iter().enumerate() {
+                        let color = if i == self.selected_file_idx { 0xFFFF00 } else { 0xFFFFFF };
+                        let icon = if entry.is_dir { "[D]" } else { "[F]" };
+                        let info = alloc::format!("{:<3} {:<30} {:>12}  {}", 
+                            icon, entry.name, entry.size, if entry.is_dir { "DIR" } else { "FILE" });
+                        
+                        pg.draw_text(20, y, &info, color);
+                        y += 20;
+                        if y > height - 100 { break; }
+                    }
                 }
                 _ => {
-                    pg.draw_text(20, 100, "Tab implementation in progress...", 0x888888);
+                    pg.draw_text(20, 100, &alloc::format!("{:?} implementation in progress...", self.selected_tab), 0x888888);
                 }
             }
 
             // Draw footer
-            pg.fill_rect(0, 552, 800, 48, 0x000080); // Blue
-            pg.draw_text(10, 568, "Press 'Q' to exit dashboard", 0xFFFFFF);
+            pg.fill_rect(0, height - 48, width, 48, 0x000080); // Blue
+            pg.draw_text(10, height - 32, "Press 'Q' to exit dashboard | Use keys O, V, R, S, N, C to switch tabs", 0xFFFFFF);
+
+            // Update and draw cursor
+            self.cursor.update_from_mouse(width, height);
+            pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
+
+            pg.flip();
 
         } else {
             self.draw_header();
@@ -606,6 +675,74 @@ impl DashboardUI {
             .count()
     }
 
+    pub fn refresh_storage(&mut self) {
+        use uefi::proto::media::file::{File, FileMode, FileAttribute};
+        use uefi::proto::media::fs::SimpleFileSystem;
+
+        self.files.clear();
+
+        let handle = match uefi::boot::get_handle_for_protocol::<SimpleFileSystem>() {
+            Ok(h) => h,
+            Err(_) => return,
+        };
+        let mut sfs = match uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let mut root_dir = match sfs.open_volume() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+
+        let mut target_dir = if self.current_path == "\\" || self.current_path == "/" {
+            root_dir
+        } else {
+            let mut u16_path: Vec<u16> = self.current_path.encode_utf16().collect();
+            u16_path.push(0);
+            let path_cstr = match uefi::data_types::CStr16::from_u16_with_nul(&u16_path) {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+
+            let handle = match root_dir.open(path_cstr, FileMode::Read, FileAttribute::DIRECTORY) {
+                Ok(h) => h,
+                Err(_) => return,
+            };
+
+            match handle.into_directory() {
+                Some(d) => d,
+                None => return,
+            }
+        };
+
+        let mut buffer = [0u8; 4096];
+        loop {
+            match target_dir.read_entry(&mut buffer) {
+                Ok(Some(entry)) => {
+                    let name = entry.file_name().to_string();
+                    let size = entry.file_size();
+                    let is_dir = entry.attribute().contains(FileAttribute::DIRECTORY);
+                    
+                    self.files.push(FileEntry {
+                        name,
+                        size,
+                        is_dir,
+                    });
+                }
+                _ => break,
+            }
+        }
+
+        // Clamp selected index to new list size
+        if !self.files.is_empty() {
+            if self.selected_file_idx >= self.files.len() {
+                self.selected_file_idx = self.files.len() - 1;
+            }
+        } else {
+            self.selected_file_idx = 0;
+        }
+    }
+
     pub fn handle_input(&mut self, key: Key) {
         use uefi::proto::console::text::ScanCode;
 
@@ -619,20 +756,75 @@ impl DashboardUI {
                     's' => self.selected_tab = DashboardTab::Storage,
                     'n' => self.selected_tab = DashboardTab::Network,
                     'c' => self.selected_tab = DashboardTab::Console,
+                    '\r' | '\n' => {
+                        if matches!(self.selected_tab, DashboardTab::Storage) {
+                            if self.selected_file_idx < self.files.len() {
+                                let entry = &self.files[self.selected_file_idx];
+                                if entry.is_dir {
+                                    if entry.name == "." {
+                                        // Do nothing
+                                    } else if entry.name == ".." {
+                                        // Go up
+                                        if let Some(pos) = self.current_path.rfind('\\') {
+                                            if pos == 0 {
+                                                self.current_path = String::from("\\");
+                                            } else {
+                                                self.current_path.truncate(pos);
+                                            }
+                                        }
+                                    } else {
+                                        // Go down
+                                        if !self.current_path.ends_with('\\') {
+                                            self.current_path.push('\\');
+                                        }
+                                        self.current_path.push_str(&entry.name);
+                                    }
+                                    self.selected_file_idx = 0;
+                                    self.refresh_storage();
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
             Key::Special(ScanCode::UP) => {
-                if self.scroll_offset > 0 {
-                    self.scroll_offset -= 1;
+                if matches!(self.selected_tab, DashboardTab::Storage) {
+                    if self.selected_file_idx > 0 {
+                        self.selected_file_idx -= 1;
+                    }
+                } else {
+                    if self.scroll_offset > 0 {
+                        self.scroll_offset -= 1;
+                    }
                 }
             }
             Key::Special(ScanCode::DOWN) => {
-                if self.scroll_offset < self.vms.len().saturating_sub(1) {
-                    self.scroll_offset += 1;
+                if matches!(self.selected_tab, DashboardTab::Storage) {
+                    if self.selected_file_idx < self.files.len().saturating_sub(1) {
+                        self.selected_file_idx += 1;
+                    }
+                } else {
+                    if self.scroll_offset < self.vms.len().saturating_sub(1) {
+                        self.scroll_offset += 1;
+                    }
                 }
             }
             _ => {}
+        }
+        
+        // Handle mouse clicks for tab switching
+        if self.cursor.left_button {
+            if self.cursor.y >= 48 && self.cursor.y <= 80 {
+                // Crude tab switching based on X position
+                let x = self.cursor.x;
+                if x < 100 { self.selected_tab = DashboardTab::Overview; }
+                else if x < 180 { self.selected_tab = DashboardTab::VirtualMachines; }
+                else if x < 280 { self.selected_tab = DashboardTab::Resources; }
+                else if x < 380 { self.selected_tab = DashboardTab::Storage; }
+                else if x < 480 { self.selected_tab = DashboardTab::Network; }
+                else if x < 580 { self.selected_tab = DashboardTab::Console; }
+            }
         }
     }
 }
