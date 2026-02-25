@@ -11,6 +11,7 @@ mod vm_manager;
 mod terminal;
 
 pub use graphics::{Graphics, Rect};
+use crate::message;
 
 pub struct Window {
     pub title: String,
@@ -151,6 +152,15 @@ pub struct WinNTShell {
     pub listbox: Option<ListBox>,
     pub focused_button: usize,
     pub focused_textbox: usize,
+    focus_target: FocusTarget,
+    exit_requested: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FocusTarget {
+    TextBox,
+    Button,
+    ListBox,
 }
 
 impl WinNTShell {
@@ -162,6 +172,8 @@ impl WinNTShell {
             listbox: None,
             focused_button: 0,
             focused_textbox: 0,
+            focus_target: FocusTarget::TextBox,
+            exit_requested: false,
         }
     }
 
@@ -195,6 +207,11 @@ impl WinNTShell {
         output_list.add_item("HPVMx v0.1.0 - Shell Interface");
         output_list.add_item("Type 'help' for available commands");
         self.listbox = Some(output_list);
+
+        if !self.textboxes.is_empty() {
+            self.focus_textbox(0);
+        }
+        self.exit_requested = false;
     }
 
     pub fn draw(&self) {
@@ -220,6 +237,7 @@ impl WinNTShell {
             button.focused = i == idx;
         }
         self.focused_button = idx;
+        self.focus_target = FocusTarget::Button;
     }
 
     pub fn focus_textbox(&mut self, idx: usize) {
@@ -227,36 +245,129 @@ impl WinNTShell {
             textbox.focused = i == idx;
         }
         self.focused_textbox = idx;
+        self.focus_target = FocusTarget::TextBox;
+    }
+
+    fn focus_listbox(&mut self) {
+        self.focus_target = FocusTarget::ListBox;
+    }
+
+    fn cycle_focus(&mut self) {
+        let has_textbox = !self.textboxes.is_empty();
+        let has_button = !self.buttons.is_empty();
+        let has_listbox = self.listbox.is_some();
+
+        let mut next = self.focus_target;
+        let mut attempts = 0;
+        while attempts < 3 {
+            next = match next {
+                FocusTarget::TextBox => FocusTarget::Button,
+                FocusTarget::Button => FocusTarget::ListBox,
+                FocusTarget::ListBox => FocusTarget::TextBox,
+            };
+            if (next == FocusTarget::TextBox && has_textbox)
+                || (next == FocusTarget::Button && has_button)
+                || (next == FocusTarget::ListBox && has_listbox)
+            {
+                break;
+            }
+            attempts += 1;
+        }
+
+        match next {
+            FocusTarget::TextBox => {
+                let idx = self.focused_textbox.min(self.textboxes.len().saturating_sub(1));
+                self.focus_textbox(idx);
+            }
+            FocusTarget::Button => {
+                let idx = self.focused_button.min(self.buttons.len().saturating_sub(1));
+                self.focus_button(idx);
+            }
+            FocusTarget::ListBox => self.focus_listbox(),
+        }
     }
 
     pub fn handle_input(&mut self, key: Key) {
         match key {
             Key::Printable(c) => {
-                if self.focused_textbox < self.textboxes.len() {
-                    let ch = char::from(c);
+                let ch = char::from(c);
+                if ch.to_ascii_lowercase() == 'q' {
+                    self.exit_requested = true;
+                    return;
+                }
+                if ch == '\t' {
+                    self.cycle_focus();
+                    return;
+                }
+                if self.focus_target == FocusTarget::TextBox && self.focused_textbox < self.textboxes.len() {
                     if ch != '\r' && ch != '\n' {
                         self.textboxes[self.focused_textbox].add_char(ch);
                     }
                 }
             }
             Key::Special(ScanCode::DELETE) => {
-                if self.focused_textbox < self.textboxes.len() {
+                if self.focus_target == FocusTarget::TextBox && self.focused_textbox < self.textboxes.len() {
                     self.textboxes[self.focused_textbox].backspace();
                 }
             }
             Key::Special(ScanCode::UP) => {
-                if let Some(ref mut listbox) = self.listbox {
-                    listbox.select_prev();
+                if self.focus_target == FocusTarget::ListBox {
+                    if let Some(ref mut listbox) = self.listbox {
+                        listbox.select_prev();
+                    }
+                } else if self.focus_target == FocusTarget::Button && !self.textboxes.is_empty() {
+                    self.focus_textbox(self.focused_textbox);
                 }
             }
             Key::Special(ScanCode::DOWN) => {
-                if let Some(ref mut listbox) = self.listbox {
-                    listbox.select_next();
+                if self.focus_target == FocusTarget::ListBox {
+                    if let Some(ref mut listbox) = self.listbox {
+                        listbox.select_next();
+                    }
+                } else if self.focus_target == FocusTarget::TextBox && self.listbox.is_some() {
+                    self.focus_listbox();
+                }
+            }
+            Key::Special(ScanCode::LEFT) => {
+                if self.focus_target == FocusTarget::Button && !self.buttons.is_empty() {
+                    let next_button = if self.focused_button == 0 {
+                        self.buttons.len() - 1
+                    } else {
+                        self.focused_button - 1
+                    };
+                    self.focus_button(next_button);
+                } else if self.focus_target == FocusTarget::ListBox && !self.buttons.is_empty() {
+                    self.focus_button(self.focused_button);
                 }
             }
             Key::Special(ScanCode::RIGHT) => {
-                let next_button = (self.focused_button + 1) % self.buttons.len();
-                self.focus_button(next_button);
+                if self.focus_target == FocusTarget::Button && !self.buttons.is_empty() {
+                    let next_button = (self.focused_button + 1) % self.buttons.len();
+                    self.focus_button(next_button);
+                } else if self.focus_target == FocusTarget::TextBox && !self.buttons.is_empty() {
+                    self.focus_button(self.focused_button);
+                }
+            }
+            Key::Special(ScanCode::END) => {
+                self.cycle_focus();
+            }
+            Key::Special(ScanCode::HOME) => {
+                if self.focus_target == FocusTarget::Button && self.focused_button < self.buttons.len() {
+                    let label = self.buttons[self.focused_button].label.clone();
+                    self.buttons[self.focused_button].clicked = true;
+                    if label.eq_ignore_ascii_case("ok") {
+                        if let Some(input) = self.get_input() {
+                            if !input.is_empty() {
+                                self.add_output(&alloc::format!("> {}", input));
+                                self.clear_input();
+                            }
+                        }
+                    } else if label.eq_ignore_ascii_case("cancel") {
+                        self.clear_input();
+                    } else {
+                        self.add_output(&alloc::format!("[{}] pressed", label));
+                    }
+                }
             }
             _ => {}
         }
@@ -280,6 +391,10 @@ impl WinNTShell {
         if let Some(ref mut listbox) = self.listbox {
             listbox.add_item(text);
         }
+    }
+
+    pub fn exit_requested(&self) -> bool {
+        self.exit_requested
     }
     
     pub  fn process_mouse(){
@@ -325,6 +440,7 @@ pub struct DashboardUI {
     pub selected_file_idx: usize,
     pub categories: Vec<DeviceCategory>,
     pub selected_device_idx: usize,
+    exit_requested: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -336,6 +452,7 @@ pub enum DashboardTab {
     Network,
     Console,
     Devices,
+    Test,
 }
 
 pub struct VmDisplayInfo {
@@ -373,6 +490,7 @@ impl DashboardUI {
             selected_file_idx: 0,
             categories: Vec::new(),
             selected_device_idx: 0,
+            exit_requested: false,
         }
     }
 
@@ -404,8 +522,16 @@ impl DashboardUI {
 
             // Draw navigation
             pg.fill_rect(0, 48, width, 32, 0x444444); // Dark Gray
-            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console";
+            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test";
             pg.draw_text(10, 56, nav_text, 0xFFFFFF);
+
+            // Layout constants for consistent spacing across tabs
+            let header_h = 48usize;
+            let nav_h = 32usize;
+            let content_top = header_h + nav_h; // 80px from top
+            let margin = 16usize; // outer margin
+            let gutter = 12usize; // space between widgets/rows
+            let line_h = 20usize; // standard text line height
 
             // Content area based on selected tab
             match self.selected_tab {
@@ -417,33 +543,70 @@ impl DashboardUI {
                     pg.draw_text(20, 190, &alloc::format!("Total VMs: {}", self.vms.len()), 0xFFFFFF);
                 }
                 DashboardTab::VirtualMachines => {
-                    pg.draw_text(20, 100, "Virtual Machines", 0x00FF00);
-                    let mut y = 130;
-                    pg.draw_text(20, y, "ID   NAME             STATE        CPU  MEM", 0xAAAAAA);
-                    y += 20;
+                    // Title
+                    pg.draw_text(margin, content_top + margin + 4, "Virtual Machines", 0x00FF00);
+
+                    // Table frame
+                    let table_x = margin;
+                    let table_y = content_top + margin + 24;
+                    let table_w = core::cmp::min(width - margin * 2, 760);
+                    let table_h = core::cmp::min(height - table_y - 80, 260);
+                    pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0x888888);
+
+                    // Header background
+                    pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
+                    pg.draw_text(table_x + 8, table_y + 4, "ID   NAME             STATE        CPU  MEM", 0xCCCCCC);
+
+                    // Rows
+                    let mut y = table_y + line_h + gutter;
                     for vm in &self.vms {
-                        let info = alloc::format!("{:<4} {:<16} {:<12} {:>3}% {:>5}MB", 
+                        if y + line_h > table_y + table_h - 2 { break; }
+                        let info = alloc::format!("{:<4} {:<16} {:<12} {:>3}% {:>5}MB",
                             vm.id, vm.name, vm.state, vm.cpu_usage, vm.memory_usage_mb);
-                        pg.draw_text(20, y, &info, 0xFFFFFF);
-                        y += 20;
-                        if y > height - 60 { break; }
+                        pg.draw_text(table_x + 8, y, &info, 0xFFFFFF);
+                        y += line_h;
                     }
                 }
                 DashboardTab::Resources => {
-                    pg.draw_text(20, 100, "Resource Monitor", 0x00FF00);
-                    pg.draw_text(20, 130, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
-                    pg.draw_text(20, 150, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
-                    pg.draw_text(20, 170, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
-                    
-                    // Draw memory usage bar
-                    pg.draw_text(20, 200, "Memory Usage:", 0xCCCCCC);
-                    pg.fill_rect(150, 200, 200, 20, 0x444444);
-                    let usage_width = (200 * self.resources.used_memory_mb) / self.resources.total_memory_mb.max(1);
-                    pg.fill_rect(150, 200, usage_width as usize, 20, 0x00FF00);
+                    // Left info panel
+                    let panel_x = margin;
+                    let panel_y = content_top + margin;
+                    let panel_w = 360usize;
+                    let panel_h = 180usize;
+                    pg.draw_text(panel_x, panel_y - 4, "Resource Monitor", 0x00FF00);
+                    pg.draw_rect_outline(panel_x, panel_y, panel_w, panel_h, 0x888888);
+                    pg.draw_text(panel_x + 10, panel_y + 16, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
+                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
+                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h * 2, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
 
-                    pg.draw_text(20, 240, "CPU Usage per Core (Mocked):", 0xFFFFFF);
+                    // Memory usage bar with spacing
+                    let bar_y = panel_y + 16 + line_h * 3 + gutter;
+                    pg.draw_text(panel_x + 10, bar_y, "Memory Usage:", 0xCCCCCC);
+                    let bar_x = panel_x + 10 + 130;
+                    let bar_w = 200usize;
+                    let bar_h = 20usize;
+                    // Use real values for progress bar (value/max) and let widget compute width
+                    pg.draw_progress_bar(
+                        bar_x,
+                        bar_y,
+                        bar_w,
+                        bar_h,
+                        self.resources.used_memory_mb as usize,
+                        self.resources.total_memory_mb as usize,
+                        0x00FF00,
+                    );
+
+                    // Right CPU core list panel
+                    let right_x = panel_x + panel_w + gutter * 2;
+                    let right_y = panel_y;
+                    let right_w = core::cmp::min(width - right_x - margin, 360);
+                    let right_h = core::cmp::min(height - right_y - 100, 220);
+                    pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
+                    pg.draw_text(right_x + 10, right_y - 4, "CPU Usage per Core (Mocked):", 0xFFFFFF);
                     for i in 0..self.resources.cpu_count {
-                        pg.draw_text(40, 260 + (i as usize * 20), &alloc::format!("Core {}: 25%", i), 0xCCCCCC);
+                        let row_y = right_y + 16 + (i as usize * line_h);
+                        if row_y + line_h > right_y + right_h - 8 { break; }
+                        pg.draw_text(right_x + 10, row_y, &alloc::format!("Core {}: 25%", i), 0xCCCCCC);
                     }
                 }
                 DashboardTab::Network => {
@@ -483,7 +646,7 @@ impl DashboardUI {
                         if cat.expanded {
                             for dev in &cat.devices {
                                 let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xFFFFFF };
-                                pg.draw_text(40, y, &alloc::format!("└─ {}: {}", dev.name, dev.path), color);
+                                pg.draw_text(40, y, &alloc::format!("Ð {}: {}", dev.name, dev.path), color);
                                 y += 20;
                                 current_idx += 1;
                                 if y > height - 60 { break; }
@@ -493,29 +656,140 @@ impl DashboardUI {
                     }
                 }
                 DashboardTab::Storage => {
-                    pg.draw_text(20, 100, "File Explorer", 0x00FF00);
-                    pg.draw_text(20, 130, &alloc::format!("Path: {}", self.current_path), 0xAAAAAA);
-                    
-                    let mut y = 160;
-                    pg.draw_text(20, y, "NAME                           SIZE (BYTES)  ATTR", 0x888888);
-                    y += 20;
-                    
+                    // Title and path
+                    let base_y = content_top + margin;
+                    pg.draw_text(margin, base_y - 4, "File Explorer", 0x00FF00);
+                    pg.draw_text(margin, base_y + 8, &alloc::format!("Path: {}", self.current_path), 0xAAAAAA);
+
+                    // Table area
+                    let list_x = margin;
+                    let list_y = base_y + 28;
+                    let list_w = core::cmp::min(width - margin * 2, 760);
+                    let list_h = core::cmp::min(height - list_y - 90, 360);
+                    pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
+
+                    // Header row with better spacing and column guides
+                    pg.fill_rect(list_x + 1, list_y + 1, list_w - 2, line_h, 0x333333);
+                    pg.draw_text(list_x + 8, list_y + 4, "TYPE  NAME                                      SIZE (BYTES)  ATTR", 0xCCCCCC);
+                    // Optional column separators
+                    pg.draw_line(list_x + 48, list_y + 1, list_x + 48, list_y + list_h - 1, 0x444444);
+                    pg.draw_line(list_x + 340, list_y + 1, list_x + 340, list_y + list_h - 1, 0x444444);
+
+                    // Rows
+                    let mut y = list_y + line_h + gutter;
                     for (i, entry) in self.files.iter().enumerate() {
+                        if y + line_h > list_y + list_h - 2 { break; }
                         let color = if i == self.selected_file_idx { 0xFFFF00 } else { 0xFFFFFF };
-                        let icon = if entry.is_dir { "[D]" } else { "[F]" };
-                        let info = alloc::format!("{:<3} {:<30} {:>12}  {}", 
-                            icon, entry.name, entry.size, if entry.is_dir { "DIR" } else { "FILE" });
-                        
-                        pg.draw_text(20, y, &info, color);
-                        y += 20;
-                        if y > height - 100 { break; }
+                        let icon = if entry.is_dir { "Ñ D" } else { "Ç F" };
+                        pg.draw_text(list_x + 8, y, icon, 0xCCCCCC);
+                        pg.draw_text(list_x + 56, y, &alloc::format!("{:<28}", entry.name), color);
+                        pg.draw_text(list_x + 348, y, &alloc::format!("{:>12}", entry.size), 0xCCCCCC);
+                        pg.draw_text(list_x + 480, y, if entry.is_dir { "DIR" } else { "FILE" }, 0x6666FF);
+                        y += line_h;
                     }
+                }
+                DashboardTab::Test => {
+                    pg.draw_text(20, 100, "UI Components Test Bed (Qt6 Style)", 0x00FF00);
+                    
+                    // Column 1
+                    let mut y = 130;
+                    pg.draw_text(20, y, "Buttons & Inputs:", 0xAAAAAA); y += 25;
+                    pg.fill_rect(20, y, 100, 25, 0x444444); pg.draw_text(25, y+5, "Push Button", 0xFFFFFF);
+                    pg.fill_rect(130, y, 30, 25, 0x444444); pg.draw_text(138, y+5, "?", 0xFFFFFF); // ToolButton
+                    y += 35;
+                    
+                    pg.draw_checkbox(20, y, true); pg.draw_text(40, y, "CheckBox (Checked)", 0xFFFFFF); y += 25;
+                    pg.draw_checkbox(20, y, false); pg.draw_text(40, y, "CheckBox (Unchecked)", 0xFFFFFF); y += 25;
+                    
+                    pg.draw_radio_button(20, y, true); pg.draw_text(40, y, "RadioButton 1", 0xFFFFFF); y += 25;
+                    pg.draw_radio_button(20, y, false); pg.draw_text(40, y, "RadioButton 2", 0xFFFFFF); y += 35;
+                    
+                    pg.draw_text(20, y, "LineEdit:", 0xAAAAAA); y += 20;
+                    pg.draw_rect_outline(20, y, 150, 20, 0x888888); pg.fill_rect(21, y+1, 148, 18, 0xFFFFFF);
+                    pg.draw_text(25, y+2, "Editable text..ſ", 0x000000); y += 30;
+                    
+                    pg.draw_text(20, y, "SpinBox / DoubleSpinBox:", 0xAAAAAA); y += 20;
+                    pg.draw_rect_outline(20, y, 60, 20, 0x888888); pg.draw_text(25, y+2, "42", 0xFFFFFF); pg.draw_text(65, y+2, "[^v]", 0xAAAAAA);
+                    pg.draw_rect_outline(100, y, 60, 20, 0x888888); pg.draw_text(105, y+2, "3.14", 0xFFFFFF); y += 30;
+
+                    // Column 2
+                    let mut y = 130;
+                    let x2 = 250;
+                    pg.draw_text(x2, y, "Sliders & Progress:", 0xAAAAAA); y += 25;
+                    pg.draw_slider(x2, y, 150, 40, 100, false); y += 25; // Horizontal Slider
+                    pg.draw_slider(x2 + 160, 130, 100, 30, 100, true); // Vertical Slider
+                    
+                    pg.draw_text(x2, y, "Progress Bar:", 0xAAAAAA); y += 20;
+                    pg.draw_progress_bar(x2, y, 150, 20, 65, 100, 0x00FF00); y += 35;
+                    
+                    pg.draw_text(x2, y, "LCD Number:", 0xAAAAAA); y += 20;
+                    pg.draw_lcd_number(x2, y, "123.45"); y += 40;
+                    
+                    pg.draw_text(x2, y, "ScrollBars:", 0xAAAAAA); y += 20;
+                    pg.draw_rect_outline(x2, y, 150, 15, 0x444444); pg.fill_rect(x2 + 40, y + 1, 30, 13, 0x888888); // H Scroll
+                    y += 25;
+                    
+                    pg.draw_text(x2, y, "Date/Time Edits:", 0xAAAAAA); y += 20;
+                    pg.draw_text(x2, y, "2026-02-23 10:25", 0x00FFFF); y += 30;
+
+                    // Column 3
+                    let mut y = 130;
+                    let x3 = 500;
+                    pg.draw_text(x3, y, "Complex Views (Mock):", 0xAAAAAA); y += 25;
+                    pg.draw_rect_outline(x3, y, 200, 60, 0x888888); // ListView
+                    pg.draw_text(x3 + 5, y + 5, "ListView Item A", 0xFFFFFF);
+                    pg.draw_text(x3 + 5, y + 25, "ListView Item B", 0xFFFF00);
+                    pg.draw_text(x3 + 5, y + 45, "ListView Item C", 0xFFFFFF);
+                    y += 70;
+                    
+                    pg.draw_rect_outline(x3, y, 200, 60, 0x888888); // TreeView
+                    pg.draw_text(x3 + 5, y + 5, "[-] Root", 0xFFFFFF);
+                    pg.draw_text(x3 + 20, y + 25, " └─ Child 1", 0xAAAAAA);
+                    pg.draw_text(x3 + 20, y + 45, " └─ Child 2", 0xAAAAAA);
+                    y += 70;
+                    
+                    pg.draw_rect_outline(x3, y, 200, 60, 0x888888); // TableView
+                    pg.draw_line(x3, y + 20, x3 + 200, y + 20, 0x888888);
+                    pg.draw_line(x3 + 60, y, x3 + 60, y + 60, 0x888888);
+                    pg.draw_text(x3 + 5, y + 2, "H1", 0xAAAAAA); pg.draw_text(x3 + 65, y + 2, "Header 2", 0xAAAAAA);
+                    pg.draw_text(x3 + 5, y + 25, "Val 1", 0xFFFFFF); pg.draw_text(x3 + 65, y + 25, "Data 2", 0xFFFFFF);
+                    y += 70;
+
+                    // Group Box & ToolBox
+                    let mut y = 400;
+                    pg.draw_rect_outline(20, y, 200, 100, 0x888888);
+                    pg.fill_rect(30, y - 8, 80, 16, 0x222222);
+                    pg.draw_text(35, y - 8, "GroupBox", 0xAAAAAA);
+                    pg.draw_text(40, y + 20, "Internal content", 0x888888);
+                    
+                    pg.draw_rect_outline(240, y, 200, 100, 0x888888);
+                    pg.fill_rect(240, y, 200, 20, 0x444444); pg.draw_text(245, y + 2, "ToolBox Tab 1 [v]", 0xFFFFFF);
+                    pg.fill_rect(240, y + 80, 200, 20, 0x444444); pg.draw_text(245, y + 82, "ToolBox Tab 2 [>]", 0xFFFFFF);
+                    
+                    pg.draw_rect_outline(460, y, 200, 100, 0x888888); // ScrollArea
+                    pg.draw_rect_outline(645, y, 15, 100, 0x444444); pg.fill_rect(646, y + 10, 13, 30, 0x888888); // V Scroll
+                    pg.draw_text(470, y + 10, "Scroll Area Content...", 0xFFFFFF);
+                    pg.draw_text(470, y + 30, "That is clipped", 0xFFFFFF);
+                    
+                    // Lines
+                    pg.draw_line(20, 500, 780, 500, 0x555555); // Horizontal Line
+                    pg.draw_line(400, 505, 400, 550, 0x555555); // Vertical Line
+                    
+                    pg.draw_text(20, 510, "Labels & Browser:", 0xAAAAAA);
+                    pg.draw_text(20, 530, "Standard Label", 0xFFFFFF);
+                    pg.draw_rect_outline(150, 510, 230, 40, 0x444444);
+                    pg.draw_text(155, 515, "Text Browser with <b>rich</b> content", 0xAAAAAA);
+                    
+                    pg.draw_text(420, 510, "Dial & Key Sequence:", 0xAAAAAA);
+                    // Mock Dial
+                    pg.draw_radio_button(420, 530, false); pg.draw_line(426, 536, 432, 530, 0xFF0000);
+                    pg.draw_rect_outline(550, 530, 100, 20, 0x888888); pg.draw_text(555, 532, "Ctrl+Alt+Del", 0xFFFF00);
                 }
             }
 
             // Draw footer
             pg.fill_rect(0, height - 48, width, 48, 0x000080); // Blue
-            pg.draw_text(10, height - 32, "Press 'Q' to exit dashboard | Use keys O, V, R, S, N, D, C to switch tabs", 0xFFFFFF);
+            pg.draw_text(10, height - 32, "Press 'Q' to exit dashboard | Use keys O, V, R, S, N, D, C, T to switch tabs", 0xFFFFFF);
 
             // Update and draw cursor
             self.cursor.update_from_mouse(width, height);
@@ -524,228 +798,230 @@ impl DashboardUI {
             pg.flip();
 
         } else {
-            self.draw_header();
-            self.draw_navigation_bar();
-
-            match self.selected_tab {
-                DashboardTab::Overview => self.draw_overview(),
-                DashboardTab::VirtualMachines => self.draw_vms_list(),
-                DashboardTab::Resources => self.draw_resources(),
-                DashboardTab::Storage => self.draw_storage(),
-                DashboardTab::Network => self.draw_network(),
-                DashboardTab::Console => self.draw_console(),
-                DashboardTab::Devices => {},
-            }
-
-            self.draw_footer();
+            // self.draw_header();
+            // self.draw_navigation_bar();
+            // 
+            // match self.selected_tab {
+            //     DashboardTab::Overview => self.draw_overview(),
+            //     DashboardTab::VirtualMachines => self.draw_vms_list(),
+            //     DashboardTab::Resources => self.draw_resources(),
+            //     DashboardTab::Storage => self.draw_storage(),
+            //     DashboardTab::Network => self.draw_network(),
+            //     DashboardTab::Console => self.draw_console(),
+            //     DashboardTab::Devices => {},
+            //     DashboardTab::Test => {},
+            // }
+            // 
+            // self.draw_footer();
+            message!("", "dashboard unavailable")
         }
     }
 
-    fn draw_header(&self) {
-        uefi::system::with_stdout(|stdout| {
-            let _ = stdout.set_color(Color::Cyan, Color::Black);
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "╔════════════════════════════════════════════════════════════╗\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "║           HPVMx - Hypervisor Management Console            ║\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "╚════════════════════════════════════════════════════════════╝\n"
-            );
-            let _ = stdout.set_color(Color::White, Color::Black);
-        });
-    }
+    // fn draw_header(&self) {
+    //     uefi::system::with_stdout(|stdout| {
+    //         let _ = stdout.set_color(Color::Cyan, Color::Black);
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "╔════════════════════════════════════════════════════════════╗\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "║           HPVMx - Hypervisor Management Console            ║\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "╚════════════════════════════════════════════════════════════╝\n"
+    //         );
+    //         let _ = stdout.set_color(Color::White, Color::Black);
+    //     });
+    // }
+    // 
+    // fn draw_navigation_bar(&self) {
+    //     uefi::system::with_stdout(|stdout| {
+    //         let _ = stdout.set_color(Color::LightGray, Color::Black);
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             " [O]verview │ [V]Ms │ [R]esources │ [S]torage │ [N]etwork │ [C]onsole\n"
+    //         );
+    //         let _ = stdout.set_color(Color::White, Color::Black);
+    //     });
+    // }
 
-    fn draw_navigation_bar(&self) {
-        uefi::system::with_stdout(|stdout| {
-            let _ = stdout.set_color(Color::LightGray, Color::Black);
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                " [O]verview │ [V]Ms │ [R]esources │ [S]torage │ [N]etwork │ [C]onsole\n"
-            );
-            let _ = stdout.set_color(Color::White, Color::Black);
-        });
-    }
+    // fn draw_overview(&self) {
+    //     uefi::system::with_stdout(|stdout| {
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "\n┌─ System Overview ────────────────────────────────────────┐\n"
+    //         );
+    //         let _ = core::fmt::Write::write_fmt(
+    //             stdout,
+    //             format_args!("│ CPU Usage:    {:3}%                                    │\n",
+    //                          self.resources.cpu_usage)
+    //         );
+    //         let _ = core::fmt::Write::write_fmt(
+    //             stdout,
+    //             format_args!("│ Memory:       {}/{} MB                          │\n",
+    //                          self.resources.used_memory_mb,
+    //                          self.resources.total_memory_mb)
+    //         );
+    //         let _ = core::fmt::Write::write_fmt(
+    //             stdout,
+    //             format_args!("│ VMs Running:  {}                                      │\n",
+    //                          self.count_running_vms())
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "└──────────────────────────────────────────────────────────┘\n"
+    //         );
+    //     });
+    // }
 
-    fn draw_overview(&self) {
-        uefi::system::with_stdout(|stdout| {
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "\n┌─ System Overview ────────────────────────────────────────┐\n"
-            );
-            let _ = core::fmt::Write::write_fmt(
-                stdout,
-                format_args!("│ CPU Usage:    {:3}%                                    │\n",
-                             self.resources.cpu_usage)
-            );
-            let _ = core::fmt::Write::write_fmt(
-                stdout,
-                format_args!("│ Memory:       {}/{} MB                          │\n",
-                             self.resources.used_memory_mb,
-                             self.resources.total_memory_mb)
-            );
-            let _ = core::fmt::Write::write_fmt(
-                stdout,
-                format_args!("│ VMs Running:  {}                                      │\n",
-                             self.count_running_vms())
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "└──────────────────────────────────────────────────────────┘\n"
-            );
-        });
-    }
+    // fn draw_vms_list(&self) {
+    //     uefi::system::with_stdout(|stdout| {
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "\n┌─ Virtual Machines ───────────────────────────────────────┐\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "│ ID │ Name       │ State    │ CPU │ Memory │ Uptime    │\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "├────┼────────────┼──────────┼─────┼────────┼───────────┤\n"
+    //         );
+    // 
+    //         let end = core::cmp::min(
+    //             self.scroll_offset + 10,
+    //             self.vms.len()
+    //         );
+    // 
+    //         for vm in &self.vms[self.scroll_offset..end] {
+    //             let name_len = core::cmp::min(10, vm.name.len());
+    //             let _ = core::fmt::Write::write_fmt(
+    //                 stdout,
+    //                 format_args!(
+    //                     "│ {:2} │ {:<10} │ {:<8} │ {:3}% │ {:5} MB │ {:>4}h {:>2}m │\n",
+    //                     vm.id,
+    //                     &vm.name[..name_len],
+    //                     &vm.state,
+    //                     vm.cpu_usage,
+    //                     vm.memory_usage_mb,
+    //                     vm.uptime_seconds / 3600,
+    //                     (vm.uptime_seconds % 3600) / 60
+    //                 )
+    //             );
+    //         }
+    // 
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "└────┴────────────┴──────────┴─────┴────────┴───────────┘\n"
+    //         );
+    //     });
+    // }
 
-    fn draw_vms_list(&self) {
-        uefi::system::with_stdout(|stdout| {
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "\n┌─ Virtual Machines ───────────────────────────────────────┐\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "│ ID │ Name       │ State    │ CPU │ Memory │ Uptime    │\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "├────┼────────────┼──────────┼─────┼────────┼───────────┤\n"
-            );
+    // fn draw_resources(&self) {
+    //     uefi::system::with_stdout(|stdout| {
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "\n┌─ System Resources ───────────────────────────────────────┐\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "│ Processor: 8 cores @ 3.2 GHz                             │\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "│ Memory: 16 GB total, 12 GB allocated to VMs              │\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "│ Thermal: CPU 45°C, Host 38°C                             │\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "└──────────────────────────────────────────────────────────┘\n"
+    //         );
+    //     });
+    // }
 
-            let end = core::cmp::min(
-                self.scroll_offset + 10,
-                self.vms.len()
-            );
+    // fn draw_storage(&self) {
+    //     uefi::system::with_stdout(|stdout| {
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "\n┌─ Storage ────────────────────────────────────────────────┐\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "│ /dev/sda   500 GB   [████████░░] 80% used               │\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "│ /dev/sdb   1.0 TB   [██████░░░░] 60% used               │\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "│ /dev/sdc   2.0 TB   [███░░░░░░░] 30% used               │\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "└──────────────────────────────────────────────────────────┘\n"
+    //         );
+    //     });
+    // }
 
-            for vm in &self.vms[self.scroll_offset..end] {
-                let name_len = core::cmp::min(10, vm.name.len());
-                let _ = core::fmt::Write::write_fmt(
-                    stdout,
-                    format_args!(
-                        "│ {:2} │ {:<10} │ {:<8} │ {:3}% │ {:5} MB │ {:>4}h {:>2}m │\n",
-                        vm.id,
-                        &vm.name[..name_len],
-                        &vm.state,
-                        vm.cpu_usage,
-                        vm.memory_usage_mb,
-                        vm.uptime_seconds / 3600,
-                        (vm.uptime_seconds % 3600) / 60
-                    )
-                );
-            }
+    // fn draw_network(&self) {
+    //     uefi::system::with_stdout(|stdout| {
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "\n┌─ Network ────────────────────────────────────────────────┐\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "│ eth0: 192.168.1.100  RX: 125 MB/s   TX: 87 MB/s          │\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "│ eth1: 10.0.0.50      RX: 12 MB/s    TX: 34 MB/s          │\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "└──────────────────────────────────────────────────────────┘\n"
+    //         );
+    //     });
+    // }
 
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "└────┴────────────┴──────────┴─────┴────────┴───────────┘\n"
-            );
-        });
-    }
+    // fn draw_console(&self) {
+    //     uefi::system::with_stdout(|stdout| {
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "\n┌─ Console Output ─────────────────────────────────────────┐\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "│ [Connected to VM console]                                │\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "│                                                          │\n"
+    //         );
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             "└──────────────────────────────────────────────────────────┘\n"
+    //         );
+    //     });
+    // }
 
-    fn draw_resources(&self) {
-        uefi::system::with_stdout(|stdout| {
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "\n┌─ System Resources ───────────────────────────────────────┐\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "│ Processor: 8 cores @ 3.2 GHz                             │\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "│ Memory: 16 GB total, 12 GB allocated to VMs              │\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "│ Thermal: CPU 45°C, Host 38°C                             │\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "└──────────────────────────────────────────────────────────┘\n"
-            );
-        });
-    }
-
-    fn draw_storage(&self) {
-        uefi::system::with_stdout(|stdout| {
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "\n┌─ Storage ────────────────────────────────────────────────┐\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "│ /dev/sda   500 GB   [████████░░] 80% used               │\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "│ /dev/sdb   1.0 TB   [██████░░░░] 60% used               │\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "│ /dev/sdc   2.0 TB   [███░░░░░░░] 30% used               │\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "└──────────────────────────────────────────────────────────┘\n"
-            );
-        });
-    }
-
-    fn draw_network(&self) {
-        uefi::system::with_stdout(|stdout| {
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "\n┌─ Network ────────────────────────────────────────────────┐\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "│ eth0: 192.168.1.100  RX: 125 MB/s   TX: 87 MB/s          │\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "│ eth1: 10.0.0.50      RX: 12 MB/s    TX: 34 MB/s          │\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "└──────────────────────────────────────────────────────────┘\n"
-            );
-        });
-    }
-
-    fn draw_console(&self) {
-        uefi::system::with_stdout(|stdout| {
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "\n┌─ Console Output ─────────────────────────────────────────┐\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "│ [Connected to VM console]                                │\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "│                                                          │\n"
-            );
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                "└──────────────────────────────────────────────────────────┘\n"
-            );
-        });
-    }
-
-    fn draw_footer(&self) {
-        uefi::system::with_stdout(|stdout| {
-            let _ = stdout.set_color(Color::LightGray, Color::Black);
-            let _ = core::fmt::Write::write_str(
-                stdout,
-                " [↑↓] Navigate  [Enter] Select  [Q] Quit  [?] Help\n"
-            );
-            let _ = stdout.set_color(Color::White, Color::Black);
-        });
-    }
+    // fn draw_footer(&self) {
+    //     uefi::system::with_stdout(|stdout| {
+    //         let _ = stdout.set_color(Color::LightGray, Color::Black);
+    //         let _ = core::fmt::Write::write_str(
+    //             stdout,
+    //             " [↑↓] Navigate  [Enter] Select  [Q] Quit  [?] Help\n"
+    //         );
+    //         let _ = stdout.set_color(Color::White, Color::Black);
+    //     });
+    // }
 
     fn count_running_vms(&self) -> usize {
         self.vms.iter()
@@ -906,6 +1182,10 @@ impl DashboardUI {
             Key::Printable(c) => {
                 let ch = char::from(c).to_ascii_lowercase();
                 match ch {
+                    'q' => {
+                        self.exit_requested = true;
+                        return;
+                    }
                     'o' => self.selected_tab = DashboardTab::Overview,
                     'v' => self.selected_tab = DashboardTab::VirtualMachines,
                     'r' => self.selected_tab = DashboardTab::Resources,
@@ -913,6 +1193,7 @@ impl DashboardUI {
                     'n' => self.selected_tab = DashboardTab::Network,
                     'd' => self.selected_tab = DashboardTab::Devices,
                     'c' => self.selected_tab = DashboardTab::Console,
+                    't' => self.selected_tab = DashboardTab::Test,
                     '\r' | '\n' => {
                         if matches!(self.selected_tab, DashboardTab::Storage) {
                             if self.selected_file_idx < self.files.len() {
@@ -941,31 +1222,51 @@ impl DashboardUI {
                                 }
                             }
                         } else if matches!(self.selected_tab, DashboardTab::Devices) {
-                             // Toggle expansion
-                             let mut current_idx = 0;
-                             let mut found = false;
-                             for i in 0..self.categories.len() {
-                                 if current_idx == self.selected_device_idx {
-                                     self.categories[i].expanded = !self.categories[i].expanded;
-                                     break;
-                                 }
-                                 current_idx += 1;
-                                 if self.categories[i].expanded {
-                                     for _ in &self.categories[i].devices {
-                                         if current_idx == self.selected_device_idx {
-                                             // Can't toggle a device, only categories
-                                             found = true;
-                                             break;
-                                         }
-                                         current_idx += 1;
-                                     }
-                                 }
-                                 if found { break; }
-                             }
+                            // Toggle expansion
+                            let mut current_idx = 0;
+                            let mut found = false;
+                            for i in 0..self.categories.len() {
+                                if current_idx == self.selected_device_idx {
+                                    self.categories[i].expanded = !self.categories[i].expanded;
+                                    break;
+                                }
+                                current_idx += 1;
+                                if self.categories[i].expanded {
+                                    for _ in &self.categories[i].devices {
+                                        if current_idx == self.selected_device_idx {
+                                            // Can't toggle a device, only categories
+                                            found = true;
+                                            break;
+                                        }
+                                        current_idx += 1;
+                                    }
+                                }
+                                if found { break; }
+                            }
                         }
+                    }
+                    // 'i' => self.cursor.y -= if (self.cursor.y > 10) {10} else { 0 },
+                    // 'k' => self.cursor.y += 10,
+                    // 'j' => self.cursor.x -= if (self.cursor.x > 10) {10} else { 0 },
+                    // 'l' => self.cursor.x += 10,
+                    // 'u' => self.cursor.left_button = true,
+                    '\t' => {
+                        self.selected_tab = match self.selected_tab {
+                            DashboardTab::Overview => DashboardTab::VirtualMachines,
+                            DashboardTab::VirtualMachines => DashboardTab::Resources,
+                            DashboardTab::Resources => DashboardTab::Storage,
+                            DashboardTab::Storage => DashboardTab::Network,
+                            DashboardTab::Network => DashboardTab::Devices,
+                            DashboardTab::Devices => DashboardTab::Console,
+                            DashboardTab::Console => DashboardTab::Test,
+                            DashboardTab::Test => DashboardTab::Overview,
+                        };
                     }
                     _ => {}
                 }
+                // if (self.cursor.left_button) {
+                //     self.cursor.left_button = false;
+                // }
             }
             Key::Special(ScanCode::UP) => {
                 if matches!(self.selected_tab, DashboardTab::Storage) {
@@ -1019,7 +1320,12 @@ impl DashboardUI {
                 else if x < 480 { self.selected_tab = DashboardTab::Network; }
                 else if x < 580 { self.selected_tab = DashboardTab::Devices; }
                 else if x < 680 { self.selected_tab = DashboardTab::Console; }
+                else if x < 780 { self.selected_tab = DashboardTab::Test; }
             }
         }
+    }
+
+    pub fn exit_requested(&self) -> bool {
+        self.exit_requested
     }
 }

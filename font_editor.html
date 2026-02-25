@@ -2,69 +2,68 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Rust Bitmap Font Editor Pro</title>
+    <title>Rust Extended ASCII Font Editor</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #e0e0e0; padding: 20px; margin: 0; }
-        .main-layout { display: flex; gap: 30px; justify-content: center; flex-wrap: wrap; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a1a; color: #cfcfcf; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .main-layout { display: flex; gap: 25px; max-width: 1100px; width: 100%; justify-content: center; }
 
-        /* Editor Section */
-        .editor-card { background: #1e1e1e; padding: 20px; border-radius: 8px; border: 1px solid #333; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        #canvas-grid { display: grid; grid-template-columns: repeat(8, 25px); grid-template-rows: repeat(16, 25px); border: 2px solid #444; background: #000; cursor: crosshair; }
-        .pixel { width: 25px; height: 25px; border: 1px solid #222; box-sizing: border-box; }
-        .pixel.on { background-color: #4ec9b0; box-shadow: inset 0 0 5px #000; }
-        .pixel.off:hover { background-color: #333; }
+        /* Drawing Grid */
+        .editor-card { background: #252526; padding: 20px; border-radius: 8px; border: 1px solid #444; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        #canvas-grid { display: grid; grid-template-columns: repeat(8, 24px); grid-template-rows: repeat(16, 24px); border: 2px solid #333; background: #000; cursor: pointer; }
+        .pixel { width: 24px; height: 24px; border: 1px solid #1e1e1e; }
+        .pixel.on { background-color: #00ff95; box-shadow: inset 0 0 8px rgba(0,0,0,0.5); }
 
         /* Controls */
-        .controls { margin-top: 15px; display: flex; flex-direction: column; gap: 10px; }
-        .button-group { display: flex; gap: 5px; flex-wrap: wrap; }
-        button { background: #3c3c3c; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
-        button:hover { background: #505050; }
-        button.primary { background: #007acc; }
-        select { background: #3c3c3c; color: white; padding: 8px; border-radius: 4px; border: 1px solid #555; }
+        .button-group { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+        button { background: #3e3e42; color: white; border: 1px solid #555; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+        button:hover { background: #4e4e52; }
+        button.accent { background: #007acc; border-color: #005a9e; }
+        select { background: #3e3e42; color: white; padding: 8px; border-radius: 4px; width: 100%; border: 1px solid #555; }
 
-        /* Preview Section */
-        .preview-card { background: #1e1e1e; padding: 20px; border-radius: 8px; border: 1px solid #333; min-width: 300px; }
-        #preview-canvas { background: #000; border: 1px solid #444; image-rendering: pixelated; width: 100%; height: auto; }
-        #preview-input { width: 100%; padding: 10px; background: #121212; color: #4ec9b0; border: 1px solid #444; margin-top: 10px; box-sizing: border-box; }
-
-        /* Code Output */
-        .code-section { width: 100%; max-width: 900px; margin-top: 20px; }
-        textarea { width: 100%; height: 250px; background: #000; color: #ce9178; border: 1px solid #333; font-family: 'Consolas', monospace; padding: 10px; border-radius: 4px; }
-
-        h3 { margin-top: 0; color: #569cd6; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        /* Preview & Output */
+        .side-panel { display: flex; flex-direction: column; gap: 20px; flex-grow: 1; }
+        #preview-canvas { background: #000; border: 1px solid #444; height: 80px; width: 100%; image-rendering: pixelated; }
+        textarea { width: 100%; height: 350px; background: #1e1e1e; color: #d7ba7d; font-family: 'Consolas', monospace; font-size: 12px; padding: 10px; border: 1px solid #444; border-radius: 4px; }
+        h3 { margin-top: 0; color: #9cdcfe; font-weight: normal; border-bottom: 1px solid #444; padding-bottom: 8px; }
     </style>
 </head>
 <body>
 
 <div class="main-layout">
     <div class="editor-card">
-        <h3>Editor</h3>
+        <h3 id="char-label">Editing: [32] Space</h3>
         <div id="canvas-grid"></div>
-        <div class="controls">
+
+        <div class="button-group">
             <select id="char-selector"></select>
-            <div class="button-group">
-                <button onclick="shift('up')">↑ Up</button>
-                <button onclick="shift('down')">↓ Down</button>
-                <button onclick="shift('left')">← Left</button>
-                <button onclick="shift('right')">→ Right</button>
-            </div>
-            <div class="button-group">
-                <button onclick="clearGrid()" style="background: #a31515;">Clear</button>
-                <button class="primary" onclick="importFromCode()">Import From Code</button>
-            </div>
+        </div>
+
+        <div class="button-group">
+            <button onclick="shift('up')">↑</button>
+            <button onclick="shift('down')">↓</button>
+            <button onclick="shift('left')">←</button>
+            <button onclick="shift('right')">→</button>
+            <button onclick="clearGrid()">Clear</button>
+        </div>
+
+        <div class="button-group" style="margin-top:20px; border-top: 1px solid #444; padding-top: 15px;">
+            <button class="accent" onclick="copyBuffer()">Copy Glyph</button>
+            <button class="accent" onclick="pasteBuffer()">Paste Glyph</button>
         </div>
     </div>
 
-    <div class="preview-card">
-        <h3>Live Preview</h3>
-        <canvas id="preview-canvas" width="256" height="64"></canvas>
-        <input type="text" id="preview-input" value="Hello World! 123" placeholder="Type here to preview...">
-        <p style="font-size: 11px; color: #888;">Rendered at 2x scale</p>
-    </div>
+    <div class="side-panel">
+        <div class="editor-card">
+            <h3>Live Preview (Scale 2x)</h3>
+            <canvas id="preview-canvas" width="400" height="80"></canvas>
+            <input type="text" id="preview-text" value="Testing 0123! ñá" style="width:100%; margin-top:10px; background:#1e1e1e; color:#00ff95; border:1px solid #444; padding:8px;">
+        </div>
 
-    <div class="code-section">
-        <h3>Rust Output</h3>
-        <textarea id="output-code" spellcheck="false"></textarea>
+        <div class="editor-card" style="flex-grow: 1;">
+            <h3>Rust Code [u8; 16]; 256</h3>
+            <textarea id="output-code" spellcheck="false"></textarea>
+            <button onclick="importCode()" style="width:100%; margin-top:10px;">Import Existing Code</button>
+        </div>
     </div>
 </div>
 
@@ -72,128 +71,119 @@
     const grid = document.getElementById('canvas-grid');
     const selector = document.getElementById('char-selector');
     const output = document.getElementById('output-code');
-    const previewInput = document.getElementById('preview-input');
+    const previewText = document.getElementById('preview-text');
     const previewCanvas = document.getElementById('preview-canvas');
     const ctx = previewCanvas.getContext('2d');
 
-    let fontData = Array.from({ length: 128 }, () => Array(16).fill(0));
+    // Array for 0-255
+    let fontData = Array.from({ length: 256 }, () => Array(16).fill(0));
+    let clipboard = null;
 
-    // Setup Selector
-    for (let i = 32; i < 127; i++) {
+    // Build Selector 0-255
+    for (let i = 0; i < 256; i++) {
         const opt = document.createElement('option');
         opt.value = i;
-        opt.textContent = `Char ${i} (${String.fromCharCode(i)})`;
+        // Show char if printable, otherwise show hex code
+        let label = (i > 32 && i < 127) || (i > 160) ? String.fromCharCode(i) : `0x${i.toString(16).toUpperCase()}`;
+        opt.textContent = `${i}: ${label}`;
         selector.appendChild(opt);
     }
+    selector.value = 32;
 
-    // Setup Grid UI
     function initGrid() {
         grid.innerHTML = '';
         for (let r = 0; r < 16; r++) {
             for (let c = 0; c < 8; c++) {
                 const d = document.createElement('div');
-                d.className = 'pixel off';
-                d.onclick = () => {
-                    fontData[selector.value][r] ^= (1 << (7 - c));
-                    updateAll();
-                };
+                d.className = 'pixel';
+                d.onclick = () => togglePixel(r, c);
                 grid.appendChild(d);
             }
         }
+        updateUI();
     }
 
-    function updateAll() {
-        renderGrid();
-        generateCode();
-        drawPreview();
+    function togglePixel(r, c) {
+        fontData[selector.value][r] ^= (1 << (7 - c));
+        updateUI();
     }
 
-    function renderGrid() {
-        const charIdx = selector.value;
+    function updateUI() {
+        const idx = selector.value;
+        const data = fontData[idx];
         const pixels = document.querySelectorAll('.pixel');
-        fontData[charIdx].forEach((byte, r) => {
+        data.forEach((byte, r) => {
             for (let c = 0; c < 8; c++) {
                 const isOn = (byte >> (7 - c)) & 1;
-                pixels[(r * 8) + c].className = isOn ? 'pixel on' : 'pixel off';
+                pixels[(r * 8) + c].className = isOn ? 'pixel on' : 'pixel';
             }
         });
+        document.getElementById('char-label').textContent = `Editing: [${idx}] ${selector.options[selector.selectedIndex].text.split(': ')[1]}`;
+        generateCode();
+        renderPreview();
     }
 
-    // Directional Shifting Logic
     function shift(dir) {
-        const idx = selector.value;
-        let char = fontData[idx];
-
-        if (dir === 'up') {
-            char.shift();
-            char.push(0);
-        } else if (dir === 'down') {
-            char.unshift(0);
-            char.pop();
-        } else if (dir === 'left') {
-            fontData[idx] = char.map(byte => (byte << 1) & 0xFF);
-        } else if (dir === 'right') {
-            fontData[idx] = char.map(byte => (byte >> 1));
-        }
-        updateAll();
+        let char = fontData[selector.value];
+        if (dir === 'up') { char.shift(); char.push(0); }
+        else if (dir === 'down') { char.unshift(0); char.pop(); }
+        else if (dir === 'left') fontData[selector.value] = char.map(b => (b << 1) & 0xFF);
+        else if (dir === 'right') fontData[selector.value] = char.map(b => (b >> 1));
+        updateUI();
     }
 
-    function drawPreview() {
-        const text = previewInput.value;
+    function copyBuffer() { clipboard = JSON.parse(JSON.stringify(fontData[selector.value])); }
+    function pasteBuffer() { if(clipboard) { fontData[selector.value] = [...clipboard]; updateUI(); } }
+    function clearGrid() { fontData[selector.value].fill(0); updateUI(); }
+
+    function renderPreview() {
+        const str = previewText.value;
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
-        ctx.fillStyle = "#4ec9b0";
+        ctx.fillStyle = "#00ff95";
 
-        for (let i = 0; i < text.length; i++) {
-            const code = text.charCodeAt(i);
-            if (code >= 128) continue;
-            const charData = fontData[code];
-            const xOffset = i * 9; // 8 pixels + 1 space
-
-            charData.forEach((byte, y) => {
+        for (let i = 0; i < str.length; i++) {
+            const code = str.charCodeAt(i);
+            if (code > 255) continue;
+            const data = fontData[code];
+            const xOff = i * 9;
+            data.forEach((byte, y) => {
                 for (let x = 0; x < 8; x++) {
-                    if ((byte >> (7 - x)) & 1) {
-                        ctx.fillRect((xOffset + x) * 2, (y + 10) * 2, 2, 2);
-                    }
+                    if ((byte >> (7 - x)) & 1) ctx.fillRect((xOff + x) * 2, (y + 12) * 2, 2, 2);
                 }
             });
         }
     }
 
     function generateCode() {
-        let code = "const BASIC_FONT: [[u8; 16]; 128] = {\n    let mut font = [[0u8; 16]; 128];\n\n";
-        for (let i = 32; i < 127; i++) {
+        let res = "const BASIC_FONT: [[u8; 16]; 256] = {\n    let mut font = [[0u8; 16]; 256];\n\n";
+        for (let i = 0; i < 256; i++) {
             if (fontData[i].some(b => b !== 0)) {
                 const bytes = fontData[i].map(b => '0x' + b.toString(16).toUpperCase().padStart(2, '0')).join(', ');
-                code += `    font[${i}] = [${bytes}]; // ${String.fromCharCode(i)}\n`;
+                let comment = (i > 32 && i < 127) || (i > 160) ? String.fromCharCode(i) : `Idx ${i}`;
+                res += `    font[${i}] = [${bytes}]; // ${comment}\n`;
             }
         }
-        code += "\n    font\n};";
-        output.value = code;
+        res += "\n    font\n};";
+        output.value = res;
     }
 
-    function importFromCode() {
+    function importCode() {
         const text = output.value;
         const regex = /font\[(\d+)\]\s*=\s*\[([^\]]+)\]/g;
         let match;
         while ((match = regex.exec(text)) !== null) {
             const idx = parseInt(match[1]);
-            const bytes = match[2].split(',').map(s => parseInt(s.trim(), 16));
-            if (idx < 128) fontData[idx] = bytes;
+            if (idx < 256) {
+                fontData[idx] = match[2].split(',').map(s => parseInt(s.trim(), 16));
+            }
         }
-        updateAll();
+        updateUI();
     }
 
-    function clearGrid() {
-        fontData[selector.value].fill(0);
-        updateAll();
-    }
-
-    selector.onchange = renderGrid;
-    previewInput.oninput = drawPreview;
-
+    selector.onchange = updateUI;
+    previewText.oninput = renderPreview;
     initGrid();
-    generateCode();
 </script>
 </body>
 </html>

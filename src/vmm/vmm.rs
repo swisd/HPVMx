@@ -162,10 +162,8 @@ impl HypervisorManager {
         }, list_str)
     }
 
-    pub fn boot_vm_with_media(&mut self, _vm_id: u32, _media_data: &[u8]) -> Result<(), &str> {
-        // Find the VM
-        // let vm = self.vms.iter_mut().find(|v| v.id == vm_id)
-        //     .ok_or("VM not found")?;
+    pub fn boot_vm_with_media(&mut self, vm_id: u32, _media_data: &[u8]) -> Result<(), &str> {
+        let vm = self.vms.get_mut(&vm_id).ok_or("VM not found")?;
 
         // Set the VM's boot media
         // In a real implementation, this would:
@@ -173,7 +171,7 @@ impl HypervisorManager {
         // 2. Set up boot parameters
         // 3. Jump to the bootloader entry point
 
-        //vm.state = crate::vmm::vm::VmState::Running;
+        vm.state = crate::vmm::vm::VmState::Running;
 
         Ok(())
     }

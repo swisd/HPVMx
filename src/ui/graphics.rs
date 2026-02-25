@@ -1,8 +1,42 @@
 use core::fmt::Write;
+use core::time::Duration;
 use uefi::proto::console::text::Color;
-// Import both protocols
+use uefi::{StatusExt, Identify};
 use uefi::proto::console::pointer::Pointer;
-use uefi::proto::console::pointer::Pointer as SimplePointer;
+use uefi_raw::protocol::console::AbsolutePointerProtocol;
+use crate::message;
+
+#[repr(transparent)]
+struct AbsolutePointer(AbsolutePointerProtocol);
+unsafe impl uefi::Identify for AbsolutePointer {
+    const GUID: uefi::Guid = AbsolutePointerProtocol::GUID;
+}
+impl uefi::proto::Protocol for AbsolutePointer {}
+
+#[allow(dead_code)]
+impl AbsolutePointer {
+    fn read_state(&mut self) -> uefi::Result<Option<uefi_raw::protocol::console::AbsolutePointerState>> {
+        let mut state = uefi_raw::protocol::console::AbsolutePointerState {
+            current_x: 0,
+            current_y: 0,
+            current_z: 0,
+            active_buttons: 0,
+        };
+        match unsafe { (self.0.get_state)(&mut self.0, &mut state) } {
+            uefi::Status::SUCCESS => Ok(Some(state)),
+            uefi::Status::NOT_READY => Ok(None),
+            status => Err(status.into()),
+        }
+    }
+
+    fn mode(&self) -> &uefi_raw::protocol::console::AbsolutePointerMode {
+        unsafe { &*self.0.mode }
+    }
+    
+    fn reset(&mut self, extended: bool) -> uefi::Result {
+        unsafe { (self.0.reset)(&mut self.0, extended.into()) }.to_result()
+    }
+}
  // Assuming you're using uefi-services for simplicity
 
 #[allow(dead_code)]
@@ -27,53 +61,81 @@ impl Cursor {
     }
 
     pub fn update_from_mouse(&mut self, screen_width: usize, screen_height: usize) {
-        // Strategy: Try Absolute Pointer first, then fall back to Simple (Relative) Pointer
-
-        if !self.try_update_absolute(screen_width, screen_height) {
-            self.try_update_relative(screen_width, screen_height);
+        // Try absolute first (modern environments/VMs)
+        if self.try_update_absolute(screen_width, screen_height) {
+            return;
         }
+        // Fallback to relative
+        self.try_update_relative(screen_width, screen_height);
     }
 
     fn try_update_absolute(&mut self, screen_width: usize, screen_height: usize) -> bool {
-        if let Ok(handle) = uefi::boot::get_handle_for_protocol::<Pointer>() {
-            if let Ok(mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) {
-                let mode = &mut mouse.mode();
-                let Ok(mut mouse2) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) else {
-                    return false;
-                };
-                if let Ok(Some(state)) = mouse2.read_state() {
-                    // Map absolute hardware coordinates to our screen pixels
-                    if mode.resolution[0] > 0 {
-                        self.x = ((state.relative_movement[0] as u64 * screen_width as u64) / mode.resolution[0]) as i32;
-                    }
-                    if mode.resolution[1] > 0 {
-                        self.y = ((state.relative_movement[1] as u64 * screen_height as u64) / mode.resolution[1]) as i32;
-                    }
-                    self.left_button = state.button[0];
-                    self.right_button = state.button[1];
-                    return true; // Successfully updated via Absolute Pointer
-                }
+        let Ok(handle) = uefi::boot::get_handle_for_protocol::<AbsolutePointer>() else { return false };
+        let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<AbsolutePointer>(handle) else { return false };
+
+        if let Ok(Some(state)) = mouse.read_state() {
+            let mode = mouse.mode();
+            
+            // Map absolute coordinates to screen coordinates
+            // Formula: screen_pos = (abs_pos - abs_min) * screen_max / (abs_max - abs_min)
+            let abs_x = state.current_x as f32;
+            let abs_y = state.current_y as f32;
+            
+            let min_x = mode.absolute_min_x as f32;
+            let min_y = mode.absolute_min_y as f32;
+            let max_x = mode.absolute_max_x as f32;
+            let max_y = mode.absolute_max_y as f32;
+
+            if max_x > min_x && max_y > min_y {
+                self.x = (((abs_x - min_x) * (screen_width as f32 - 1.0)) / (max_x - min_x)) as i32;
+                self.y = (((abs_y - min_y) * (screen_height as f32 - 1.0)) / (max_y - min_y)) as i32;
             }
+
+            self.left_button = state.active_buttons & 0x1 != 0;
+            self.right_button = state.active_buttons & 0x2 != 0;
+            return true;
         }
         false
     }
 
+    // Absolute pointer path not used in this target environment
+
     fn try_update_relative(&mut self, screen_width: usize, screen_height: usize) {
-        if let Ok(handle) = uefi::boot::get_handle_for_protocol::<SimplePointer>() {
-            if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<SimplePointer>(handle) {
-                if let Ok(Some(state)) = mouse.read_state() {
-                    // Add relative movement to existing position
-                    self.x = self.x.saturating_add(state.relative_movement[0]);
-                    self.y = self.y.saturating_add(state.relative_movement[1]);
+        let Ok(handle) = uefi::boot::get_handle_for_protocol::<Pointer>() else {
+            return;
+        };
+        let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) else {
+            return;
+        };
 
-                    // Clamp to the screen pixels
-                    self.x = self.x.max(0).min(screen_width as i32);
-                    self.y = self.y.max(0).min(screen_height as i32);
+        if let Ok(Some(state)) = mouse.read_state() {
+            let mode = mouse.mode();
+            
+            // X and Y resolution can be used to scale movement
+            // resolution is in counts/mm. If 0, it's not supported.
+            // We use a base sensitivity and then scale if resolution is available.
+            let mut dx = state.relative_movement[0] as f32;
+            let mut dy = state.relative_movement[1] as f32;
 
-                    self.left_button = state.button[0];
-                    self.right_button = state.button[1];
-                }
+            // Sensitivity factor - adjust as needed. 
+            // In some environments, 1:1 is too slow.
+            let sensitivity = 1.5f32;
+            dx *= sensitivity;
+            dy *= sensitivity;
+
+            // Optional: apply resolution scaling if available
+            if mode.resolution[0] != 0 {
+                // Adjusting based on resolution might help on real hardware
+                // but for now we keep it simple to ensure basic movement first.
             }
+
+            if dx != 0.0 || dy != 0.0 {
+                self.x = (self.x + dx as i32).clamp(0, screen_width as i32 - 1);
+                self.y = (self.y + dy as i32).clamp(0, screen_height as i32 - 1);
+            }
+
+            self.left_button = state.button[0];
+            self.right_button = state.button[1];
         }
     }
 
@@ -82,6 +144,102 @@ impl Cursor {
         stdout.enable_cursor(true).expect("cursor issue 0");
         stdout.set_cursor_position(self.x as usize, self.y as usize).expect("cursor issue 1");
         //let _ = write!(stdout, "[{};{}H{}", self.y + 1, self.x + 1, cursor_char);
+    }
+
+    pub fn debug_mouse() {
+        use uefi::proto::console::pointer::Pointer;
+        use uefi_raw::protocol::console::AbsolutePointerProtocol;
+
+        message!("\n", "--- Mouse Debug ---");
+
+        // Check relative pointer
+        let handles = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::ByProtocol(&Pointer::GUID));
+        match handles {
+            Ok(h) => {
+                message!("", "Found {} handles with Simple Pointer protocol", h.as_slice().len());
+                for (i, handle) in h.as_slice().iter().enumerate() {
+                    if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(*handle) {
+                        let mode = mouse.mode();
+                        message!("", "  [{}] Resolution: [{}, {}, {}], Buttons: [{}, {}]", 
+                            i, mode.resolution[0], mode.resolution[1], mode.resolution[2],
+                            mode.has_button[0], mode.has_button[1]);
+                    } else {
+                        message!("", "  [{}] Failed to open protocol", i);
+                    }
+                }
+            }
+            Err(_) => message!("", "No Simple Pointer protocol found"),
+        }
+
+        // Check absolute pointer
+        let handles = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::ByProtocol(&AbsolutePointerProtocol::GUID));
+        match handles {
+            Ok(h) => {
+                message!("", "Found {} handles with Absolute Pointer protocol", h.as_slice().len());
+                for (i, handle) in h.as_slice().iter().enumerate() {
+                    // Use our local wrapper
+                    if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<AbsolutePointer>(*handle) {
+                        let mode = mouse.mode();
+                        message!("", "  [{}] Range: [{}..{}, {}..{}, {}..{}], Buttons: {:?}", 
+                            i, mode.absolute_min_x, mode.absolute_max_x,
+                            mode.absolute_min_y, mode.absolute_max_y,
+                            mode.absolute_min_z, mode.absolute_max_z,
+                            mode.attributes);
+                    } else {
+                        message!("", "  [{}] Failed to open protocol", i);
+                    }
+                }
+            }
+            Err(_) => message!("", "No Absolute Pointer protocol found"),
+        }
+
+        message!("", "Polling data... Press any key to stop.");
+        
+        loop {
+            // Poll relative
+            if let Ok(handle) = uefi::boot::get_handle_for_protocol::<Pointer>() {
+                if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) {
+                    if let Ok(Some(state)) = mouse.read_state() {
+                        if state.relative_movement[0] != 0 || state.relative_movement[1] != 0 || state.button[0] || state.button[1] {
+                            message!("", "REL: dx={}, dy={}, btn=[{}, {}]", 
+                                state.relative_movement[0], state.relative_movement[1],
+                                state.button[0], state.button[1]);
+                        }
+                    } else if let Ok(None) = mouse.read_state() {
+                        uefi::boot::stall(Duration::from_millis(10));
+                    }
+
+                    //else {
+                    //     message!("", "no state rel  {:#?}", mouse.read_state());
+                    // }
+                }
+            }
+
+            // Poll absolute
+            if let Ok(handle) = uefi::boot::get_handle_for_protocol::<AbsolutePointer>() {
+                if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<AbsolutePointer>(handle) {
+                    if let Ok(Some(state)) = mouse.read_state() {
+                        message!("", "ABS: x={}, y={}, btn={}", 
+                            state.current_x, state.current_y, state.active_buttons);
+                    } else if let Ok(None) = mouse.read_state() {
+                        uefi::boot::stall(Duration::from_millis(10));
+                    }
+
+
+                    //else {
+                    //     message!("", "no state abs  {:#?}", mouse.read_state());
+                    // }
+                }
+            }
+
+            // Check for keypress to exit
+            let key = uefi::system::with_stdin(|i| i.read_key());
+            if let Ok(Some(_)) = key {
+                break;
+            }
+
+            uefi::boot::stall(core::time::Duration::from_millis(100)); // 100ms
+        }
     }
 }
 

@@ -18,9 +18,11 @@ mod devices;
 mod hpvmlog;
 
 
+
 extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::arch::x86_64::__m128;
 use core::fmt::Write;
 use uefi::prelude::*;
 use log::error;
@@ -33,12 +35,14 @@ use uefi::proto::console::text::Color;
 use uefi::runtime::ResetType;
 //use uefi::system::with_stdout;
 use uefi_raw::table::system::SystemTable;
+use uefi::proto::console::pointer::Pointer as SimplePointer;
 //use ui::UI;
 use kernel::KernelLoader;
 use filesystem::FileSystem;
 use vmm::HypervisorManager;
 use ui::WinNTShell;
 use ui::DashboardUI;
+//use sysinfo;
 
 
 //#[global_allocator]
@@ -53,6 +57,8 @@ static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
 
 use crate::paging::PagingManager;
 //use crate::graphics::Cursor;
+
+
 
 static mut HYPERVISOR: Option<HypervisorManager> = None;
 
@@ -71,6 +77,7 @@ fn main() -> Status {
 
     uefi::system::with_stdout(|stdout| {
         let _ = stdout.clear();
+        let _ = stdout.enable_cursor(true);
     });
 
     hpvm_info!("HPVMx", "HPVMx version is {}", env!("CARGO_PKG_VERSION"));
@@ -146,6 +153,14 @@ fn main() -> Status {
         }
     }
 
+
+
+
+
+
+
+    init_mouse();
+
     hpvm_info!("HPVMx", "init sequence complete.");
 
     hpvm_info!("HPVMx", "ready");
@@ -199,7 +214,7 @@ fn main() -> Status {
         let parts = &command;
 
         match command.as_slice()[0] {
-            "help" => message!("\n", "commands available: \n(* means command is not in a working state) \n\nFileSystem:\n  help - show this help\n  clear - clear screen\n  ls - list files\n  cd [dir] - change directory*\n  pwd - print working directory\n  mkdir [dir] - make directory\n  touch [file] - create file\n  cpy [src] [dst] - copy file\n  mov [src] [dst] - move file\n  rm [file] - remove file\n  cat [file] - show file contents\n  clon [src] [dst] - clone directory\n  write [file] [data] [mode] - write to file\n\nVM Management:\n  vm create [name] [memory_mb] [vcpus] - create VM\n  vm list - list all VMs\n  vm start [vm_id] - start VM\n  vm stop [vm_id] - stop VM\n  vm delete [vm_id] - delete VM\n  boot [vm_id] [iso|efi|img] - boot VM with media\n  console [vm_id] - attach to VM console\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n\nHypervisor:\n  vmm info - show hypervisor stats\n  vmm info-adv - show advanced stats\n\nNetworking:\n  net status - show NIC status (SNP)\n  net up - initialize NIC via UEFI SNP\n  ping [ip] - test reachability (placeholder)\n  lanscan [x.y.z.] - scan /24 network (placeholder)\n  httpd start [port] - start HTTP management server (placeholder)\n  httpd stop - stop HTTP server\n\nOther:\n  devs - list drives\n  info - show system info\n  start [kernel] - load kernel*\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS"),
+            "help" => message!("\n", "commands available: \n(* means command is not in a working state) \n\nFileSystem:\n  help - show this help\n  clear - clear screen\n  ls - list files\n  cd [dir] - change directory*\n  pwd - print working directory\n  mkdir [dir] - make directory\n  touch [file] - create file\n  cpy [src] [dst] - copy file\n  mov [src] [dst] - move file\n  rm [file] - remove file\n  cat [file] - show file contents\n  clon [src] [dst] - clone directory\n  write [file] [data] [mode] - write to file\n\nVM Management:\n  vm create [name] [memory_mb] [vcpus] - create VM\n  vm list - list all VMs\n  vm start [vm_id] - start VM\n  vm stop [vm_id] - stop VM\n  vm delete [vm_id] - delete VM\n  vm boot [vm_id] [iso|efi|img] - boot VM with media\n  boot [vm_id] [iso|efi|img] - boot VM with media\n  console [vm_id] - attach to VM console\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n\nHypervisor:\n  vmm info - show hypervisor stats\n  vmm info-adv - show advanced stats\n\nNetworking:\n  net status - show NIC status (SNP)\n  net up - initialize NIC via UEFI SNP\n  ping [ip] - test reachability (placeholder)\n  lanscan [x.y.z.] - scan /24 network (placeholder)\n  httpd start [port] - start HTTP management server (placeholder)\n  httpd stop - stop HTTP server\n\nOther:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel*\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data"),
             "clear" => { uefi::system::with_stdout(|s| s.clear().unwrap()); }
             "ls" => FileSystem::list_files(),
             "cd" => { FileSystem::cd(command[1]) }
@@ -282,6 +297,20 @@ fn main() -> Status {
             }
             "upd" => {}
             "info" => {}
+            // "sysinfo" => {
+            //     message!("\n", "=== System Information ===");
+            //     message!("", "Memory Total: {} MB", sysinfo::);
+            //     message!("", "Memory Used: {} MB", info.memory_used_mb);
+            //     message!("", "Memory Free: {} MB", info.memory_total_mb - info.memory_used_mb);
+            //     message!("", "CPU Count: {}", info.cpu_count);
+            //     message!("", "CPU Usage: {}%", info.cpu_usage_percent);
+            //     message!("", "CPU Frequency: {} MHz", info.cpu_frequency_mhz);
+            //     message!("", "GPU Usage: {}%", info.gpu_usage_percent);
+            //     message!("", "Disk Read Operations: {}", info.disk_read_ops);
+            //     message!("", "Disk Write Operations: {}", info.disk_write_ops);
+            //     message!("", "Disk Read Bytes: {} MB", info.disk_read_bytes / (1024 * 1024));
+            //     message!("", "Disk Write Bytes: {} MB", info.disk_write_bytes / (1024 * 1024));
+            // }
             "devs" => {
                 if command.len() > 0 {
                     FileSystem::get_drives("DEVICELIST");
@@ -300,6 +329,7 @@ fn main() -> Status {
                 enter(body.as_slice()[1])
             }
             "BIOS" => break,
+            "mouse-debug" => crate::graphics::Cursor::debug_mouse(),
 
             "shutdown" => {
                 if command.len() > 1 {
@@ -724,7 +754,22 @@ fn handle_vm_command(command: &[&str]) {
                             Err(e) => hpvm_error!("VMM", "failed to delete VM: {}", e),
                         }
                     }
-                    _ => message!("\n", "Usage: vm [create|list|start|stop|delete]"),
+                    Some(&"boot") => {
+                        if command.len() < 4 {
+                            message!("\n", "Usage: vm boot [vm_id] [iso|efi|img]");
+                            return;
+                        }
+                        let vm_id: u32 = match command[2].parse() {
+                            Ok(id) => id,
+                            Err(_) => {
+                                hpvm_error!("Boot", "invalid VM ID");
+                                return;
+                            }
+                        };
+                        let path = command[3];
+                        boot_vm_with_media(vm_id, path);
+                    }
+                    _ => message!("\n", "Usage: vm [create|list|start|stop|delete|boot]"),
                 }
             }
             None => hpvm_error!("VMM", "hypervisor not initialized"),
@@ -913,6 +958,7 @@ fn show_dashboard_ui() {
                         });
                     }
                     let stats = hv.get_stats();
+
                     dashboard.set_resources(ui::SystemResources {
                         total_memory_mb: stats.total_memory_mb,
                         used_memory_mb: stats.total_memory_mb / 2,
@@ -937,19 +983,18 @@ fn show_dashboard_ui() {
 
         if let Some(key) = key {
             dashboard.handle_input(key);
+            if dashboard.exit_requested() {
+                hpvm_info!("Dashboard", "exiting dashboard");
+                uefi::system::with_stdout(|s| {
+                    let _ = s.clear();
+                    core::fmt::Write::write_str(s, "\nHPVMx> ").unwrap();
+                });
+                break;
 
-            // Check if user wants to exit dashboard
-            if let uefi::proto::console::text::Key::Printable(c) = key {
-                if char::from(c).to_ascii_lowercase() == 'q' {
-                    hpvm_info!("Dashboard", "exiting dashboard");
-                    uefi::system::with_stdout(|s| {
-                        let _ = s.clear();
-                    });
-                    break;
-                }
             }
         }
     }
+    return;
 }
 
 #[allow(static_mut_refs, dead_code)]
@@ -1052,3 +1097,28 @@ fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
 //         });
 //     }
 // }
+
+pub fn init_mouse() {
+    if let Ok(handle) = boot::get_handle_for_protocol::<SimplePointer>() {
+        unsafe {
+            let _ = boot::connect_controller(handle, None, None, true);
+        }
+        if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<SimplePointer>(handle) {
+
+
+            // This is the "magic" line for VirtualBox PS/2
+            // We try non-extended first, then extended if it doesn't fail but isn't working
+            let rx = mouse.reset(false);
+            hpvm_info!("usbhid", "mouse reset ev=false  {:?}", rx);
+            // Some firmwares require extended verification
+            let ry = mouse.reset(true);
+            hpvm_info!("usbhid", "mouse reset ev=true  {:?}", ry);
+        }
+    }
+
+    // Also try to reset AbsolutePointer if present
+    // Since it's a manual protocol in graphics.rs, we use its GUID directly or just skip here
+    // as we don't have easy access to the type without importing it.
+    // Actually, let's keep it simple for now as the Dashboard loop will call update_from_mouse
+    // which will open it.
+}

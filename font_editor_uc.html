@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Rust Unicode Font Editor</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: #e0e0e0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .main-layout { display: flex; gap: 20px; max-width: 1200px; width: 100%; justify-content: center; }
+
+        /* Editor Section */
+        .card { background: #1e1e1e; padding: 20px; border-radius: 8px; border: 1px solid #333; }
+        #canvas-grid { display: grid; grid-template-columns: repeat(8, 22px); grid-template-rows: repeat(16, 22px); border: 2px solid #444; background: #000; cursor: crosshair; }
+        .pixel { width: 22px; height: 22px; border: 1px solid #222; }
+        .pixel.on { background-color: #f1c40f; box-shadow: 0 0 5px #f1c40f; }
+
+        /* Navigation */
+        .nav-bar { display: flex; gap: 10px; margin-bottom: 15px; background: #252525; padding: 10px; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        input, select, button { background: #3c3c3c; color: white; border: 1px solid #555; padding: 8px; border-radius: 4px; }
+
+        .preview-area { min-width: 300px; }
+        #preview-canvas { background: #000; border: 1px solid #444; width: 100%; height: 100px; image-rendering: pixelated; }
+        textarea { width: 100%; height: 200px; background: #000; color: #ce9178; font-family: monospace; margin-top: 10px; }
+
+        .hint { font-size: 12px; color: #888; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="nav-bar">
+    <div>
+        <label>Unicode Block:</label>
+        <select id="block-selector" onchange="jumpToBlock()">
+            <option value="32">Basic Latin (ASCII)</option>
+            <option value="160">Latin-1 Supplement</option>
+            <option value="1024">Cyrillic</option>
+            <option value="1488">Hebrew</option>
+            <option value="8448">Letterlike Symbols</option>
+            <option value="128512">Emojis</option>
+        </select>
+    </div>
+    <div>
+        <label>Current Hex:</label>
+        <input type="text" id="hex-input" size="6" value="0x20" onchange="jumpToHex()">
+    </div>
+    <button onclick="prevChar()">⬅ Prev</button>
+    <button onclick="nextChar()">Next ➡</button>
+</div>
+
+<div class="main-layout">
+    <div class="card">
+        <h3 id="char-display">Char: Space (32)</h3>
+        <div id="canvas-grid"></div>
+        <div style="margin-top:10px; display: flex; gap:5px; flex-wrap: wrap;">
+            <button onclick="shift('up')">↑</button>
+            <button onclick="shift('down')">↓</button>
+            <button onclick="shift('left')">←</button>
+            <button onclick="shift('right')">→</button>
+            <button onclick="clearGrid()" style="color: #ff5555">Clear</button>
+        </div>
+    </div>
+
+    <div class="preview-area">
+        <div class="card">
+            <h3>Live Preview</h3>
+            <canvas id="preview-canvas" width="400" height="100"></canvas>
+            <input type="text" id="preview-input" value="Hello! 😊" style="width:100%; margin-top:10px;">
+            <div class="hint">Unicode input supported</div>
+        </div>
+
+        <textarea id="output-code" readonly placeholder="Rust code will generate here..."></textarea>
+        <button onclick="importFromCode()" style="width: 100%; background: #007acc;">Import Existing Code</button>
+    </div>
+</div>
+
+<script>
+    const grid = document.getElementById('canvas-grid');
+    const output = document.getElementById('output-code');
+    const hexInput = document.getElementById('hex-input');
+    const charDisplay = document.getElementById('char-display');
+    const previewInput = document.getElementById('preview-input');
+    const previewCanvas = document.getElementById('preview-canvas');
+    const ctx = previewCanvas.getContext('2d');
+
+    // Store as Map to handle sparse Unicode data efficiently
+    let fontMap = new Map();
+    let currentChar = 32;
+
+    function initGrid() {
+        grid.innerHTML = '';
+        for (let r = 0; r < 16; r++) {
+            for (let c = 0; c < 8; c++) {
+                const d = document.createElement('div');
+                d.className = 'pixel';
+                d.onclick = () => togglePixel(r, c);
+                grid.appendChild(d);
+            }
+        }
+        updateUI();
+    }
+
+    function togglePixel(r, c) {
+        if (!fontMap.has(currentChar)) fontMap.set(currentChar, Array(16).fill(0));
+        fontMap.get(currentChar)[r] ^= (1 << (7 - c));
+        updateUI();
+    }
+
+    function updateUI() {
+        const data = fontMap.get(currentChar) || Array(16).fill(0);
+        const pixels = document.querySelectorAll('.pixel');
+        data.forEach((byte, r) => {
+            for (let c = 0; c < 8; c++) {
+                const isOn = (byte >> (7 - c)) & 1;
+                pixels[(r * 8) + c].style.backgroundColor = isOn ? "#f1c40f" : "#252525";
+            }
+        });
+
+        hexInput.value = '0x' + currentChar.toString(16).toUpperCase();
+        charDisplay.textContent = `Char: ${String.fromCodePoint(currentChar)} (${currentChar})`;
+        generateCode();
+        drawPreview();
+    }
+
+    function shift(dir) {
+        if (!fontMap.has(currentChar)) return;
+        let char = fontMap.get(currentChar);
+        if (dir === 'up') { char.shift(); char.push(0); }
+        else if (dir === 'down') { char.unshift(0); char.pop(); }
+        else if (dir === 'left') fontMap.set(currentChar, char.map(b => (b << 1) & 0xFF));
+        else if (dir === 'right') fontMap.set(currentChar, char.map(b => (b >> 1)));
+        updateUI();
+    }
+
+    function drawPreview() {
+        const text = previewInput.value;
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
+        ctx.fillStyle = "#f1c40f";
+
+        let xOffset = 5;
+        for (let char of text) {
+            const code = char.codePointAt(0);
+            const data = fontMap.get(code) || Array(16).fill(0);
+            data.forEach((byte, y) => {
+                for (let x = 0; x < 8; x++) {
+                    if ((byte >> (7 - x)) & 1) ctx.fillRect((xOffset + x) * 2, (y + 10) * 2, 2, 2);
+                }
+            });
+            xOffset += 9;
+        }
+    }
+
+    function generateCode() {
+        let code = "// Sparse Font Map\n";
+        code += "use std::collections::HashMap;\n\n";
+        code += "fn get_font() -> HashMap<u32, [u8; 16]> {\n";
+        code += "    let mut m = HashMap::new();\n";
+
+        // Sort keys so output is organized
+        const sortedKeys = Array.from(fontMap.keys()).sort((a, b) => a - b);
+        for (let key of sortedKeys) {
+            if (fontMap.get(key).some(b => b !== 0)) {
+                const bytes = fontMap.get(key).map(b => '0x' + b.toString(16).toUpperCase().padStart(2, '0')).join(', ');
+                code += `    m.insert(${key}, [${bytes}]); // ${String.fromCodePoint(key)}\n`;
+            }
+        }
+        code += "    m\n}";
+        output.value = code;
+    }
+
+    function importFromCode() {
+        const text = output.value;
+        const regex = /m\.insert\((\d+),\s*\[([^\]]+)\]/g;
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+            const idx = parseInt(match[1]);
+            const bytes = match[2].split(',').map(s => parseInt(s.trim(), 16));
+            fontMap.set(idx, bytes);
+        }
+        updateUI();
+    }
+
+    // Nav functions
+    function nextChar() { currentChar++; updateUI(); }
+    function prevChar() { if(currentChar > 0) currentChar--; updateUI(); }
+    function jumpToHex() { currentChar = parseInt(hexInput.value); updateUI(); }
+    function jumpToBlock() { currentChar = parseInt(document.getElementById('block-selector').value); updateUI(); }
+    function clearGrid() { fontMap.delete(currentChar); updateUI(); }
+
+    previewInput.oninput = drawPreview;
+    initGrid();
+</script>
+</body>
+</html>
