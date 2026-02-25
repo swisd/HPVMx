@@ -22,7 +22,6 @@ mod hpvmlog;
 extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use core::arch::x86_64::__m128;
 use core::fmt::Write;
 use uefi::prelude::*;
 use log::error;
@@ -1100,9 +1099,7 @@ fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
 
 pub fn init_mouse() {
     if let Ok(handle) = boot::get_handle_for_protocol::<SimplePointer>() {
-        unsafe {
-            let _ = boot::connect_controller(handle, None, None, true);
-        }
+        let _ = boot::connect_controller(handle, None, None, true);
         if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<SimplePointer>(handle) {
 
 

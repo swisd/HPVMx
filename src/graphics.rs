@@ -158,7 +158,7 @@ impl Cursor {
             Ok(h) => {
                 message!("", "Found {} handles with Simple Pointer protocol", h.as_slice().len());
                 for (i, handle) in h.as_slice().iter().enumerate() {
-                    if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(*handle) {
+                    if let Ok(mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(*handle) {
                         let mode = mouse.mode();
                         message!("", "  [{}] Resolution: [{}, {}, {}], Buttons: [{}, {}]", 
                             i, mode.resolution[0], mode.resolution[1], mode.resolution[2],
@@ -178,7 +178,7 @@ impl Cursor {
                 message!("", "Found {} handles with Absolute Pointer protocol", h.as_slice().len());
                 for (i, handle) in h.as_slice().iter().enumerate() {
                     // Use our local wrapper
-                    if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<AbsolutePointer>(*handle) {
+                    if let Ok(mouse) = uefi::boot::open_protocol_exclusive::<AbsolutePointer>(*handle) {
                         let mode = mouse.mode();
                         message!("", "  [{}] Range: [{}..{}, {}..{}, {}..{}], Buttons: {:?}", 
                             i, mode.absolute_min_x, mode.absolute_max_x,

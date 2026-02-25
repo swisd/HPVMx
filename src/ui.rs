@@ -710,7 +710,7 @@ impl DashboardUI {
                     
                     pg.draw_text(20, y, "SpinBox / DoubleSpinBox:", 0xAAAAAA); y += 20;
                     pg.draw_rect_outline(20, y, 60, 20, 0x888888); pg.draw_text(25, y+2, "42", 0xFFFFFF); pg.draw_text(65, y+2, "[^v]", 0xAAAAAA);
-                    pg.draw_rect_outline(100, y, 60, 20, 0x888888); pg.draw_text(105, y+2, "3.14", 0xFFFFFF); y += 30;
+                    pg.draw_rect_outline(100, y, 60, 20, 0x888888); pg.draw_text(105, y+2, "3.14", 0xFFFFFF); //y += 30;
 
                     // Column 2
                     let mut y = 130;
@@ -730,7 +730,7 @@ impl DashboardUI {
                     y += 25;
                     
                     pg.draw_text(x2, y, "Date/Time Edits:", 0xAAAAAA); y += 20;
-                    pg.draw_text(x2, y, "2026-02-23 10:25", 0x00FFFF); y += 30;
+                    pg.draw_text(x2, y, "2026-02-23 10:25", 0x00FFFF); //y += 30;
 
                     // Column 3
                     let mut y = 130;
@@ -753,10 +753,10 @@ impl DashboardUI {
                     pg.draw_line(x3 + 60, y, x3 + 60, y + 60, 0x888888);
                     pg.draw_text(x3 + 5, y + 2, "H1", 0xAAAAAA); pg.draw_text(x3 + 65, y + 2, "Header 2", 0xAAAAAA);
                     pg.draw_text(x3 + 5, y + 25, "Val 1", 0xFFFFFF); pg.draw_text(x3 + 65, y + 25, "Data 2", 0xFFFFFF);
-                    y += 70;
+                    //y += 70;
 
                     // Group Box & ToolBox
-                    let mut y = 400;
+                    let y = 400;
                     pg.draw_rect_outline(20, y, 200, 100, 0x888888);
                     pg.fill_rect(30, y - 8, 80, 16, 0x222222);
                     pg.draw_text(35, y - 8, "GroupBox", 0xAAAAAA);
@@ -800,7 +800,7 @@ impl DashboardUI {
         } else {
             // self.draw_header();
             // self.draw_navigation_bar();
-            // 
+            //
             // match self.selected_tab {
             //     DashboardTab::Overview => self.draw_overview(),
             //     DashboardTab::VirtualMachines => self.draw_vms_list(),
@@ -811,7 +811,7 @@ impl DashboardUI {
             //     DashboardTab::Devices => {},
             //     DashboardTab::Test => {},
             // }
-            // 
+            //
             // self.draw_footer();
             message!("", "dashboard unavailable")
         }
@@ -835,7 +835,7 @@ impl DashboardUI {
     //         let _ = stdout.set_color(Color::White, Color::Black);
     //     });
     // }
-    // 
+    //
     // fn draw_navigation_bar(&self) {
     //     uefi::system::with_stdout(|stdout| {
     //         let _ = stdout.set_color(Color::LightGray, Color::Black);
@@ -890,12 +890,12 @@ impl DashboardUI {
     //             stdout,
     //             "├────┼────────────┼──────────┼─────┼────────┼───────────┤\n"
     //         );
-    // 
+    //
     //         let end = core::cmp::min(
     //             self.scroll_offset + 10,
     //             self.vms.len()
     //         );
-    // 
+    //
     //         for vm in &self.vms[self.scroll_offset..end] {
     //             let name_len = core::cmp::min(10, vm.name.len());
     //             let _ = core::fmt::Write::write_fmt(
@@ -912,7 +912,7 @@ impl DashboardUI {
     //                 )
     //             );
     //         }
-    // 
+    //
     //         let _ = core::fmt::Write::write_str(
     //             stdout,
     //             "└────┴────────────┴──────────┴─────┴────────┴───────────┘\n"
