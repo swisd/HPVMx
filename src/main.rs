@@ -1,5 +1,6 @@
 #![feature(str_as_str)]
 #![feature(abi_x86_interrupt)]
+#![feature(core_float_math)]
 #![no_std]
 #![no_main]
 
@@ -16,8 +17,8 @@ mod hardware;
 mod logiclang_int;
 mod devices;
 mod hpvmlog;
-
-
+mod consts;
+mod types;
 
 extern crate alloc;
 use alloc::string::{String, ToString};
@@ -42,7 +43,7 @@ use vmm::HypervisorManager;
 use ui::WinNTShell;
 use ui::DashboardUI;
 //use sysinfo;
-
+use types::*;
 
 //#[global_allocator]
 #[allow(dead_code, unused)]
@@ -213,7 +214,35 @@ fn main() -> Status {
         let parts = &command;
 
         match command.as_slice()[0] {
-            "help" => message!("\n", "commands available: \n(* means command is not in a working state) \n\nFileSystem:\n  help - show this help\n  clear - clear screen\n  ls - list files\n  cd [dir] - change directory*\n  pwd - print working directory\n  mkdir [dir] - make directory\n  touch [file] - create file\n  cpy [src] [dst] - copy file\n  mov [src] [dst] - move file\n  rm [file] - remove file\n  cat [file] - show file contents\n  clon [src] [dst] - clone directory\n  write [file] [data] [mode] - write to file\n\nVM Management:\n  vm create [name] [memory_mb] [vcpus] - create VM\n  vm list - list all VMs\n  vm start [vm_id] - start VM\n  vm stop [vm_id] - stop VM\n  vm delete [vm_id] - delete VM\n  vm boot [vm_id] [iso|efi|img] - boot VM with media\n  boot [vm_id] [iso|efi|img] - boot VM with media\n  console [vm_id] - attach to VM console\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n\nHypervisor:\n  vmm info - show hypervisor stats\n  vmm info-adv - show advanced stats\n\nNetworking:\n  net status - show NIC status (SNP)\n  net up - initialize NIC via UEFI SNP\n  ping [ip] - test reachability (placeholder)\n  lanscan [x.y.z.] - scan /24 network (placeholder)\n  httpd start [port] - start HTTP management server (placeholder)\n  httpd stop - stop HTTP server\n\nOther:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel*\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data"),
+            "help" => {
+                if parts.len() < 2 {
+                    message!("\n", "commands sets available: \n\nhelp fs - FileSystem Help\nhelp vm - VM Help\nhelp hv - Hypervisor Help\nhelp net - Network Help\nhelp misc - Misc. Help\nhelp prog [command] - Command-Specific Help\n\n")
+                } else {
+                    match parts[1] {
+                        "fs" => {
+                            message!("\n", "\nFileSystem:\n \n  clear - clear screen\n  ls - list files\n  cd [dir] - change directory*\n  pwd - print working directory\n  mkdir [dir] - make directory\n  touch [file] - create file\n  cpy [src] [dst] - copy file\n  mov [src] [dst] - move file\n  rm [file] - remove file\n  cat [file] - show file contents\n  clon [src] [dst] - clone directory\n  write [file] [data] [mode] - write to file\n")
+                        }
+                        "vm" => {
+                            message!("\n", "\nVM Management:\n  vm create [name] [memory_mb] [vcpus] - create VM\n  vm list - list all VMs\n  vm start [vm_id] - start VM\n  vm stop [vm_id] - stop VM\n  vm delete [vm_id] - delete VM\n  vm boot [vm_id] [iso|efi|img] - boot VM with media\n  boot vm [vm_id] [iso|efi|img] - boot VM with media\n  console [vm_id] - attach to VM console\n")
+                        }
+                        "hv" => {
+                            message!("\n", "\nHypervisor:\n  vmm info - show hypervisor stats\n  vmm info-adv - show advanced stats\n\n")
+                        }
+                        "net" => {
+                            message!("\n", "\nNetworking:\n  net status - show NIC status (SNP)\n  net up - initialize NIC via UEFI SNP\n  ping [ip] - test reachability (placeholder)\n  lanscan [x.y.z.] - scan /24 network (placeholder)\n  httpd start [port] - start HTTP management server (placeholder)\n  httpd stop - stop HTTP server\n\n")
+                        }
+                        "misc" => {
+                            message!("\n", "\n Misc\nOther:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel*\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\nrun-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard")
+                        }
+                        "prog" => {
+                            message!("\n", "no help for '{}' (yet)", parts[2])
+                        }
+                        _ => {
+                            message!("\n", "no help for this")
+                        }
+                    }
+                }
+            },
             "clear" => { uefi::system::with_stdout(|s| s.clear().unwrap()); }
             "ls" => FileSystem::list_files(),
             "cd" => { FileSystem::cd(command[1]) }

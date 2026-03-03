@@ -680,7 +680,27 @@ impl DashboardUI {
                     for (i, entry) in self.files.iter().enumerate() {
                         if y + line_h > list_y + list_h - 2 { break; }
                         let color = if i == self.selected_file_idx { 0xFFFF00 } else { 0xFFFFFF };
-                        let icon = if entry.is_dir { "Ñ D" } else { "Ç F" };
+                        let icon = if entry.is_dir { "Ñ D" } else {
+                            let dec_syn = ["json", "xml"];
+                            let sys_syn = ["sys", "efi"];
+                            let prog_syn = ["logical", "py", "dmx", "rts"];
+
+
+                            #[allow(irrefutable_let_patterns)]
+                            if let ext = entry.name.split(".").last().unwrap() {
+                                if dec_syn.contains(&ext) {
+                                    "Ò F"
+                                } else if sys_syn.contains(&ext) {
+                                    "Ó F"
+                                } else if prog_syn.contains(&ext) {
+                                    "Ô F"
+                                } else {
+                                    "Ç F"
+                                }
+                            } else {
+                                "Ç F"
+                            }
+                        };
                         pg.draw_text(list_x + 8, y, icon, 0xCCCCCC);
                         pg.draw_text(list_x + 56, y, &alloc::format!("{:<28}", entry.name), color);
                         pg.draw_text(list_x + 348, y, &alloc::format!("{:>12}", entry.size), 0xCCCCCC);
