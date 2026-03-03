@@ -1,3 +1,5 @@
+#![allow(unsafe_code, dead_code, non_camel_case_types, non_snake_case, unused)]
+
 pub const PI: f64 = 3.141592653589793;
 pub const E: f64 = 2.71828;
 pub const TAU: f64 = 6.28318530717958647692528676655900576839433879875021164194988918461563281257241799;

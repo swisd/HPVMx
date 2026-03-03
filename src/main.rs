@@ -4,6 +4,9 @@
 #![no_std]
 #![no_main]
 
+
+#![allow(unsafe_code, dead_code, non_camel_case_types, non_snake_case, unused)]
+
 mod ui;
 mod kernel;
 mod filesystem;
@@ -31,6 +34,7 @@ use buddy_system_allocator::LockedHeap;
 use uefi::boot::{MemoryType};
 use uefi::mem::memory_map::MemoryMap;
 use uefi::proto::console::text::{Key, ScanCode};
+
 use uefi::proto::console::text::Color;
 use uefi::runtime::ResetType;
 //use uefi::system::with_stdout;
