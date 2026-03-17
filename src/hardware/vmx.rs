@@ -132,6 +132,7 @@ impl VmcsRegion {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::message;
 
     #[test]
     fn test_vtx_detection() {

@@ -1,6 +1,7 @@
 #![feature(str_as_str)]
 #![feature(abi_x86_interrupt)]
 #![feature(core_float_math)]
+#![feature(generic_atomic)]
 #![no_std]
 #![no_main]
 
@@ -28,6 +29,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
 use uefi::prelude::*;
+use uefi::Char16;
 use log::error;
 use uefi::boot;
 use buddy_system_allocator::LockedHeap;
@@ -145,7 +147,7 @@ fn main() -> Status {
 
     FileSystem::scan_and_map_devices("DEVICELIST").unwrap();
 
-    //interrupts::init_idt();
+    interrupts::init_idt();
 
     unsafe {
         HYPERVISOR = Some(HypervisorManager::new());
@@ -799,9 +801,36 @@ fn handle_vm_command(command: &[&str]) {
                             }
                         };
                         let path = command[3];
-                        boot_vm_with_media(vm_id, path);
+                        match hv.boot_vm_with_media(vm_id, path) {
+                            Ok(_) => hpvm_info!("Boot", "VM {} boot process initiated", vm_id),
+                            Err(e) => hpvm_error!("Boot", "failed to boot VM: {}", e),
+                        }
                     }
-                    _ => message!("\n", "Usage: vm [create|list|start|stop|delete|boot]"),
+                    Some(&"simulate-violation") => {
+                        if command.len() < 4 {
+                            message!("\n", "Usage: vm simulate-violation [vm_id] [error_code]");
+                            return;
+                        }
+                        let vm_id: u32 = match command[2].parse() {
+                            Ok(id) => id,
+                            Err(_) => {
+                                hpvm_error!("VMM", "invalid VM ID");
+                                return;
+                            }
+                        };
+                        let error_code: u32 = match command[3].parse() {
+                            Ok(code) => code,
+                            Err(_) => {
+                                hpvm_error!("VMM", "invalid error code");
+                                return;
+                            }
+                        };
+                        match hv.trigger_autolytic_response(vm_id, error_code) {
+                            Ok(_) => hpvm_info!("VMM", "Autolytic response triggered for VM {}", vm_id),
+                            Err(e) => hpvm_error!("VMM", "failed to trigger response: {}", e),
+                        }
+                    }
+                    _ => message!("\n", "Usage: vm [create|list|start|stop|delete|boot|simulate-violation]"),
                 }
             }
             None => hpvm_error!("VMM", "hypervisor not initialized"),
@@ -870,7 +899,7 @@ fn boot_vm_with_media(vm_id: u32, media_path: &str) {
                         hpvm_info!("Boot", "loaded {} bytes from '{}'", media_data.len(), media_path);
 
                         // Attempt to boot the VM with the media
-                        match hv.boot_vm_with_media(vm_id, &media_data) {
+                        match hv.boot_vm_with_media(vm_id, media_path) {
                             Ok(_) => {
                                 hpvm_info!("Boot", "VM {} booted with {}", vm_id, media_type);
                             }
@@ -967,13 +996,14 @@ fn show_dashboard_ui() {
 
     // Enter dashboard interaction loop
     let mut last_refresh = 0;
+    let refresh_rate = 60;
     loop {
         // Limit frame rate to ~60Hz (16,666 microseconds)
         boot::stall(core::time::Duration::from_micros(16_666));
 
         // Periodically refresh data from hypervisor
         last_refresh += 1;
-        if last_refresh >= 60 { // Refresh roughly every second
+        if last_refresh >= refresh_rate { // Refresh roughly every second
             unsafe {
                 if let Some(ref hv) = HYPERVISOR {
                     dashboard.vms.clear();
@@ -1014,7 +1044,46 @@ fn show_dashboard_ui() {
         });
 
         if let Some(key) = key {
+            let old_tab = dashboard.get_tab();
             dashboard.handle_input(key);
+            let new_tab = dashboard.get_tab();
+
+            // Handle VM Actions
+            let is_enter = matches!(key, Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A);
+            if matches!(old_tab, ui::DashboardTab::VirtualMachines) && is_enter {
+                if let Some(vm_id) = dashboard.get_selected_vm_id() {
+                    let action = dashboard.get_selected_action();
+                    unsafe {
+                        if let Some(hv) = HYPERVISOR.as_mut() {
+                            match action {
+                                0 => { let _ = hv.start_vm(vm_id); }
+                                1 => { let _ = hv.stop_vm(vm_id); }
+                                2 => { let _ = hv.reset_vm(vm_id); }
+                                3 => { let _ = hv.zero_vm(vm_id); }
+                                4 => { let _ = hv.delete_vm(vm_id); }
+                                _ => {}
+                            }
+                        }
+                    }
+                    last_refresh = refresh_rate; // Force refresh
+                }
+            }
+
+            // Handle Create VM Confirmation
+            if matches!(old_tab, ui::DashboardTab::CreateVM) && dashboard.is_create_vm_requested() {
+                let (name, mem, vcpus) = dashboard.get_create_vm_data();
+                unsafe {
+                    if let Some(hv) = HYPERVISOR.as_mut() {
+                        if let Ok(vm_id) = hv.create_vm(&name, mem, vcpus) {
+                            hpvm_info!("VMM", "Created VM '{}' via UI", name);
+                        }
+                    }
+                }
+                dashboard.reset_create_vm_data();
+                dashboard.set_tab(ui::DashboardTab::VirtualMachines);
+                last_refresh = refresh_rate; // Force refresh
+            }
+
             if dashboard.exit_requested() {
                 hpvm_info!("Dashboard", "exiting dashboard");
                 uefi::system::with_stdout(|s| {

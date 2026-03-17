@@ -441,6 +441,14 @@ pub struct DashboardUI {
     pub categories: Vec<DeviceCategory>,
     pub selected_device_idx: usize,
     exit_requested: bool,
+
+    // Fields for Create VM UI
+    pub new_vm_name: String,
+    pub new_vm_memory_mb: u32,
+    pub new_vm_vcpus: u32,
+    pub create_vm_focus_idx: usize, 
+    pub vm_action_idx: usize, // For VM actions (0: Start, 1: Stop, 2: Reset, 3: Zero, 4: Delete)
+    pub selected_vm_idx: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -453,6 +461,7 @@ pub enum DashboardTab {
     Console,
     Devices,
     Test,
+    CreateVM, // New state for VM creation UI
 }
 
 pub struct VmDisplayInfo {
@@ -491,6 +500,12 @@ impl DashboardUI {
             categories: Vec::new(),
             selected_device_idx: 0,
             exit_requested: false,
+            new_vm_name: String::from("NewVM"),
+            new_vm_memory_mb: 1024,
+            new_vm_vcpus: 1,
+            create_vm_focus_idx: 0,
+            vm_action_idx: 0,
+            selected_vm_idx: 0,
         }
     }
 
@@ -546,11 +561,17 @@ impl DashboardUI {
                     // Title
                     pg.draw_text(margin, content_top + margin + 4, "Virtual Machines", 0x00FF00);
 
+                    // New VM Button
+                    let create_btn_x = width - margin - 120;
+                    let create_btn_y = content_top + margin;
+                    pg.fill_rect(create_btn_x, create_btn_y, 120, 24, 0x008000);
+                    pg.draw_text(create_btn_x + 10, create_btn_y + 4, "[+] Create VM", 0xFFFFFF);
+
                     // Table frame
                     let table_x = margin;
-                    let table_y = content_top + margin + 24;
+                    let table_y = content_top + margin + 32;
                     let table_w = core::cmp::min(width - margin * 2, 760);
-                    let table_h = core::cmp::min(height - table_y - 80, 260);
+                    let table_h = core::cmp::min(height - table_y - 120, 260);
                     pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0x888888);
 
                     // Header background
@@ -559,13 +580,77 @@ impl DashboardUI {
 
                     // Rows
                     let mut y = table_y + line_h + gutter;
-                    for vm in &self.vms {
+                    for (idx, vm) in self.vms.iter().enumerate() {
                         if y + line_h > table_y + table_h - 2 { break; }
+                        let is_selected = idx == self.selected_vm_idx;
+                        let text_color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
+                        if is_selected {
+                            pg.fill_rect(table_x + 2, y - 2, table_w - 4, line_h, 0x444400);
+                        }
                         let info = alloc::format!("{:<4} {:<16} {:<12} {:>3}% {:>5}MB",
                             vm.id, vm.name, vm.state, vm.cpu_usage, vm.memory_usage_mb);
-                        pg.draw_text(table_x + 8, y, &info, 0xFFFFFF);
+                        pg.draw_text(table_x + 8, y, &info, text_color);
                         y += line_h;
                     }
+
+                    // VM Actions Bar
+                    if !self.vms.is_empty() {
+                        let actions_y = table_y + table_h + gutter;
+                        pg.draw_text(margin, actions_y, "Actions for Selected VM:", 0xCCCCCC);
+                        let actions = ["Start", "Stop", "Reset", "Zero", "Delete"];
+                        let mut action_x = margin;
+                        let action_y = actions_y + 20;
+                        for (idx, action) in actions.iter().enumerate() {
+                            let is_focused = idx == self.vm_action_idx;
+                            let color = if is_focused { 0x00AA00 } else { 0x444444 };
+                            pg.fill_rect(action_x, action_y, 70, 24, color);
+                            pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
+                            action_x += 80;
+                        }
+                        pg.draw_text(margin, action_y + 32, "Press ENTER to execute action | SPACE to Create VM", 0x888888);
+                    } else {
+                        pg.draw_text(margin, table_y + table_h + gutter, "No VMs. Press SPACE to Create VM", 0x888888);
+                    }
+                }
+                DashboardTab::CreateVM => {
+                    pg.draw_text(margin, content_top + margin, "Create New Virtual Machine", 0x00FF00);
+                    
+                    let form_x = margin + 20;
+                    let mut form_y = content_top + margin + 40;
+                    
+                    // Name Field
+                    pg.draw_text(form_x, form_y, "Name:", 0xFFFFFF);
+                    let name_focus = self.create_vm_focus_idx == 0;
+                    pg.draw_rect_outline(form_x + 100, form_y - 4, 200, 24, if name_focus { 0xFFFF00 } else { 0x888888 });
+                    pg.draw_text(form_x + 105, form_y, &self.new_vm_name, 0xFFFFFF);
+                    
+                    form_y += 40;
+                    // CPU Cores Field
+                    pg.draw_text(form_x, form_y, "vCPUs:", 0xFFFFFF);
+                    let cpu_focus = self.create_vm_focus_idx == 1;
+                    pg.draw_rect_outline(form_x + 100, form_y - 4, 100, 24, if cpu_focus { 0xFFFF00 } else { 0x888888 });
+                    pg.draw_text(form_x + 105, form_y, &alloc::format!("{}", self.new_vm_vcpus), 0xFFFFFF);
+                    pg.draw_text(form_x + 210, form_y, "(Use + / - to change)", 0x888888);
+                    
+                    form_y += 40;
+                    // Memory Field
+                    pg.draw_text(form_x, form_y, "Memory (MB):", 0xFFFFFF);
+                    let mem_focus = self.create_vm_focus_idx == 2;
+                    pg.draw_rect_outline(form_x + 100, form_y - 4, 100, 24, if mem_focus { 0xFFFF00 } else { 0x888888 });
+                    pg.draw_text(form_x + 105, form_y, &alloc::format!("{}", self.new_vm_memory_mb), 0xFFFFFF);
+                    pg.draw_text(form_x + 210, form_y, "(Use + / - to change)", 0x888888);
+                    
+                    form_y += 60;
+                    // Buttons
+                    let create_focused = self.create_vm_focus_idx == 3;
+                    pg.fill_rect(form_x, form_y, 120, 32, if create_focused { 0x00AA00 } else { 0x006600 });
+                    pg.draw_text(form_x + 20, form_y + 8, "CREATE", 0xFFFFFF);
+                    
+                    let cancel_focused = self.create_vm_focus_idx == 4;
+                    pg.fill_rect(form_x + 140, form_y, 120, 32, if cancel_focused { 0xAA0000 } else { 0x660000 });
+                    pg.draw_text(form_x + 20 + 140, form_y + 8, "CANCEL", 0xFFFFFF);
+                    
+                    pg.draw_text(margin, form_y + 50, "TAB to switch fields | ENTER to confirm | ESC to cancel", 0x888888);
                 }
                 DashboardTab::Resources => {
                     // Left info panel
@@ -1195,8 +1280,102 @@ impl DashboardUI {
         }
     }
 
+    pub fn get_create_vm_data(&self) -> (String, u32, u32) {
+        (self.new_vm_name.clone(), self.new_vm_memory_mb, self.new_vm_vcpus)
+    }
+
+    pub fn reset_create_vm_data(&mut self) {
+        self.new_vm_name = String::from("NewVM");
+        self.new_vm_memory_mb = 1024;
+        self.new_vm_vcpus = 1;
+        self.create_vm_focus_idx = 0;
+    }
+
+    pub fn get_selected_vm_id(&self) -> Option<u32> {
+        self.vms.get(self.selected_vm_idx).map(|vm| vm.id)
+    }
+
+    pub fn get_selected_action(&self) -> usize {
+        self.vm_action_idx
+    }
+
+    pub fn is_create_vm_requested(&self) -> bool {
+        matches!(self.selected_tab, DashboardTab::CreateVM) && self.create_vm_focus_idx == 3
+    }
+
+    pub fn set_tab(&mut self, tab: DashboardTab) {
+        self.selected_tab = tab;
+    }
+
+    pub fn get_tab(&self) -> DashboardTab {
+        self.selected_tab
+    }
+
     pub fn handle_input(&mut self, key: Key) {
         use uefi::proto::console::text::ScanCode;
+
+        match self.selected_tab {
+            DashboardTab::CreateVM => {
+                match key {
+                    Key::Printable(c) => {
+                        let ch = char::from(c).to_ascii_lowercase();
+                        match ch {
+                            ' ' => {
+                                if self.create_vm_focus_idx == 0 {
+                                    self.new_vm_name.push(' ');
+                                }
+                            }
+                            '+' | '=' => {
+                                if self.create_vm_focus_idx == 1 {
+                                    self.new_vm_vcpus += 1;
+                                } else if self.create_vm_focus_idx == 2 {
+                                    self.new_vm_memory_mb += 128;
+                                }
+                            }
+                            '-' | '_' => {
+                                if self.create_vm_focus_idx == 1 {
+                                    self.new_vm_vcpus = self.new_vm_vcpus.saturating_sub(1).max(1);
+                                } else if self.create_vm_focus_idx == 2 {
+                                    self.new_vm_memory_mb = self.new_vm_memory_mb.saturating_sub(128).max(128);
+                                }
+                            }
+                            '\u{08}' => { // Backspace
+                                if self.create_vm_focus_idx == 0 {
+                                    self.new_vm_name.pop();
+                                }
+                            }
+                            '\t' => {
+                                self.create_vm_focus_idx = (self.create_vm_focus_idx + 1) % 5;
+                            }
+                            '\r' | '\n' => {
+                                if self.create_vm_focus_idx == 3 {
+                                    // Trigger Create VM (will be handled in main.rs)
+                                    // We set a flag or just wait for main.rs to poll
+                                } else if self.create_vm_focus_idx == 4 {
+                                    self.selected_tab = DashboardTab::VirtualMachines;
+                                } else {
+                                    self.create_vm_focus_idx = (self.create_vm_focus_idx + 1) % 5;
+                                }
+                            }
+                            'q' => {
+                                self.selected_tab = DashboardTab::VirtualMachines;
+                            }
+                            _ => {
+                                if self.create_vm_focus_idx == 0 && (ch.is_alphanumeric() || ch == '_') {
+                                    self.new_vm_name.push(ch);
+                                }
+                            }
+                        }
+                    }
+                    Key::Special(ScanCode::ESCAPE) => {
+                        self.selected_tab = DashboardTab::VirtualMachines;
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            _ => {}
+        }
 
         match key {
             Key::Printable(c) => {
@@ -1214,8 +1393,15 @@ impl DashboardUI {
                     'd' => self.selected_tab = DashboardTab::Devices,
                     'c' => self.selected_tab = DashboardTab::Console,
                     't' => self.selected_tab = DashboardTab::Test,
+                    ' ' => {
+                        if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
+                            self.selected_tab = DashboardTab::CreateVM;
+                        }
+                    }
                     '\r' | '\n' => {
-                        if matches!(self.selected_tab, DashboardTab::Storage) {
+                        if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
+                            // Action execution handled in main.rs
+                        } else if matches!(self.selected_tab, DashboardTab::Storage) {
                             if self.selected_file_idx < self.files.len() {
                                 let entry = &self.files[self.selected_file_idx];
                                 if entry.is_dir {
@@ -1280,6 +1466,7 @@ impl DashboardUI {
                             DashboardTab::Devices => DashboardTab::Console,
                             DashboardTab::Console => DashboardTab::Test,
                             DashboardTab::Test => DashboardTab::Overview,
+                            DashboardTab::CreateVM => DashboardTab::VirtualMachines,
                         };
                     }
                     _ => {}
@@ -1296,6 +1483,10 @@ impl DashboardUI {
                 } else if matches!(self.selected_tab, DashboardTab::Devices) {
                     if self.selected_device_idx > 0 {
                         self.selected_device_idx -= 1;
+                    }
+                } else if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
+                    if self.selected_vm_idx > 0 {
+                        self.selected_vm_idx -= 1;
                     }
                 } else {
                     if self.scroll_offset > 0 {
@@ -1319,10 +1510,24 @@ impl DashboardUI {
                     if self.selected_device_idx < total_rows.saturating_sub(1) {
                         self.selected_device_idx += 1;
                     }
+                } else if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
+                    if self.selected_vm_idx < self.vms.len().saturating_sub(1) {
+                        self.selected_vm_idx += 1;
+                    }
                 } else {
                     if self.scroll_offset < self.vms.len().saturating_sub(1) {
                         self.scroll_offset += 1;
                     }
+                }
+            }
+            Key::Special(ScanCode::LEFT) => {
+                if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
+                    self.vm_action_idx = self.vm_action_idx.saturating_sub(1);
+                }
+            }
+            Key::Special(ScanCode::RIGHT) => {
+                if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
+                    self.vm_action_idx = (self.vm_action_idx + 1).min(4);
                 }
             }
             _ => {}

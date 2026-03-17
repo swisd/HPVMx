@@ -28,9 +28,8 @@ impl BootLoader {
         Ok(Vec::new())
     }
 
-    pub fn load_kernel(&self, _path: &str) -> Result<Vec<u8>, &str> {
-        // Load kernel image
-        Ok(Vec::new())
+    pub fn load_kernel(&self, path: &str) -> Result<Vec<u8>, &'static str> {
+        crate::kernel::KernelLoader::load_kernel(path)
     }
 
     pub fn load_initrd(&self, _path: &str) -> Result<Vec<u8>, &str> {

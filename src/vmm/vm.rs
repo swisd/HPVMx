@@ -3,6 +3,8 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use crate::vmm::vcpu::VirtualCpu;
+use crate::vmm::vmbus::VmBus;
+use crate::vmm::mapper::ResourceMapper;
 
 /// Virtual Machine state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +15,7 @@ pub enum VmState {
     Paused,
     Stopped,
     Failed,
+    Decommissioned, // Added for Autolytic Protocol
 }
 
 impl core::fmt::Display for VmState {
@@ -23,6 +26,7 @@ impl core::fmt::Display for VmState {
             VmState::Paused => write!(f, "Paused"),
             VmState::Stopped => write!(f, "Stopped"),
             VmState::Failed => write!(f, "Failed"),
+            VmState::Decommissioned => write!(f, "Decommissioned"),
         }
     }
 }
@@ -36,6 +40,8 @@ pub struct VirtualMachine {
     pub vcpu_count: u32,
     pub vcpus: Vec<VirtualCpu>,
     pub guest_memory_base: Option<usize>,
+    pub vmbus: VmBus,            // New: Communication bus
+    pub mapper: ResourceMapper, // New: Memory/Disk mapping
 }
 
 #[allow(dead_code)]
@@ -59,6 +65,8 @@ impl VirtualMachine {
             vcpu_count,
             vcpus,
             guest_memory_base: None,
+            vmbus: VmBus::new(id),
+            mapper: ResourceMapper::new(id),
         })
     }
 

@@ -8,6 +8,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::f64::math::sqrt;
+use core::sync::atomic::Atomic;
 use crate::message;
 
 pub type BYTE = u8;
@@ -1407,3 +1408,33 @@ pub mod net {
         }
     }
 }
+
+
+
+
+type BoxedVec<T> = Box<Vec<T>>;
+type BoxedResult<T, E> = Box<Result<T, E>>;
+type BoxedOption<T> = Box<Option<T>>;
+type BoxedBox<T> = Box<Box<T>>;
+
+type VecBox<T> = Vec<Box<T>>;
+
+
+type AtomicBox<T> = Atomic<Box<T>>;
+
+
+type DualVec<T> = Vec<Vec<T>>;
+type TripleVec<T> = Vec<Vec<Vec<T>>>;
+type QuadVec<T> = Vec<Vec<Vec<Vec<T>>>>;
+type DualBox<T> = Box<Box<T>>;
+type TripleBox<T> = Box<Box<Box<T>>>;
+type QuadBox<T> = Box<Box<Box<Box<T>>>>;
+type DualOption<T> = Option<Option<T>>;
+type TripleOption<T> = Option<Option<Option<T>>>;
+type QuadOption<T> = Option<Option<Option<Option<T>>>>;
+
+
+
+type Synchronous<T> = Vec<Box<Vec<T>>>;
+
+// type DynBoxedVec<T> = BoxedVec<dyn T>;

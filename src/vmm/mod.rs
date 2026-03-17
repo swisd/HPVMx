@@ -10,4 +10,10 @@ pub  mod bootloader;
 pub mod storage;
 pub mod devices;
 
+pub mod ghm;
+pub mod partitioner;
+pub mod vmbus;
+pub mod security;
+pub mod mapper;
+
 pub use vmm::HypervisorManager;
