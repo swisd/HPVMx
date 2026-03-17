@@ -21,20 +21,16 @@ pub struct GlobalHardwareManager {
 }
 
 impl GlobalHardwareManager {
-    pub fn new(total_cores: u32, total_memory_mb: usize) -> Self {
+    pub fn new(cores_to_use: u32, memory_regions: Vec<(u64, usize)>) -> Self {
         let mut available_cores = Vec::new();
-        for i in 0..total_cores {
+        for i in 0..cores_to_use {
             available_cores.push(i);
         }
-
-        let mut available_memory = Vec::new();
-        // Simplified: single large block of memory
-        available_memory.push((0x100000000, total_memory_mb * 1024 * 1024));
 
         Self {
             assignments: Vec::new(),
             available_cores,
-            available_memory,
+            available_memory: memory_regions,
         }
     }
 

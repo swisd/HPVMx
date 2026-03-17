@@ -13,6 +13,7 @@ mod kernel;
 mod filesystem;
 mod graphics;
 mod interrupts;
+mod gdt;
 mod imx;
 mod paging;
 mod tools;
@@ -28,6 +29,7 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
+use core::ptr::addr_of_mut;
 use uefi::prelude::*;
 use uefi::Char16;
 use log::error;
@@ -51,12 +53,11 @@ use ui::DashboardUI;
 //use sysinfo;
 use types::*;
 
-//#[global_allocator]
 #[allow(dead_code, unused)]
 static ALLOCATOR: LockedHeap<32> = LockedHeap::<32>::empty();
 
 #[allow(dead_code, unused)]
-static mut HEAP_STORAGE: [u8; 2 * 1024 * 1024] = [0; 2 * 1024 * 1024];
+static mut HEAP_STORAGE: [u8; 1 * 1024 * 1024] = [0; 1 * 1024 * 1024]; // 1MB heap for UEFI
 
 #[allow(dead_code, unused)]
 static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
@@ -68,18 +69,18 @@ use crate::paging::PagingManager;
 
 static mut HYPERVISOR: Option<HypervisorManager> = None;
 
-#[allow(dead_code, unused, unused_must_use, non_camel_case_types, nonstandard_style)]
+#[allow(dead_code, unused, unused_must_use, non_camel_case_types, nonstandard_style, static_mut_refs)]
 #[entry]
 fn main() -> Status {
     uefi::helpers::init().unwrap();
     hpvm_info!("UEFI", "init uefi helpers");
 
     // FIXED: Using addr_of_mut! to avoid static_mut_refs errors
-    // unsafe {
-    //     let heap_ptr = addr_of_mut!(HEAP_STORAGE) as *mut u8;
-    //     let heap_size = core::mem::size_of_val(&&raw const HEAP_STORAGE);
-    //     ALLOCATOR.lock().init(heap_ptr as usize, heap_size);
-    // }
+    unsafe {
+        let heap_ptr = addr_of_mut!(HEAP_STORAGE) as *mut u8;
+        let heap_size = core::mem::size_of_val(&&raw const HEAP_STORAGE);
+        ALLOCATOR.lock().init(heap_ptr as usize, heap_size);
+    }
 
     uefi::system::with_stdout(|stdout| {
         let _ = stdout.clear();
@@ -95,48 +96,48 @@ fn main() -> Status {
     let size = uefi::boot::PAGE_SIZE;
     hpvm_info!("page", "system required buffer of {} bytes", size);
 
-    // 16KB is usually enough for most servers; 32KB is safe for high-end systems.
-    let mut map_buffer = [0u8; 32768];
-    hpvm_info!("page", "set map buffer to [0u8; 32768]");
+    hpvm_info!("page", "retrieving memory map...");
 
+    let mut memory_regions = Vec::new();
 
-    let SYSTEM_TABLE: *mut SystemTable = uefi::table::system_table_raw().unwrap().as_ptr();
+    // Workaround for the INVALID_PARAMETER issue in boot::memory_map.
+    // Instead of using the heap-based memory_map function, we'll try to use a static buffer.
+    // However, since boot::get_memory_map is private, we have to find another way.
+    // We can use the boot_services directly if we can access them.
+    
+    hpvm_info!("page", "retrieving memory map...");
+    
+    // We try to use a type that might be "easier" for some reason or just retry.
+    // Actually, uefi-rs 0.36.1's boot::memory_map is what we're supposed to use.
+    // Let's ensure the heap is working by doing a test allocation first.
+    let _test = alloc::vec![0u8; 8192];
+    hpvm_info!("malloc", "test alloc 8k successful");
 
-    // 2. Use get_memory_map_static instead of the alloc version
-    // This does NOT use your LockedHeap; it uses the array above.
-    // let memory_map = uefi::boot::get_boot_services().memory_map(&mut map_buffer)
-    //     .expect("Failed to get memory map. Buffer might be too small.");
-
-    // let memory_map = boot::memory_map(MemoryType::CONVENTIONAL)
-    //     .expect("failed to retrieve memory map. ensure 'alloc' feature is enabled in Cargo.toml");
-
-    match boot::memory_map(MemoryType::LOADER_DATA) {
+    match boot::memory_map(MemoryType::CONVENTIONAL) {
         Ok(map) => {
-            hpvm_info!("malloc", "retrieved memory map with {} entries.  OMT (bsc/bsd)", map.entries().count());
+            hpvm_info!("malloc", "retrieved memory map with {} entries.", map.entries().count());
 
-            // Iterate and filter for free RAM
             for entry in map.entries() {
-                match entry.ty {
-                    MemoryType::BOOT_SERVICES_CODE => {}
-                    MemoryType::BOOT_SERVICES_DATA => {}
-
-                    _ => hpvm_info!("malloc",
-                         "AREA {:#?}  START {:#x}  PAGE {}",
-                         entry.ty,
+                if entry.ty == MemoryType::CONVENTIONAL {
+                    hpvm_info!("malloc",
+                         "CONVENTIONAL {:#x}  PAGES {}",
                          entry.phys_start,
                          entry.page_count,
-                     )
+                     );
+                    memory_regions.push((entry.phys_start, entry.page_count as usize * 4096));
                 }
             }
         }
         Err(e) => {
-            error!("Failed to retrieve memory map: {:?}", e.status());
+             hpvm_error!("page", "Failed to retrieve memory map: {:?}.", e);
+             // If it fails, memory_regions stays empty.
         }
     };
 
     hpvm_info!("IDT", "initializing idt");
-    hpvm_info!("page", "setting active paging mapper");
-    let mut mapper = unsafe { PagingManager::get_active_mapper(x86_64::VirtAddr::new(16384)) };
+    gdt::init();
+    hpvm_info!("page", "setting active paging mapper (identity)");
+    let mut mapper = unsafe { PagingManager::get_active_mapper(x86_64::VirtAddr::new(0)) };
 
     hpvm_info!("fs", "building devicelist");
 
@@ -150,7 +151,7 @@ fn main() -> Status {
     interrupts::init_idt();
 
     unsafe {
-        HYPERVISOR = Some(HypervisorManager::new());
+        HYPERVISOR = Some(HypervisorManager::new(8, memory_regions));
         if let Some(ref mut hv) = HYPERVISOR {
             match hv.initialize() {
                 Ok(_) => hpvm_info!("VMM", "hypervisor initialized"),

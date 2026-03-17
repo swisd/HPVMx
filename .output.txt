@@ -1,0 +1,209 @@
+diff --git a/src/main.rs b/src/main.rs
+index 4dff8e2..39d1d39 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,8 +1,13 @@
+ #![feature(str_as_str)]
+ #![feature(abi_x86_interrupt)]
++#![feature(core_float_math)]
++#![feature(generic_atomic)]
+ #![no_std]
+ #![no_main]
+
++
++#![allow(unsafe_code, dead_code, non_camel_case_types, non_snake_case, unused)]
++
+ mod ui;
+ mod kernel;
+ mod filesystem;
+@@ -16,20 +21,22 @@ mod hardware;
+ mod logiclang_int;
+ mod devices;
+ mod hpvmlog;
+-
+-
++mod consts;
++mod types;
+
+ extern crate alloc;
+ use alloc::string::{String, ToString};
+ use alloc::vec::Vec;
+ use core::fmt::Write;
+ use uefi::prelude::*;
++use uefi::Char16;
+ use log::error;
+ use uefi::boot;
+ use buddy_system_allocator::LockedHeap;
+ use uefi::boot::{MemoryType};
+ use uefi::mem::memory_map::MemoryMap;
+ use uefi::proto::console::text::{Key, ScanCode};
++
+ use uefi::proto::console::text::Color;
+ use uefi::runtime::ResetType;
+ //use uefi::system::with_stdout;
+@@ -42,7 +49,7 @@ use vmm::HypervisorManager;
+ use ui::WinNTShell;
+ use ui::DashboardUI;
+ //use sysinfo;
+-
++use types::*;
+
+ //#[global_allocator]
+ #[allow(dead_code, unused)]
+@@ -140,7 +147,7 @@ fn main() -> Status {
+
+     FileSystem::scan_and_map_devices("DEVICELIST").unwrap();
+
+-    //interrupts::init_idt();
++    interrupts::init_idt();
+
+     unsafe {
+         HYPERVISOR = Some(HypervisorManager::new());
+@@ -213,7 +220,35 @@ fn main() -> Status {
+         let parts = &command;
+
+         match command.as_slice()[0] {
+-            "help" => message!("\n", "commands available: \n(* means command is not in a working state) \n\nFileSystem:\n  help - show this help\n  clear - clear screen\n  ls - list files\n  cd [dir] - change directory*\n  pwd - print working directory\n  mkdir [dir] - make directory\n  touch [file] - create file\n  cpy [src] [dst] - copy file\n  mov [src] [dst] - move file\n  rm [file] - remove file\n  cat [file] - show file contents\n  clon [src] [dst] - clone directory\n  write [file] [data] [mode] - write to file\n\nVM Management:\n  vm create [name] [memory_mb] [vcpus] - create VM\n  vm list - list all VMs\n  vm start [vm_id] - start VM\n  vm stop [vm_id] - stop VM\n  vm delete [vm_id] - delete VM\n  vm boot [vm_id] [iso|efi|img] - boot VM with media\n  boot [vm_id] [iso|efi|img] - boot VM with media\n  console [vm_id] - attach to VM console\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n\nHypervisor:\n  vmm info - show hypervisor stats\n  vmm info-adv - show advanced stats\n\nNetworking:\n  net status - show NIC status (SNP)\n  net up - initialize NIC via UEFI SNP\n  ping [ip] - test reachability (placeholder)\n  lanscan [x.y.z.] - scan /24 network (placeholder)\n  httpd start [port] - start HTTP management server (placeholder)\n  httpd stop - stop HTTP server\n\nOther:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel*\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data"),
++            "help" => {
++                if parts.len() < 2 {
++                    message!("\n", "commands sets available: \n\nhelp fs - FileSystem Help\nhelp vm - VM Help\nhelp hv - Hypervisor Help\nhelp net - Network Help\nhelp misc - Misc. Help\nhelp prog [command] - Command-Specific Help\n\n")
++                } else {
++                    match parts[1] {
++                        "fs" => {
++                            message!("\n", "\nFileSystem:\n \n  clear - clear screen\n  ls - list files\n  cd [dir] - change directory*\n  pwd - print working directory\n  mkdir [dir] - make directory\n  touch [file] - create file\n  cpy [src] [dst] - copy file\n  mov [src] [dst] - move file\n  rm [file] - remove file\n  cat [file] - show file contents\n  clon [src] [dst] - clone directory\n  write [file] [data] [mode] - write to file\n")
++                        }
++                        "vm" => {
++                            message!("\n", "\nVM Management:\n  vm create [name] [memory_mb] [vcpus] - create VM\n  vm list - list all VMs\n  vm start [vm_id] - start VM\n  vm stop [vm_id] - stop VM\n  vm delete [vm_id] - delete VM\n  vm boot [vm_id] [iso|efi|img] - boot VM with media\n  boot vm [vm_id] [iso|efi|img] - boot VM with media\n  console [vm_id] - attach to VM console\n")
++                        }
++                        "hv" => {
++                            message!("\n", "\nHypervisor:\n  vmm info - show hypervisor stats\n  vmm info-adv - show advanced stats\n\n")
++                        }
++                        "net" => {
++                            message!("\n", "\nNetworking:\n  net status - show NIC status (SNP)\n  net up - initialize NIC via UEFI SNP\n  ping [ip] - test reachability (placeholder)\n  lanscan [x.y.z.] - scan /24 network (placeholder)\n  httpd start [port] - start HTTP management server (placeholder)\n  httpd stop - stop HTTP server\n\n")
++                        }
++                        "misc" => {
++                            message!("\n", "\n Misc\nOther:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel*\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\nrun-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard")
++                        }
++                        "prog" => {
++                            message!("\n", "no help for '{}' (yet)", parts[2])
++                        }
++                        _ => {
++                            message!("\n", "no help for this")
++                        }
++                    }
++                }
++            },
+             "clear" => { uefi::system::with_stdout(|s| s.clear().unwrap()); }
+             "ls" => FileSystem::list_files(),
+             "cd" => { FileSystem::cd(command[1]) }
+@@ -766,9 +801,36 @@ fn handle_vm_command(command: &[&str]) {
+                             }
+                         };
+                         let path = command[3];
+-                        boot_vm_with_media(vm_id, path);
++                        match hv.boot_vm_with_media(vm_id, path) {
++                            Ok(_) => hpvm_info!("Boot", "VM {} boot process initiated", vm_id),
++                            Err(e) => hpvm_error!("Boot", "failed to boot VM: {}", e),
++                        }
+                     }
+-                    _ => message!("\n", "Usage: vm [create|list|start|stop|delete|boot]"),
++                    Some(&"simulate-violation") => {
++                        if command.len() < 4 {
++                            message!("\n", "Usage: vm simulate-violation [vm_id] [error_code]");
++                            return;
++                        }
++                        let vm_id: u32 = match command[2].parse() {
++                            Ok(id) => id,
++                            Err(_) => {
++                                hpvm_error!("VMM", "invalid VM ID");
++                                return;
++                            }
++                        };
++                        let error_code: u32 = match command[3].parse() {
++                            Ok(code) => code,
++                            Err(_) => {
++                                hpvm_error!("VMM", "invalid error code");
++                                return;
++                            }
++                        };
++                        match hv.trigger_autolytic_response(vm_id, error_code) {
++                            Ok(_) => hpvm_info!("VMM", "Autolytic response triggered for VM {}", vm_id),
++                            Err(e) => hpvm_error!("VMM", "failed to trigger response: {}", e),
++                        }
++                    }
++                    _ => message!("\n", "Usage: vm [create|list|start|stop|delete|boot|simulate-violation]"),
+                 }
+             }
+             None => hpvm_error!("VMM", "hypervisor not initialized"),
+@@ -837,7 +899,7 @@ fn boot_vm_with_media(vm_id: u32, media_path: &str) {
+                         hpvm_info!("Boot", "loaded {} bytes from '{}'", media_data.len(), media_path);
+
+                         // Attempt to boot the VM with the media
+-                        match hv.boot_vm_with_media(vm_id, &media_data) {
++                        match hv.boot_vm_with_media(vm_id, media_path) {
+                             Ok(_) => {
+                                 hpvm_info!("Boot", "VM {} booted with {}", vm_id, media_type);
+                             }
+@@ -934,13 +996,14 @@ fn show_dashboard_ui() {
+
+     // Enter dashboard interaction loop
+     let mut last_refresh = 0;
++    let refresh_rate = 60;
+     loop {
+         // Limit frame rate to ~60Hz (16,666 microseconds)
+         boot::stall(core::time::Duration::from_micros(16_666));
+
+         // Periodically refresh data from hypervisor
+         last_refresh += 1;
+-        if last_refresh >= 60 { // Refresh roughly every second
++        if last_refresh >= refresh_rate { // Refresh roughly every second
+             unsafe {
+                 if let Some(ref hv) = HYPERVISOR {
+                     dashboard.vms.clear();
+@@ -981,7 +1044,46 @@ fn show_dashboard_ui() {
+         });
+
+         if let Some(key) = key {
++            let old_tab = dashboard.get_tab();
+             dashboard.handle_input(key);
++            let new_tab = dashboard.get_tab();
++
++            // Handle VM Actions
++            let is_enter = matches!(key, Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A);
++            if matches!(old_tab, ui::DashboardTab::VirtualMachines) && is_enter {
++                if let Some(vm_id) = dashboard.get_selected_vm_id() {
++                    let action = dashboard.get_selected_action();
++                    unsafe {
++                        if let Some(hv) = HYPERVISOR.as_mut() {
++                            match action {
++                                0 => { let _ = hv.start_vm(vm_id); }
++                                1 => { let _ = hv.stop_vm(vm_id); }
++                                2 => { let _ = hv.reset_vm(vm_id); }
++                                3 => { let _ = hv.zero_vm(vm_id); }
++                                4 => { let _ = hv.delete_vm(vm_id); }
++                                _ => {}
++                            }
++                        }
++                    }
++                    last_refresh = refresh_rate; // Force refresh
++                }
++            }
++
++            // Handle Create VM Confirmation
++            if matches!(old_tab, ui::DashboardTab::CreateVM) && dashboard.is_create_vm_requested() {
++                let (name, mem, vcpus) = dashboard.get_create_vm_data();
++                unsafe {
++                    if let Some(hv) = HYPERVISOR.as_mut() {
++                        if let Ok(vm_id) = hv.create_vm(&name, mem, vcpus) {
++                            hpvm_info!("VMM", "Created VM '{}' via UI", name);
++                        }
++                    }
++                }
++                dashboard.reset_create_vm_data();
++                dashboard.set_tab(ui::DashboardTab::VirtualMachines);
++                last_refresh = refresh_rate; // Force refresh
++            }
++
+             if dashboard.exit_requested() {
+                 hpvm_info!("Dashboard", "exiting dashboard");
+                 uefi::system::with_stdout(|s| {
