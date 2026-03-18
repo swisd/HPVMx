@@ -1,4 +1,4 @@
-#![allow(unsafe_code, dead_code, non_camel_case_types, non_snake_case, unused, unused_must_use)]
+#![allow(unsafe_code, dead_code, non_camel_case_types, non_snake_case, unused, unused_must_use, unused_features)]
 #![feature(str_as_str)]
 #![feature(abi_x86_interrupt)]
 #![feature(core_float_math)]
