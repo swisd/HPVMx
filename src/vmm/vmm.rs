@@ -32,12 +32,12 @@ pub struct HypervisorManager {
 #[allow(dead_code)]
 impl HypervisorManager {
     /// Create a new hypervisor manager instance
-    pub fn new(vcpu_count: u32, memory_regions: Vec<(u64, usize)>) -> Self {
+    pub fn new() -> Self {
         Self {
             vms: BTreeMap::new(),
             is_initialized: false,
             vm_count: 0,
-            ghm: GlobalHardwareManager::new(vcpu_count, memory_regions),
+            ghm: GlobalHardwareManager::new(8, 4096), // Example defaults
             partitioner: HardwarePartitioner::new(),
             security: DeepLevelSecurity::new(),
         }
@@ -68,8 +68,6 @@ impl HypervisorManager {
             return Err("Hypervisor not initialized");
         }
 
-        hpvm_info!("VMM", "Creating VM '{}' ({} MB, {} vCPUs)", name, memory_mb, vcpu_count);
-
         let vm_id = VM_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
 
         let mut vm = VirtualMachine::new(vm_id, name, memory_mb, vcpu_count)?;
@@ -79,17 +77,13 @@ impl HypervisorManager {
         for _ in 0..vcpu_count {
             allocated_cores.push(self.ghm.allocate_core_to_vm(vm_id)?);
         }
-        
-        let memory_size = (memory_mb as usize) * 1024 * 1024;
-        let hpa = self.ghm.allocate_memory_to_vm(vm_id, memory_size)?;
-
-        hpvm_info!("VMM", "VM {} allocated at HPA: {:#x} (size: {} bytes)", vm_id, hpa, memory_size);
+        let hpa = self.ghm.allocate_memory_to_vm(vm_id, (memory_mb as usize) * 1024 * 1024)?;
 
         // Map the resources
-        vm.mapper.add_memory_mapping(0, hpa, memory_size);
+        vm.mapper.add_memory_mapping(0, hpa, (memory_mb as usize) * 1024 * 1024);
 
         // Partition the hardware into a "Silicon"
-        self.partitioner.create_silicon_unit(vm_id, allocated_cores, hpa, memory_size)?;
+        self.partitioner.create_silicon_unit(vm_id, allocated_cores, hpa, (memory_mb as usize) * 1024 * 1024)?;
 
         self.vms.insert(vm_id, vm);
         self.vm_count += 1;
@@ -270,14 +264,11 @@ impl HypervisorManager {
         let guest_addr = 0x1000000;
         let hpa = self.ghm.allocate_memory_to_vm(vm_id, data.len())?;
         
-        hpvm_info!("Boot", "Media loaded ({} bytes), allocating HPA: {:#x}", data.len(), hpa);
-
         // In a real system, we'd use a physical copy.
         // For UEFI, we must ensure hpa is accessible or use boot services.
         // Here we use a safe copy since we are in the same address space (flat).
         unsafe {
             let dest = hpa as *mut u8;
-            hpvm_info!("Boot", "Copying media to physical memory...");
             core::ptr::copy_nonoverlapping(data.as_ptr(), dest, data.len());
         }
 
@@ -287,15 +278,11 @@ impl HypervisorManager {
         let stack_size = 64 * 1024; // 64KB
         let stack_hpa = self.ghm.allocate_memory_to_vm(vm_id, stack_size)?;
         let stack_gpa = guest_addr + data.len() as u64 + 4096; // 4KB guard
-        
-        hpvm_info!("Boot", "Stack allocated at HPA: {:#x}, GPA: {:#x}", stack_hpa, stack_gpa);
-        
         vm.mapper.add_memory_mapping(stack_gpa, stack_hpa, stack_size);
 
         if let Some(vcpu) = vm.get_vcpu_mut(0) {
             vcpu.set_instruction_pointer(guest_addr);
             vcpu.set_stack_pointer(stack_gpa + stack_size as u64);
-            hpvm_info!("Boot", "vCPU registers set: RIP={:#x}, RSP={:#x}", guest_addr, stack_gpa + stack_size as u64);
         }
 
         vm.state = crate::vmm::vm::VmState::Running;

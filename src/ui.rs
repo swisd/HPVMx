@@ -479,6 +479,21 @@ pub struct SystemResources {
     pub used_memory_mb: u32,
     pub cpu_count: u32,
     pub cpu_usage: u32,
+    pub cpu_core_usage: Vec<u32>,
+    pub disk_read_kbps: u64,
+    pub disk_write_kbps: u64,
+    pub net_rx_kbps: u64,
+    pub net_tx_kbps: u64,
+    pub gpu_usage: u32,
+    
+    // History for graphs
+    pub cpu_history: Vec<u32>,
+    pub mem_history: Vec<u32>,
+    pub disk_read_history: Vec<u64>,
+    pub disk_write_history: Vec<u64>,
+    pub net_rx_history: Vec<u64>,
+    pub net_tx_history: Vec<u64>,
+    pub gpu_history: Vec<u32>,
 }
 
 impl DashboardUI {
@@ -491,6 +506,19 @@ impl DashboardUI {
                 used_memory_mb: 0,
                 cpu_count: 0,
                 cpu_usage: 0,
+                cpu_core_usage: Vec::new(),
+                disk_read_kbps: 0,
+                disk_write_kbps: 0,
+                net_rx_kbps: 0,
+                net_tx_kbps: 0,
+                gpu_usage: 0,
+                cpu_history: Vec::with_capacity(100),
+                mem_history: Vec::with_capacity(100),
+                disk_read_history: Vec::with_capacity(100),
+                disk_write_history: Vec::with_capacity(100),
+                net_rx_history: Vec::with_capacity(100),
+                net_tx_history: Vec::with_capacity(100),
+                gpu_history: Vec::with_capacity(100),
             },
             scroll_offset: 0,
             cursor: crate::graphics::Cursor::new(),
@@ -514,7 +542,42 @@ impl DashboardUI {
     }
 
     pub fn set_resources(&mut self, resources: SystemResources) {
+        let old_cpu_hist = self.resources.cpu_history.clone();
+        let old_mem_hist = self.resources.mem_history.clone();
+        let old_disk_read_hist = self.resources.disk_read_history.clone();
+        let old_disk_write_hist = self.resources.disk_write_history.clone();
+        let old_net_rx_hist = self.resources.net_rx_history.clone();
+        let old_net_tx_hist = self.resources.net_tx_history.clone();
+        let old_gpu_hist = self.resources.gpu_history.clone();
+
         self.resources = resources;
+
+        // Restore and update histories
+        self.resources.cpu_history = old_cpu_hist;
+        self.resources.mem_history = old_mem_hist;
+        self.resources.disk_read_history = old_disk_read_hist;
+        self.resources.disk_write_history = old_disk_write_hist;
+        self.resources.net_rx_history = old_net_rx_hist;
+        self.resources.net_tx_history = old_net_tx_hist;
+        self.resources.gpu_history = old_gpu_hist;
+
+        fn push_limit<T>(vec: &mut Vec<T>, val: T, limit: usize) {
+            if vec.len() >= limit {
+                vec.remove(0);
+            }
+            vec.push(val);
+        }
+
+        push_limit(&mut self.resources.cpu_history, self.resources.cpu_usage, 100);
+        let mem_percent = if self.resources.total_memory_mb > 0 {
+            (self.resources.used_memory_mb * 100 / self.resources.total_memory_mb) as u32
+        } else { 0 };
+        push_limit(&mut self.resources.mem_history, mem_percent, 100);
+        push_limit(&mut self.resources.disk_read_history, self.resources.disk_read_kbps, 100);
+        push_limit(&mut self.resources.disk_write_history, self.resources.disk_write_kbps, 100);
+        push_limit(&mut self.resources.net_rx_history, self.resources.net_rx_kbps, 100);
+        push_limit(&mut self.resources.net_tx_history, self.resources.net_tx_kbps, 100);
+        push_limit(&mut self.resources.gpu_history, self.resources.gpu_usage, 100);
     }
 
     pub fn draw(&mut self) {
@@ -552,10 +615,32 @@ impl DashboardUI {
             match self.selected_tab {
                 DashboardTab::Overview => {
                     pg.draw_text(20, 100, "System Overview", 0x00FF00);
-                    pg.draw_text(20, 130, &alloc::format!("CPU Count: {}", self.resources.cpu_count), 0xFFFFFF);
-                    pg.draw_text(20, 150, &alloc::format!("CPU Usage: {}%", self.resources.cpu_usage), 0xFFFFFF);
-                    pg.draw_text(20, 170, &alloc::format!("Memory: {} / {} MB", self.resources.used_memory_mb, self.resources.total_memory_mb), 0xFFFFFF);
-                    pg.draw_text(20, 190, &alloc::format!("Total VMs: {}", self.vms.len()), 0xFFFFFF);
+                    
+                    let mut y = 130;
+                    pg.draw_text(20, y, "System Health: OK", 0x00FF00);
+                    y += 30;
+                    pg.draw_text(20, y, &alloc::format!("CPU:   {} Cores, {}% Usage", self.resources.cpu_count, self.resources.cpu_usage), 0xFFFFFF);
+                    y += 20;
+                    pg.draw_text(20, y, &alloc::format!("Memory: {} / {} MB", self.resources.used_memory_mb, self.resources.total_memory_mb), 0xFFFFFF);
+                    y += 30;
+                    
+                    pg.draw_text(20, y, "I/O Performance:", 0xAAAAAA);
+                    y += 20;
+                    pg.draw_text(40, y, &alloc::format!("Disk:   Read {} KB/s, Write {} KB/s", self.resources.disk_read_kbps, self.resources.disk_write_kbps), 0xCCCCCC);
+                    y += 20;
+                    pg.draw_text(40, y, &alloc::format!("Network: RX {} KB/s, TX {} KB/s", self.resources.net_rx_kbps, self.resources.net_tx_kbps), 0xCCCCCC);
+                    y += 30;
+                    
+                    pg.draw_text(20, y, &alloc::format!("Virtualization: {} VMs Running", self.vms.iter().filter(|v| v.state.contains("Running")).count()), 0xFFFFFF);
+                    y += 20;
+                    pg.draw_text(20, y, &alloc::format!("Total VMs: {}", self.vms.len()), 0xCCCCCC);
+                    y += 30;
+
+                    pg.draw_text(20, y, "Hardware Categories:", 0xAAAAAA);
+                    y += 20;
+                    pg.draw_text(40, y, &alloc::format!("Storage: {} Files in current path", self.files.len()), 0xCCCCCC);
+                    y += 20;
+                    pg.draw_text(40, y, &alloc::format!("Devices: {} Categories detected", self.categories.len()), 0xCCCCCC);
                 }
                 DashboardTab::VirtualMachines => {
                     // Title
@@ -657,41 +742,45 @@ impl DashboardUI {
                     let panel_x = margin;
                     let panel_y = content_top + margin;
                     let panel_w = 360usize;
-                    let panel_h = 180usize;
+                    let panel_h = 240usize;
                     pg.draw_text(panel_x, panel_y - 4, "Resource Monitor", 0x00FF00);
                     pg.draw_rect_outline(panel_x, panel_y, panel_w, panel_h, 0x888888);
                     pg.draw_text(panel_x + 10, panel_y + 16, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
                     pg.draw_text(panel_x + 10, panel_y + 16 + line_h, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
                     pg.draw_text(panel_x + 10, panel_y + 16 + line_h * 2, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
 
-                    // Memory usage bar with spacing
+                    // Memory usage bar and graph
                     let bar_y = panel_y + 16 + line_h * 3 + gutter;
-                    pg.draw_text(panel_x + 10, bar_y, "Memory Usage:", 0xCCCCCC);
-                    let bar_x = panel_x + 10 + 130;
-                    let bar_w = 200usize;
-                    let bar_h = 20usize;
-                    // Use real values for progress bar (value/max) and let widget compute width
-                    pg.draw_progress_bar(
-                        bar_x,
-                        bar_y,
-                        bar_w,
-                        bar_h,
-                        self.resources.used_memory_mb as usize,
-                        self.resources.total_memory_mb as usize,
-                        0x00FF00,
-                    );
+                    pg.draw_text(panel_x + 10, bar_y, "Memory History (100s):", 0xCCCCCC);
+                    pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00);
 
-                    // Right CPU core list panel
+                    // I/O Stats and Graphs
+                    let io_y = bar_y + 80 + gutter * 2;
+                    pg.draw_text(panel_x + 10, io_y, "Net Traffic (RX:Cyan TX:Yellow)", 0xCCCCCC);
+                    pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF);
+                    pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00);
+                    
+                    let disk_y = io_y + 80;
+                    pg.draw_text(panel_x + 10, disk_y, "Disk I/O (Read:White Write:Red)", 0xCCCCCC);
+                    pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF);
+                    pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000);
+
+                    // Right CPU core list panel or Total CPU Graph
                     let right_x = panel_x + panel_w + gutter * 2;
                     let right_y = panel_y;
                     let right_w = core::cmp::min(width - right_x - margin, 360);
-                    let right_h = core::cmp::min(height - right_y - 100, 220);
+                    let right_h = core::cmp::min(height - right_y - 100, 260);
                     pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
-                    pg.draw_text(right_x + 10, right_y - 4, "CPU Usage per Core (Mocked):", 0xFFFFFF);
+                    pg.draw_text(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF);
+                    pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00);
+                    
+                    pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
                     for i in 0..self.resources.cpu_count {
-                        let row_y = right_y + 16 + (i as usize * line_h);
+                        let row_y = right_y + 120 + (i as usize * (line_h + 4));
                         if row_y + line_h > right_y + right_h - 8 { break; }
-                        pg.draw_text(right_x + 10, row_y, &alloc::format!("Core {}: 25%", i), 0xCCCCCC);
+                        let usage = if i < self.resources.cpu_core_usage.len() as u32 { self.resources.cpu_core_usage[i as usize] } else { 0 };
+                        pg.draw_text(right_x + 10, row_y, &alloc::format!("C{}:{:>2}%", i, usage), 0xCCCCCC);
+                        pg.draw_progress_bar(right_x + 70, row_y, right_w - 80, 12, usage as usize, 100, 0x00FF00);
                     }
                 }
                 DashboardTab::Network => {
@@ -706,14 +795,28 @@ impl DashboardUI {
                 }
                 DashboardTab::Console => {
                     pg.draw_text(20, 100, "System Log", 0x00FF00);
-                    pg.draw_text(20, 130, "[Note: Historical log viewing implementation in progress]", 0x888888);
-                    pg.draw_text(20, 150, "Latest Messages:", 0xAAAAAA);
+                    pg.draw_rect_outline(margin, 130, width - margin * 2, height - 130 - margin * 2, 0x888888);
                     
-                    // Mock some recent logs since we don't have a global log buffer yet
-                    pg.draw_text(20, 180, "[INFO] Hypervisor initialized successfully", 0x00FF00);
-                    pg.draw_text(20, 200, "[INFO] Filesystem mounted", 0x00FF00);
-                    pg.draw_text(20, 220, "[WARN] No external network detected", 0xFFFF00);
-                    pg.draw_text(20, 240, "[INFO] Dashboard UI started", 0x00FF00);
+                    let mut y = 140;
+                    let logs = crate::hpvmlog::get_logs();
+                    
+                    // Show last N logs that fit on screen
+                    let max_visible = (height - 130 - margin * 2 - 20) / line_h;
+                    let start_idx = logs.len().saturating_sub(max_visible);
+                    
+                    for i in start_idx..logs.len() {
+                        let (color, tag, msg) = &logs[i];
+                        let color_hex = match color {
+                            uefi::proto::console::text::Color::Red => 0xFF0000,
+                            uefi::proto::console::text::Color::Yellow => 0xFFFF00,
+                            uefi::proto::console::text::Color::LightCyan => 0x00FFFF,
+                            _ => 0xFFFFFF,
+                        };
+                        let log_line = if tag.is_empty() { msg.clone() } else { alloc::format!("[{}] {}", tag, msg) };
+                        pg.draw_text(margin + 10, y, &log_line, color_hex);
+                        y += line_h;
+                        if y + line_h > height - margin * 2 { break; }
+                    }
                 }
                 DashboardTab::Devices => {
                     pg.draw_text(20, 100, "Device Manager", 0x00FF00);

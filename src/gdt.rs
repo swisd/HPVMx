@@ -1,28 +1,29 @@
+use crate::{hpvm_error, hpvm_info, hpvm_log, hpvm_warn};
+use uefi::proto::console::text::Color;
 use x86_64::VirtAddr;
 use x86_64::structures::tss::TaskStateSegment;
 use x86_64::structures::gdt::{GlobalDescriptorTable, Descriptor, SegmentSelector};
 use core::ptr::addr_of_mut;
 
-pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+pub const DOUBLE_FAULT_IST_INDEX: u16 = 1;
 
 static mut TSS: TaskStateSegment = TaskStateSegment::new();
-static mut GDT: (GlobalDescriptorTable, Selectors) = (GlobalDescriptorTable::new(), Selectors {
-    code_selector: SegmentSelector::new(0, x86_64::PrivilegeLevel::Ring0),
-    tss_selector: SegmentSelector::new(0, x86_64::PrivilegeLevel::Ring0),
-});
+static mut GDT: GlobalDescriptorTable = GlobalDescriptorTable::new();
 
-struct Selectors {
-    code_selector: SegmentSelector,
-    tss_selector: SegmentSelector,
+pub struct Selectors {
+    pub code_selector: SegmentSelector,
+    pub tss_selector: SegmentSelector,
 }
 
+static mut SELECTORS: Option<Selectors> = None;
+
 pub fn init() {
-    use x86_64::instructions::segmentation::{CS, Segment};
     use x86_64::instructions::tables::load_tss;
+    use x86_64::instructions::segmentation::{CS, Segment};
 
     unsafe {
-        let tss_ptr = addr_of_mut!(TSS);
-        (*tss_ptr).interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
+        let tss = addr_of_mut!(TSS);
+        (*tss).interrupt_stack_table[(DOUBLE_FAULT_IST_INDEX - 1) as usize] = {
             const STACK_SIZE: usize = 4096 * 5;
             static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
 
@@ -31,15 +32,41 @@ pub fn init() {
             stack_end
         };
 
-        let gdt_ptr = addr_of_mut!(GDT);
-        let gdt = &mut (*gdt_ptr).0;
-        let selectors = &mut (*gdt_ptr).1;
+        let gdt = addr_of_mut!(GDT);
+        // Using append for compatibility with x86_64 0.15.4
+        let code_selector = (*gdt).append(Descriptor::kernel_code_segment());
+        hpvm_info!("GDT", "gdt append code selector {:#?}", code_selector);
+        let data_selector = (*gdt).append(Descriptor::kernel_data_segment());
+        hpvm_info!("GDT", "gdt append data_selector {:#?}", data_selector);
+        let tss_selector = (*gdt).append(Descriptor::tss_segment(&*tss));
+        hpvm_info!("GDT", "tss append selector {:#?}", tss_selector);
 
-        selectors.code_selector = gdt.append(Descriptor::kernel_code_segment());
-        selectors.tss_selector = gdt.append(Descriptor::tss_segment(&*tss_ptr));
+        hpvm_info!("GDT", "start gdt load");
+        hpvm_error!("GDT", "no gdt loading");
+        //(*gdt).load();
+        //hpvm_info!("GDT", "gdt load ok");
 
-        gdt.load();
-        CS::set_reg(selectors.code_selector);
-        load_tss(selectors.tss_selector);
+        //hpvm_info!("GDT", "set reg DS ES SS to 0");
+        use x86_64::instructions::segmentation::{DS, ES, SS, Segment};
+        //DS::set_reg(SegmentSelector(0));
+        //ES::set_reg(SegmentSelector(0));
+        //SS::set_reg(SegmentSelector(0));
+        // hpvm_info!("GDT", "set reg DS ES SS ok");
+        //
+        // hpvm_info!("GDT", "set reg CS");
+        // //CS::set_reg(code_selector);
+        // hpvm_info!("GDT", "set reg CS ok with {:#?}", code_selector);
+        //
+        // hpvm_info!("GDT", "load tss {:#?}", tss_selector);
+        // //load_tss(tss_selector);
+        // hpvm_info!("GDT", "load tss ok");
+        //
+        // hpvm_info!("GDT", "GDT and TSS loaded");
+        hpvm_warn!("GDT", "gdt may be invalid due to misload of _gdt");
+
+        SELECTORS = Some(Selectors {
+            code_selector,
+            tss_selector,
+        });
     }
 }

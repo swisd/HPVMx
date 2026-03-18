@@ -14,6 +14,25 @@ pub struct PixelGraphics {
 static mut GOP_CACHE: Option<( *mut u32, usize, usize, usize)> = None;
 
 impl PixelGraphics {
+    pub fn draw_line_graph<T: Into<u64> + Copy>(&mut self, x: usize, y: usize, width: usize, height: usize, data: &[T], max_val: u64, color: u32) {
+        if data.len() < 2 { return; }
+        self.draw_rect_outline(x, y, width, height, 0x444444);
+            
+        let dx = width as f64 / (data.len() - 1) as f64;
+        let scale = if max_val > 0 { height as f64 / max_val as f64 } else { 0.0 };
+
+        for i in 0..data.len() - 1 {
+            let x1 = x + (i as f64 * dx) as usize;
+            let val1: u64 = data[i].into();
+            let y1 = y + height - (val1 as f64 * scale) as usize;
+
+            let x2 = x + ((i + 1) as f64 * dx) as usize;
+            let val2: u64 = data[i+1].into();
+            let y2 = y + height - (val2 as f64 * scale) as usize;
+
+            self.draw_line(x1, y1, x2, y2, color);
+        }
+    }
     pub fn new() -> Option<Self> {
         let (fb_ptr, width, height, stride) = unsafe {
             if let Some(cache) = GOP_CACHE {
