@@ -14,25 +14,45 @@ pub struct PixelGraphics {
 static mut GOP_CACHE: Option<( *mut u32, usize, usize, usize)> = None;
 
 impl PixelGraphics {
-    pub fn draw_line_graph<T: Into<u64> + Copy>(&mut self, x: usize, y: usize, width: usize, height: usize, data: &[T], max_val: u64, color: u32) {
+    pub fn draw_line_graph<T: Into<u64> + Copy>(
+        &mut self,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        data: &[T],
+        max_val: u64,
+        color: u32,
+        len: usize // This is our visible "window" size
+    ) {
         if data.len() < 2 { return; }
+
         self.draw_rect_outline(x, y, width, height, 0x444444);
-            
-        let dx = width as f64 / (data.len() - 1) as f64;
+
+        // dx is fixed based on the window 'len', so the spacing never changes
+        let dx = width as f64 / (len - 1) as f64;
         let scale = if max_val > 0 { height as f64 / max_val as f64 } else { 0.0 };
 
-        for i in 0..data.len() - 1 {
-            let x1 = x + (i as f64 * dx) as usize;
+        // We only care about the last 'len' points in the data slice
+        let start_idx = if data.len() > len { data.len() - len } else { 0 };
+
+        // Iterate through the visible window
+        for i in start_idx..data.len() - 1 {
+            // Normalize the index so the most recent point is at the right edge
+            let x_offset_1 = ((i - start_idx) as f64 * dx) as usize;
+            let x_offset_2 = ((i + 1 - start_idx) as f64 * dx) as usize;
+
             let val1: u64 = data[i].into();
             let y1 = y + height - (val1 as f64 * scale) as usize;
 
-            let x2 = x + ((i + 1) as f64 * dx) as usize;
             let val2: u64 = data[i+1].into();
             let y2 = y + height - (val2 as f64 * scale) as usize;
 
-            self.draw_line(x1, y1, x2, y2, color);
+            // Ensure we stay within the horizontal bounds of the graph
+            self.draw_line(x + x_offset_1, y1, x + x_offset_2, y2, color);
         }
     }
+
     pub fn new() -> Option<Self> {
         let (fb_ptr, width, height, stride) = unsafe {
             if let Some(cache) = GOP_CACHE {
@@ -137,10 +157,31 @@ impl PixelGraphics {
         }
     }
 
+    pub fn draw_char_bg(&mut self, x: usize, y: usize, c: char, color: u32, bg: u32) {
+        let font_data = get_font_data(c);
+        for row in 0..16 {
+            for col in 0..8 {
+                if (font_data[row] & (1 << (7 - col))) != 0 {
+                    self.draw_pixel(x + col, y + row, color);
+                } else {
+                    self.draw_pixel(x + col, y + row, bg);
+                }
+            }
+        }
+    }
+
     pub fn draw_text(&mut self, x: usize, y: usize, text: &str, color: u32) {
         let mut curr_x = x;
         for c in text.chars() {
             self.draw_char(curr_x, y, c, color);
+            curr_x += 8;
+        }
+    }
+
+    pub fn draw_text_bg(&mut self, x: usize, y: usize, text: &str, color: u32, bg: u32) {
+        let mut curr_x = x;
+        for c in text.chars() {
+            self.draw_char_bg(curr_x, y, c, color, bg);
             curr_x += 8;
         }
     }
@@ -319,7 +360,7 @@ const BASIC_FONT: [[u8; 16]; 256] = {
     font[102] = [0x00, 0x00, 0x00, 0x0E, 0x10, 0x10, 0x7C, 0x10, 0x10, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; // f
     font[103] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x3E, 0x42, 0x42, 0x3E, 0x02, 0x3C, 0x00, 0x00, 0x00, 0x00, 0x00]; // g
     font[104] = [0x00, 0x00, 0x00, 0x40, 0x40, 0x40, 0x7C, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; // h
-    font[105] = [0x10, 0x00, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; // i
+    font[105] = [0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x10, 0x10, 0x10, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; // i
     font[106] = [0x00, 0x08, 0x00, 0x08, 0x08, 0x08, 0x08, 0x08, 0x48, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; // j
     font[107] = [0x00, 0x00, 0x00, 0x40, 0x40, 0x44, 0x48, 0x70, 0x48, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; // k
     font[108] = [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]; // l

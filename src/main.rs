@@ -25,6 +25,7 @@ mod devices;
 mod hpvmlog;
 mod consts;
 mod types;
+mod rng;
 
 extern crate alloc;
 use alloc::string::{String, ToString};
@@ -179,6 +180,13 @@ fn main() -> Status {
     hpvm_warn!("HPVMx", "within spinloop");
     //Graphics::get_graphics_info();
 
+    const icon_ascii: &str = "\n
+       __ _____ _   ____  ___
+      / // / _ \\ | / /  |/  /_ __
+     / _  / ___/ |/ / /|_/ /\\ \\ /
+    /_//_/_/   |___/_/  /_//_\\_\\      \n\n";
+
+    message!("", "{}", icon_ascii);
     hpvm_info!("HPVMx", "HPVMx Shell v0.1.0");
     hpvm_info!("HPVMx", "Type 'help' for commands.");
 
@@ -998,7 +1006,7 @@ fn show_dashboard_ui() {
             dashboard.set_resources(ui::SystemResources {
                 total_memory_mb: stats.total_memory_mb,
                 used_memory_mb: stats.total_memory_mb / 2,  // Approximate
-                cpu_count: 8,  // Placeholder
+                cpu_count: 3,  // Placeholder
                 cpu_usage: 35,  // Placeholder
                 cpu_core_usage: core_usage,
                 disk_read_kbps: 0,
@@ -1019,7 +1027,13 @@ fn show_dashboard_ui() {
 
     // Enter dashboard interaction loop
     let mut last_refresh = 0;
-    let refresh_rate = 60;
+    let refresh_rate = 30;
+
+    let mut RNG = crate::rng::XorShiftRng::new(20);
+
+    // Basic example using the uefi crate
+
+
     loop {
         // Limit frame rate to ~60Hz (16,666 microseconds)
         boot::stall(core::time::Duration::from_micros(16_666));
@@ -1027,6 +1041,7 @@ fn show_dashboard_ui() {
         // Periodically refresh data from hypervisor
         last_refresh += 1;
         if last_refresh >= refresh_rate { // Refresh roughly every second
+            let mut buffer = [0u8; 32768];
             unsafe {
                 if let Some(ref hv) = HYPERVISOR {
                     dashboard.vms.clear();
@@ -1036,8 +1051,8 @@ fn show_dashboard_ui() {
                             id,
                             name: name.to_string(),
                             state: state.to_string(),
-                            cpu_usage: 25,
-                            memory_usage_mb: 512,
+                            cpu_usage: RNG.rand_range(20, 50) as u32,
+                            memory_usage_mb: RNG.rand_range(300, 600) as u32,
                             disk_usage_mb: 10240,
                             uptime_seconds: 3600,
                         });
@@ -1050,20 +1065,22 @@ fn show_dashboard_ui() {
                     let mut core_usage = Vec::new();
                     for i in 0..8 {
                         let jitter = (i * 7 + last_refresh) % 15;
-                        core_usage.push((35 + jitter) as u32);
+                        core_usage.push((RNG.rand_range(5, 20) + jitter) as u32);
                     }
 
+
+                    // these values need to actually be measured (implement soon)
                     dashboard.set_resources(ui::SystemResources {
-                        total_memory_mb: stats.total_memory_mb,
-                        used_memory_mb: stats.total_memory_mb / 2,
-                        cpu_count: 8,
-                        cpu_usage: 35,
+                        total_memory_mb: 1024,
+                        used_memory_mb: (128 + RNG.rand_range(0, 64)) as u32,
+                        cpu_count: 3,
+                        cpu_usage: RNG.rand_range(10, 35) as u32,
                         cpu_core_usage: core_usage,
-                        disk_read_kbps: 124, // Mocked
-                        disk_write_kbps: 48, // Mocked
-                        net_rx_kbps: (net_stats.rx_bytes / 1024) % 1000, // Very rough
-                        net_tx_kbps: (net_stats.tx_bytes / 1024) % 1000, // Very rough
-                        gpu_usage: 12, // Mocked
+                        disk_read_kbps: RNG.rand_range(50, 200), // Mocked
+                        disk_write_kbps: RNG.rand_range(50, 200), // Mocked
+                        net_rx_kbps: if RNG.rand_range(0, 500) < 400 {0} else { 300 } ,//(net_stats.rx_bytes / 1024) % 1000, // Very rough
+                        net_tx_kbps: if RNG.rand_range(0, 500) < 400 {0} else { 300 } ,//(net_stats.tx_bytes / 1024) % 1000, // Very rough
+                        gpu_usage: RNG.rand_range(50, 200) as u32, // Mocked
                         cpu_history: alloc::vec![],
                         mem_history: alloc::vec![],
                         disk_read_history: alloc::vec![],

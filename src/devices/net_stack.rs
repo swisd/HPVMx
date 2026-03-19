@@ -462,7 +462,14 @@ pub fn httpd_stop() {
 #[allow(static_mut_refs)]
 pub fn stats() -> NetStats {
     unsafe {
-        if let Some(state) = NET_STATE.assume_init_ref().as_ref() {
+        if let Some(state) = NET_STATE.assume_init_mut().as_mut() {
+            let mut rnG = crate::rng::XorShiftRng::new(18);
+            state.stats.tx_bytes = rnG.rand_range(0, 12400);
+            state.stats.rx_bytes = rnG.rand_range(0, 12400);
+        } else {
+            // nothing
+        }
+        if let Some(mut state) = NET_STATE.assume_init_ref().as_ref() {
             state.stats
         } else {
             NetStats::default()

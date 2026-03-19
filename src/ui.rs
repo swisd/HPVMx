@@ -742,28 +742,29 @@ impl DashboardUI {
                     let panel_x = margin;
                     let panel_y = content_top + margin;
                     let panel_w = 360usize;
-                    let panel_h = 240usize;
-                    pg.draw_text(panel_x, panel_y - 4, "Resource Monitor", 0x00FF00);
+                    let panel_h = 480usize;
                     pg.draw_rect_outline(panel_x, panel_y, panel_w, panel_h, 0x888888);
+                    pg.draw_text_bg(panel_x, panel_y - 4, "Resource Monitor", 0x20FF20, 0x222222);
+
                     pg.draw_text(panel_x + 10, panel_y + 16, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
                     pg.draw_text(panel_x + 10, panel_y + 16 + line_h, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
                     pg.draw_text(panel_x + 10, panel_y + 16 + line_h * 2, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
 
                     // Memory usage bar and graph
                     let bar_y = panel_y + 16 + line_h * 3 + gutter;
-                    pg.draw_text(panel_x + 10, bar_y, "Memory History (100s):", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00);
+                    pg.draw_text(panel_x + 10, bar_y, "Memory History (10s):", 0xCCCCCC);
+                    pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00, 30);
 
                     // I/O Stats and Graphs
                     let io_y = bar_y + 80 + gutter * 2;
                     pg.draw_text(panel_x + 10, io_y, "Net Traffic (RX:Cyan TX:Yellow)", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF);
-                    pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00);
+                    pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF, 30);
+                    pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00, 30);
                     
                     let disk_y = io_y + 80;
                     pg.draw_text(panel_x + 10, disk_y, "Disk I/O (Read:White Write:Red)", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF);
-                    pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000);
+                    pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF, 30);
+                    pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000, 30);
 
                     // Right CPU core list panel or Total CPU Graph
                     let right_x = panel_x + panel_w + gutter * 2;
@@ -772,7 +773,7 @@ impl DashboardUI {
                     let right_h = core::cmp::min(height - right_y - 100, 260);
                     pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
                     pg.draw_text(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF);
-                    pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00);
+                    pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00, 30);
                     
                     pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
                     for i in 0..self.resources.cpu_count {
