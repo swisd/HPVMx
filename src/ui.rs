@@ -1,5 +1,8 @@
-#![allow(dead_code)]
+#![allow(dead_code, deprecated)]
 
+
+use alloc::fmt::format;
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::proto::console::text::{Color, Key, ScanCode};
@@ -12,396 +15,6 @@ mod terminal;
 
 pub use graphics::{Graphics, Rect};
 use crate::message;
-
-pub struct Window {
-    pub title: String,
-    pub rect: Rect,
-    pub active: bool,
-}
-
-impl Window {
-    pub fn new(title: &str, x: usize, y: usize, width: usize, height: usize) -> Self {
-        Window {
-            title: String::from(title),
-            rect: Rect::new(x, y, width, height),
-            active: true,
-        }
-    }
-
-    pub fn draw(&self) {
-        if let Some(pg) = pixel_graphics::PixelGraphics::new() {
-            let mut pg = pg;
-            pg.fill_rect(self.rect.x * 8, self.rect.y * 16, self.rect.width * 8, self.rect.height * 16, 0xCCCCCC);
-            pg.draw_text(self.rect.x * 8 + 4, self.rect.y * 16 + 4, &self.title, 0x000000);
-        } else {
-            Graphics::draw_box(&self.rect, &self.title, self.active);
-        }
-    }
-}
-
-pub struct Button {
-    pub label: String,
-    pub rect: Rect,
-    pub focused: bool,
-    pub clicked: bool,
-}
-
-impl Button {
-    pub fn new(label: &str, x: usize, y: usize, width: usize, height: usize) -> Self {
-        Button {
-            label: String::from(label),
-            rect: Rect::new(x, y, width, height),
-            focused: false,
-            clicked: false,
-        }
-    }
-
-    pub fn draw(&self) {
-        if let Some(pg) = pixel_graphics::PixelGraphics::new() {
-            let mut pg = pg;
-            let bg = if self.focused { 0xFFFFFF } else { 0xBBBBBB };
-            pg.fill_rect(self.rect.x * 8, self.rect.y * 16, self.rect.width * 8, self.rect.height * 16, bg);
-            pg.draw_text(self.rect.x * 8 + 10, self.rect.y * 16 + 8, &self.label, 0x000000);
-        } else {
-            Graphics::draw_button(&self.rect, &self.label, self.focused);
-        }
-    }
-
-    pub fn contains(&self, x: usize, y: usize) -> bool {
-        self.rect.contains(x, y)
-    }
-}
-
-pub struct TextBox {
-    pub text: String,
-    pub rect: Rect,
-    pub focused: bool,
-    pub max_length: usize,
-}
-
-impl TextBox {
-    pub fn new(x: usize, y: usize, width: usize, max_length: usize) -> Self {
-        TextBox {
-            text: String::new(),
-            rect: Rect::new(x, y, width, 3),
-            focused: false,
-            max_length,
-        }
-    }
-
-    pub fn draw(&self) {
-        Graphics::draw_textbox(&self.rect, &self.text, self.focused);
-    }
-
-    pub fn add_char(&mut self, ch: char) {
-        if self.text.len() < self.max_length {
-            self.text.push(ch);
-        }
-    }
-
-    pub fn backspace(&mut self) {
-        self.text.pop();
-    }
-}
-
-pub struct ListBox {
-    pub items: Vec<String>,
-    pub rect: Rect,
-    pub selected: usize,
-}
-
-impl ListBox {
-    pub fn new(x: usize, y: usize, width: usize, height: usize) -> Self {
-        ListBox {
-            items: Vec::new(),
-            rect: Rect::new(x, y, width, height),
-            selected: 0,
-        }
-    }
-
-    pub fn add_item(&mut self, item: &str) {
-        self.items.push(String::from(item));
-    }
-
-    pub fn draw(&self) {
-        let items_str: Vec<&str> = self.items.iter().map(|s| s.as_str()).collect();
-        Graphics::draw_list(&self.rect, &items_str, self.selected);
-    }
-
-    pub fn select_next(&mut self) {
-        if self.selected < self.items.len().saturating_sub(1) {
-            self.selected += 1;
-        }
-    }
-
-    pub fn select_prev(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
-        }
-    }
-
-    pub fn get_selected(&self) -> Option<&str> {
-        self.items.get(self.selected).map(|s| s.as_str())
-    }
-}
-
-pub struct WinNTShell {
-    pub windows: Vec<Window>,
-    pub buttons: Vec<Button>,
-    pub textboxes: Vec<TextBox>,
-    pub listbox: Option<ListBox>,
-    pub focused_button: usize,
-    pub focused_textbox: usize,
-    focus_target: FocusTarget,
-    exit_requested: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FocusTarget {
-    TextBox,
-    Button,
-    ListBox,
-}
-
-impl WinNTShell {
-    pub fn new() -> Self {
-        WinNTShell {
-            windows: Vec::new(),
-            buttons: Vec::new(),
-            textboxes: Vec::new(),
-            listbox: None,
-            focused_button: 0,
-            focused_textbox: 0,
-            focus_target: FocusTarget::TextBox,
-            exit_requested: false,
-        }
-    }
-
-    pub fn init_desktop(&mut self) {
-        // Clear screen with gray background
-        Graphics::clear_screen(Color::LightGray);
-
-        // Draw menu bar
-        Graphics::draw_menu_bar(&["File", "Edit", "View", "Help"]);
-
-        // Draw taskbar
-        Graphics::draw_taskbar("12:00");
-
-        // Create main shell window
-        let shell_window = Window::new("HPVMx Shell", 5, 3, 70, 18);
-        self.windows.push(shell_window);
-
-        // Create OK and Cancel buttons
-        let ok_button = Button::new("OK", 35, 20, 8, 2);
-        let cancel_button = Button::new("Cancel", 45, 20, 10, 2);
-
-        self.buttons.push(ok_button);
-        self.buttons.push(cancel_button);
-
-        // Create a command input textbox
-        let input_box = TextBox::new(7, 5, 66, 50);
-        self.textboxes.push(input_box);
-
-        // Create output listbox
-        let mut output_list = ListBox::new(7, 8, 66, 10);
-        output_list.add_item("HPVMx v0.1.0 - Shell Interface");
-        output_list.add_item("Type 'help' for available commands");
-        self.listbox = Some(output_list);
-
-        if !self.textboxes.is_empty() {
-            self.focus_textbox(0);
-        }
-        self.exit_requested = false;
-    }
-
-    pub fn draw(&self) {
-        for window in &self.windows {
-            window.draw();
-        }
-
-        for button in &self.buttons {
-            button.draw();
-        }
-
-        for textbox in &self.textboxes {
-            textbox.draw();
-        }
-
-        if let Some(ref listbox) = self.listbox {
-            listbox.draw();
-        }
-    }
-
-    pub fn focus_button(&mut self, idx: usize) {
-        for (i, button) in self.buttons.iter_mut().enumerate() {
-            button.focused = i == idx;
-        }
-        self.focused_button = idx;
-        self.focus_target = FocusTarget::Button;
-    }
-
-    pub fn focus_textbox(&mut self, idx: usize) {
-        for (i, textbox) in self.textboxes.iter_mut().enumerate() {
-            textbox.focused = i == idx;
-        }
-        self.focused_textbox = idx;
-        self.focus_target = FocusTarget::TextBox;
-    }
-
-    fn focus_listbox(&mut self) {
-        self.focus_target = FocusTarget::ListBox;
-    }
-
-    fn cycle_focus(&mut self) {
-        let has_textbox = !self.textboxes.is_empty();
-        let has_button = !self.buttons.is_empty();
-        let has_listbox = self.listbox.is_some();
-
-        let mut next = self.focus_target;
-        let mut attempts = 0;
-        while attempts < 3 {
-            next = match next {
-                FocusTarget::TextBox => FocusTarget::Button,
-                FocusTarget::Button => FocusTarget::ListBox,
-                FocusTarget::ListBox => FocusTarget::TextBox,
-            };
-            if (next == FocusTarget::TextBox && has_textbox)
-                || (next == FocusTarget::Button && has_button)
-                || (next == FocusTarget::ListBox && has_listbox)
-            {
-                break;
-            }
-            attempts += 1;
-        }
-
-        match next {
-            FocusTarget::TextBox => {
-                let idx = self.focused_textbox.min(self.textboxes.len().saturating_sub(1));
-                self.focus_textbox(idx);
-            }
-            FocusTarget::Button => {
-                let idx = self.focused_button.min(self.buttons.len().saturating_sub(1));
-                self.focus_button(idx);
-            }
-            FocusTarget::ListBox => self.focus_listbox(),
-        }
-    }
-
-    pub fn handle_input(&mut self, key: Key) {
-        match key {
-            Key::Printable(c) => {
-                let ch = char::from(c);
-                if ch.to_ascii_lowercase() == 'q' {
-                    self.exit_requested = true;
-                    return;
-                }
-                if ch == '\t' {
-                    self.cycle_focus();
-                    return;
-                }
-                if self.focus_target == FocusTarget::TextBox && self.focused_textbox < self.textboxes.len() {
-                    if ch != '\r' && ch != '\n' {
-                        self.textboxes[self.focused_textbox].add_char(ch);
-                    }
-                }
-            }
-            Key::Special(ScanCode::DELETE) => {
-                if self.focus_target == FocusTarget::TextBox && self.focused_textbox < self.textboxes.len() {
-                    self.textboxes[self.focused_textbox].backspace();
-                }
-            }
-            Key::Special(ScanCode::UP) => {
-                if self.focus_target == FocusTarget::ListBox {
-                    if let Some(ref mut listbox) = self.listbox {
-                        listbox.select_prev();
-                    }
-                } else if self.focus_target == FocusTarget::Button && !self.textboxes.is_empty() {
-                    self.focus_textbox(self.focused_textbox);
-                }
-            }
-            Key::Special(ScanCode::DOWN) => {
-                if self.focus_target == FocusTarget::ListBox {
-                    if let Some(ref mut listbox) = self.listbox {
-                        listbox.select_next();
-                    }
-                } else if self.focus_target == FocusTarget::TextBox && self.listbox.is_some() {
-                    self.focus_listbox();
-                }
-            }
-            Key::Special(ScanCode::LEFT) => {
-                if self.focus_target == FocusTarget::Button && !self.buttons.is_empty() {
-                    let next_button = if self.focused_button == 0 {
-                        self.buttons.len() - 1
-                    } else {
-                        self.focused_button - 1
-                    };
-                    self.focus_button(next_button);
-                } else if self.focus_target == FocusTarget::ListBox && !self.buttons.is_empty() {
-                    self.focus_button(self.focused_button);
-                }
-            }
-            Key::Special(ScanCode::RIGHT) => {
-                if self.focus_target == FocusTarget::Button && !self.buttons.is_empty() {
-                    let next_button = (self.focused_button + 1) % self.buttons.len();
-                    self.focus_button(next_button);
-                } else if self.focus_target == FocusTarget::TextBox && !self.buttons.is_empty() {
-                    self.focus_button(self.focused_button);
-                }
-            }
-            Key::Special(ScanCode::END) => {
-                self.cycle_focus();
-            }
-            Key::Special(ScanCode::HOME) => {
-                if self.focus_target == FocusTarget::Button && self.focused_button < self.buttons.len() {
-                    let label = self.buttons[self.focused_button].label.clone();
-                    self.buttons[self.focused_button].clicked = true;
-                    if label.eq_ignore_ascii_case("ok") {
-                        if let Some(input) = self.get_input() {
-                            if !input.is_empty() {
-                                self.add_output(&alloc::format!("> {}", input));
-                                self.clear_input();
-                            }
-                        }
-                    } else if label.eq_ignore_ascii_case("cancel") {
-                        self.clear_input();
-                    } else {
-                        self.add_output(&alloc::format!("[{}] pressed", label));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    pub fn get_input(&self) -> Option<String> {
-        if self.textboxes.len() > 0 {
-            Some(self.textboxes[0].text.clone())
-        } else {
-            None
-        }
-    }
-
-    pub fn clear_input(&mut self) {
-        if self.textboxes.len() > 0 {
-            self.textboxes[0].text.clear();
-        }
-    }
-
-    pub fn add_output(&mut self, text: &str) {
-        if let Some(ref mut listbox) = self.listbox {
-            listbox.add_item(text);
-        }
-    }
-
-    pub fn exit_requested(&self) -> bool {
-        self.exit_requested
-    }
-    
-    pub  fn process_mouse(){
-        //Graphics::get_cursor()
-        return;
-    }
-}
 
 // Add new UI module structure
 pub mod resource_monitor;
@@ -449,6 +62,9 @@ pub struct DashboardUI {
     pub create_vm_focus_idx: usize, 
     pub vm_action_idx: usize, // For VM actions (0: Start, 1: Stop, 2: Reset, 3: Zero, 4: Delete)
     pub selected_vm_idx: usize,
+    pub filesys_action_idx: usize,
+    pub editor: Option<TextEditor>,
+
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -462,6 +78,40 @@ pub enum DashboardTab {
     Devices,
     Test,
     CreateVM, // New state for VM creation UI
+    Editor,
+}
+
+#[derive(PartialEq)]
+pub enum EditorMode {
+    Normal,
+    Insert,
+    Command,
+}
+
+pub struct TextEditor {
+    pub file_path: String,
+    pub buffer: Vec<u8>,
+    pub cursor_pos: (usize, usize), // (line, col)
+    pub scroll_offset: usize,
+    pub mode: EditorMode,
+    pub is_hex: bool,
+    pub command_buffer: String, // For : commands
+}
+
+impl TextEditor {
+    pub fn new(path: String, data: Vec<u8>) -> Self {
+        // Detect if file is binary/unreadable
+        let is_hex = core::str::from_utf8(&data).is_err();
+        Self {
+            file_path: path,
+            buffer: data,
+            cursor_pos: (0, 0),
+            scroll_offset: 0,
+            mode: EditorMode::Normal,
+            is_hex: false,
+            command_buffer: "".to_string(),
+        }
+    }
 }
 
 pub struct VmDisplayInfo {
@@ -529,11 +179,13 @@ impl DashboardUI {
             selected_device_idx: 0,
             exit_requested: false,
             new_vm_name: String::from("NewVM"),
-            new_vm_memory_mb: 1024,
+            new_vm_memory_mb: 256,
             new_vm_vcpus: 1,
             create_vm_focus_idx: 0,
             vm_action_idx: 0,
             selected_vm_idx: 0,
+            filesys_action_idx: 0,
+            editor: None,
         }
     }
 
@@ -641,6 +293,11 @@ impl DashboardUI {
                     pg.draw_text(40, y, &alloc::format!("Storage: {} Files in current path", self.files.len()), 0xCCCCCC);
                     y += 20;
                     pg.draw_text(40, y, &alloc::format!("Devices: {} Categories detected", self.categories.len()), 0xCCCCCC);
+                    y += 60;
+                    pg.draw_text_bg(40, y, "STATE BACKUP", 0xFF7700, 0x444444);
+                    y += 20;
+                    pg.fill_rect(40, y, 70, 30, 0x553333);
+                    pg.draw_text(42, y+2, "SAVE [/]", 0xBBBBAA)
                 }
                 DashboardTab::VirtualMachines => {
                     // Title
@@ -866,9 +523,11 @@ impl DashboardUI {
 
                     // Rows
                     let mut y = list_y + line_h + gutter;
+                    let mut idx_types: Vec<&str> = Vec::new();
                     for (i, entry) in self.files.iter().enumerate() {
                         if y + line_h > list_y + list_h - 2 { break; }
                         let color = if i == self.selected_file_idx { 0xFFFF00 } else { 0xFFFFFF };
+                        idx_types.push(if entry.is_dir { "D" } else { "F" }  );
                         let icon = if entry.is_dir { "Ñ D" } else {
                             let dec_syn = ["json", "xml"];
                             let sys_syn = ["sys", "efi"];
@@ -890,11 +549,50 @@ impl DashboardUI {
                                 "Ç F"
                             }
                         };
-                        pg.draw_text(list_x + 8, y, icon, 0xCCCCCC);
-                        pg.draw_text(list_x + 56, y, &alloc::format!("{:<28}", entry.name), color);
-                        pg.draw_text(list_x + 348, y, &alloc::format!("{:>12}", entry.size), 0xCCCCCC);
-                        pg.draw_text(list_x + 480, y, if entry.is_dir { "DIR" } else { "FILE" }, 0x6666FF);
+
+                        let size: String = if entry.size < 10000 {
+                            format!("{}", entry.size)
+                        } else if entry.size/1000 < 10000 {
+                            format!("{}K", (entry.size/1000))
+                        } else {
+                            format!("{}M", (entry.size/1000)/1000)
+                        };
+
+
+                        let background = if i == self.selected_file_idx { 0x333333 } else { 0x222222 };
+                        pg.draw_text_bg(list_x + 8, y, icon, 0xCCCCCC, background);
+                        pg.draw_text_bg(list_x + 56, y, &alloc::format!("{:<28}", entry.name), color, background);
+                        pg.draw_text_bg(list_x + 348, y, &alloc::format!("{:>12}", size), 0xCCCCCC, background);
+                        pg.draw_text_bg(list_x + 480, y, if entry.is_dir { "DIR" } else { "FILE" }, 0x6666FF, background);
                         y += line_h;
+                    }
+
+                    if idx_types[self.selected_file_idx] == "F" {
+                        let actions_y = list_h + margin*8;
+                        pg.draw_text(margin, actions_y, "Actions for Selected Item", 0xCCCCCC);
+                        let actions = ["Open", "Edit", "Props", "Delete", "Clone", "Copy", "Cut", "Copy Path"];
+                        let mut action_x = margin;
+                        let action_y = actions_y + 20;
+                        for (idx, action) in actions.iter().enumerate() {
+                            let is_focused = idx == self.filesys_action_idx;
+                            let color = if is_focused { 0x00AA00 } else { 0x444444 };
+                            pg.fill_rect(action_x, action_y, 90, 24, color);
+                            pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
+                            action_x += 100;
+                        }
+                    } else {
+                        let actions_y = list_h + margin*8;
+                        pg.draw_text(margin, actions_y, "Actions for Selected Item", 0xCCCCCC);
+                        let actions = ["Props", "Delete", "Clone", "Copy", "Cut", "Compress", "Copy Path", "_"];
+                        let mut action_x = margin;
+                        let action_y = actions_y + 20;
+                        for (idx, action) in actions.iter().enumerate() {
+                            let is_focused = idx == self.filesys_action_idx;
+                            let color = if is_focused { 0x00AA00 } else { 0x444444 };
+                            pg.fill_rect(action_x, action_y, 90, 24, color);
+                            pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
+                            action_x += 100;
+                        }
                     }
                 }
                 DashboardTab::Test => {
@@ -994,6 +692,60 @@ impl DashboardUI {
                     pg.draw_radio_button(420, 530, false); pg.draw_line(426, 536, 432, 530, 0xFF0000);
                     pg.draw_rect_outline(550, 530, 100, 20, 0x888888); pg.draw_text(555, 532, "Ctrl+Alt+Del", 0xFFFF00);
                 }
+                DashboardTab::Editor => {
+                    if let Some(ref ed) = self.editor {
+                        // Draw Header with Mode
+                        let mode_text = if ed.mode == EditorMode::Insert { "-- INSERT --" } else if ed.mode == EditorMode::Command {"-- COMMAND --"} else { "-- NORMAL --" };
+                        let view_type = if ed.is_hex { "[HEX VIEW]" } else { "[TEXT VIEW]" };
+                        pg.draw_text(margin, content_top + 5, &format!("Editing: {} {}", ed.file_path, view_type), 0x00FF00);
+                        pg.draw_text(width - 150, content_top + 5, mode_text, 0xFFFF00);
+
+                        let edit_y_start = content_top + 30;
+                        let visible_lines = (height - edit_y_start - 60) / 20;
+
+                        if ed.is_hex {
+                            let mut y = content_top + 40;
+                            let line_height = 20;
+                            let hex_start_x = margin + 110;
+                            let ascii_start_x = margin + 600;
+
+                            for (i, chunk) in ed.buffer.chunks(16).enumerate().skip(ed.scroll_offset) {
+                                if y > height - 80 { break; }
+
+                                let offset = i * 16;
+                                // Draw Offset in Gray
+                                pg.draw_text(margin + 10, y, &format!("{:08X}", offset), 0x888888);
+
+                                for (j, &byte) in chunk.iter().enumerate() {
+                                    let color = match byte {
+                                        0..=31 | 127 => 0x5555FF,   // Blue: Control
+                                        32..=126 => 0xFFFFFF,      // White: ASCII
+                                        _ => 0xFF00FF,             // Purple: Other/Extended
+                                    };
+
+                                    // Draw Hex Byte
+                                    pg.draw_text(hex_start_x + (j * 30), y, &format!("{:02X}", byte), color);
+
+                                    // Draw ASCII Char on the side
+                                    let ascii_char = if byte >= 32 && byte <= 126 { byte as char } else { '.' };
+                                    pg.draw_text(ascii_start_x + (j * 12), y, &ascii_char.to_string(), color);
+                                }
+                                y += line_height;
+                            }
+                        } else {
+                            // Text Editor Rendering
+                            let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                            for (i, line) in content.lines().skip(ed.scroll_offset).enumerate() {
+                                if i >= visible_lines { break; }
+                                pg.draw_text(margin + 40, edit_y_start + (i * 20), line, 0xFFFFFF);
+                                // Line numbers
+                                pg.draw_text(margin, edit_y_start + (i * 20), &format!("{:3}", ed.scroll_offset + i + 1), 0x666666);
+                            }
+                        }
+
+                        pg.draw_text(margin, height - 70, ":w - Save | :q - Quit | i - Insert | Esc - Normal", 0x888888);
+                    }
+                }
             }
 
             // Draw footer
@@ -1025,212 +777,6 @@ impl DashboardUI {
             message!("", "dashboard unavailable")
         }
     }
-
-    // fn draw_header(&self) {
-    //     uefi::system::with_stdout(|stdout| {
-    //         let _ = stdout.set_color(Color::Cyan, Color::Black);
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "╔════════════════════════════════════════════════════════════╗\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "║           HPVMx - Hypervisor Management Console            ║\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "╚════════════════════════════════════════════════════════════╝\n"
-    //         );
-    //         let _ = stdout.set_color(Color::White, Color::Black);
-    //     });
-    // }
-    //
-    // fn draw_navigation_bar(&self) {
-    //     uefi::system::with_stdout(|stdout| {
-    //         let _ = stdout.set_color(Color::LightGray, Color::Black);
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             " [O]verview │ [V]Ms │ [R]esources │ [S]torage │ [N]etwork │ [C]onsole\n"
-    //         );
-    //         let _ = stdout.set_color(Color::White, Color::Black);
-    //     });
-    // }
-
-    // fn draw_overview(&self) {
-    //     uefi::system::with_stdout(|stdout| {
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "\n┌─ System Overview ────────────────────────────────────────┐\n"
-    //         );
-    //         let _ = core::fmt::Write::write_fmt(
-    //             stdout,
-    //             format_args!("│ CPU Usage:    {:3}%                                    │\n",
-    //                          self.resources.cpu_usage)
-    //         );
-    //         let _ = core::fmt::Write::write_fmt(
-    //             stdout,
-    //             format_args!("│ Memory:       {}/{} MB                          │\n",
-    //                          self.resources.used_memory_mb,
-    //                          self.resources.total_memory_mb)
-    //         );
-    //         let _ = core::fmt::Write::write_fmt(
-    //             stdout,
-    //             format_args!("│ VMs Running:  {}                                      │\n",
-    //                          self.count_running_vms())
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "└──────────────────────────────────────────────────────────┘\n"
-    //         );
-    //     });
-    // }
-
-    // fn draw_vms_list(&self) {
-    //     uefi::system::with_stdout(|stdout| {
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "\n┌─ Virtual Machines ───────────────────────────────────────┐\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "│ ID │ Name       │ State    │ CPU │ Memory │ Uptime    │\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "├────┼────────────┼──────────┼─────┼────────┼───────────┤\n"
-    //         );
-    //
-    //         let end = core::cmp::min(
-    //             self.scroll_offset + 10,
-    //             self.vms.len()
-    //         );
-    //
-    //         for vm in &self.vms[self.scroll_offset..end] {
-    //             let name_len = core::cmp::min(10, vm.name.len());
-    //             let _ = core::fmt::Write::write_fmt(
-    //                 stdout,
-    //                 format_args!(
-    //                     "│ {:2} │ {:<10} │ {:<8} │ {:3}% │ {:5} MB │ {:>4}h {:>2}m │\n",
-    //                     vm.id,
-    //                     &vm.name[..name_len],
-    //                     &vm.state,
-    //                     vm.cpu_usage,
-    //                     vm.memory_usage_mb,
-    //                     vm.uptime_seconds / 3600,
-    //                     (vm.uptime_seconds % 3600) / 60
-    //                 )
-    //             );
-    //         }
-    //
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "└────┴────────────┴──────────┴─────┴────────┴───────────┘\n"
-    //         );
-    //     });
-    // }
-
-    // fn draw_resources(&self) {
-    //     uefi::system::with_stdout(|stdout| {
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "\n┌─ System Resources ───────────────────────────────────────┐\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "│ Processor: 8 cores @ 3.2 GHz                             │\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "│ Memory: 16 GB total, 12 GB allocated to VMs              │\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "│ Thermal: CPU 45°C, Host 38°C                             │\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "└──────────────────────────────────────────────────────────┘\n"
-    //         );
-    //     });
-    // }
-
-    // fn draw_storage(&self) {
-    //     uefi::system::with_stdout(|stdout| {
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "\n┌─ Storage ────────────────────────────────────────────────┐\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "│ /dev/sda   500 GB   [████████░░] 80% used               │\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "│ /dev/sdb   1.0 TB   [██████░░░░] 60% used               │\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "│ /dev/sdc   2.0 TB   [███░░░░░░░] 30% used               │\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "└──────────────────────────────────────────────────────────┘\n"
-    //         );
-    //     });
-    // }
-
-    // fn draw_network(&self) {
-    //     uefi::system::with_stdout(|stdout| {
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "\n┌─ Network ────────────────────────────────────────────────┐\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "│ eth0: 192.168.1.100  RX: 125 MB/s   TX: 87 MB/s          │\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "│ eth1: 10.0.0.50      RX: 12 MB/s    TX: 34 MB/s          │\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "└──────────────────────────────────────────────────────────┘\n"
-    //         );
-    //     });
-    // }
-
-    // fn draw_console(&self) {
-    //     uefi::system::with_stdout(|stdout| {
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "\n┌─ Console Output ─────────────────────────────────────────┐\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "│ [Connected to VM console]                                │\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "│                                                          │\n"
-    //         );
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             "└──────────────────────────────────────────────────────────┘\n"
-    //         );
-    //     });
-    // }
-
-    // fn draw_footer(&self) {
-    //     uefi::system::with_stdout(|stdout| {
-    //         let _ = stdout.set_color(Color::LightGray, Color::Black);
-    //         let _ = core::fmt::Write::write_str(
-    //             stdout,
-    //             " [↑↓] Navigate  [Enter] Select  [Q] Quit  [?] Help\n"
-    //         );
-    //         let _ = stdout.set_color(Color::White, Color::Black);
-    //     });
-    // }
 
     fn count_running_vms(&self) -> usize {
         self.vms.iter()
@@ -1478,102 +1024,215 @@ impl DashboardUI {
                 }
                 return;
             }
+            DashboardTab::Storage => {
+                match key {
+                    Key::Special(ScanCode::LEFT) => {
+                        if self.filesys_action_idx >= 1 {self.filesys_action_idx -= 1 } else { self.filesys_action_idx = 0 }
+                    }
+                    Key::Special(ScanCode::RIGHT) => {
+                        if self.filesys_action_idx < 7 {self.filesys_action_idx += 1 } else { self.filesys_action_idx = 7 }
+                    }
+                    Key::Special(ScanCode::END) => {
+                        if self.filesys_action_idx == 0 || self.filesys_action_idx == 1 { // Open/Edit
+                            let entry = &self.files[self.selected_file_idx];
+                            if !entry.is_dir {
+                                let full_path = format!("{}{}", self.current_path, entry.name);
+                                if let Ok(data) = crate::FileSystem::read_file(&full_path) {
+                                    // Detect if binary: check for null bytes or invalid UTF-8
+                                    let is_hex = core::str::from_utf8(&data).is_err();
+
+                                    self.editor = Some(TextEditor {
+                                        file_path: full_path,
+                                        buffer: data,
+                                        cursor_pos: (0, 0),
+                                        scroll_offset: 0,
+                                        mode: EditorMode::Normal,
+                                        is_hex,
+                                        command_buffer: "".to_string(),
+                                    });
+                                    self.selected_tab = DashboardTab::Editor;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            DashboardTab::Editor => {
+                let ed = self.editor.as_mut().unwrap();
+
+                match ed.mode {
+                    EditorMode::Normal => match key {
+                        Key::Printable(c) => match char::from(c) {
+                            'i' => ed.mode = EditorMode::Insert,
+                            ':' => {
+                                ed.mode = EditorMode::Command;
+                                ed.command_buffer.clear();
+                            }
+                            'j' => ed.scroll_offset += 1,
+                            'k' => ed.scroll_offset = ed.scroll_offset.saturating_sub(1),
+                            _ => {}
+                        },
+                        _ => {}
+                    },
+                    EditorMode::Insert => match key {
+                        Key::Special(ScanCode::ESCAPE) => ed.mode = EditorMode::Normal,
+                        Key::Printable(char16) => {
+                            match char::from(char16) {
+                                '\u{8}'=> {
+                                ed.buffer.pop(); // Simple end-of-file backspace for now
+                                }
+                                _ => {
+                                    let c: char = char16.into();
+                                    if c.is_ascii() {
+                                        ed.buffer.push(c as u8);
+                                    } else {
+                                        // Optional: Handle non-ASCII (e.g., push UTF-8 bytes)
+                                        let mut b = [0; 4];
+                                        for &byte in c.encode_utf8(&mut b).as_bytes() {
+                                            ed.buffer.push(byte);
+                                        }
+                                    }
+                                }
+                            }
+
+                        }
+                        _ => {}
+                    },
+                    EditorMode::Command => match key {
+                        Key::Special(ScanCode::ESCAPE) => ed.mode = EditorMode::Normal,
+                        Key::Printable(c) => {
+                            let ch = char::from(c);
+                            if ch == '\r' || ch == '\n' {
+                                match ed.command_buffer.as_str() {
+                                    "w" => {
+                                        let _ = crate::FileSystem::write_to_file_bytes(&ed.file_path, &ed.buffer, 'w');
+                                        ed.mode = EditorMode::Normal;
+                                    }
+                                    "q" => self.selected_tab = DashboardTab::Storage,
+                                    "wq" => {
+                                        let _ = crate::FileSystem::write_to_file_bytes(&ed.file_path, &ed.buffer, 'w');
+                                        self.selected_tab = DashboardTab::Storage;
+                                    }
+                                    _ => ed.mode = EditorMode::Normal,
+                                }
+                            } else {
+                                ed.command_buffer.push(ch);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
             _ => {}
         }
 
         match key {
             Key::Printable(c) => {
                 let ch = char::from(c).to_ascii_lowercase();
-                match ch {
-                    'q' => {
-                        self.exit_requested = true;
-                        return;
-                    }
-                    'o' => self.selected_tab = DashboardTab::Overview,
-                    'v' => self.selected_tab = DashboardTab::VirtualMachines,
-                    'r' => self.selected_tab = DashboardTab::Resources,
-                    's' => self.selected_tab = DashboardTab::Storage,
-                    'n' => self.selected_tab = DashboardTab::Network,
-                    'd' => self.selected_tab = DashboardTab::Devices,
-                    'c' => self.selected_tab = DashboardTab::Console,
-                    't' => self.selected_tab = DashboardTab::Test,
-                    ' ' => {
-                        if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
-                            self.selected_tab = DashboardTab::CreateVM;
+                if !(matches!(self.selected_tab, DashboardTab::Editor)) {
+                    match ch {
+                        // 'q' => {
+                        //     self.exit_requested = true;
+                        //     return;
+                        // }
+                        'o' => self.selected_tab = DashboardTab::Overview,
+                        'v' => self.selected_tab = DashboardTab::VirtualMachines,
+                        'r' => self.selected_tab = DashboardTab::Resources,
+                        's' => self.selected_tab = DashboardTab::Storage,
+                        'n' => self.selected_tab = DashboardTab::Network,
+                        'd' => self.selected_tab = DashboardTab::Devices,
+                        'c' => self.selected_tab = DashboardTab::Console,
+                        't' => self.selected_tab = DashboardTab::Test,
+                        ' ' => {
+                            if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
+                                self.selected_tab = DashboardTab::CreateVM;
+                            }
                         }
-                    }
-                    '\r' | '\n' => {
-                        if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
-                            // Action execution handled in main.rs
-                        } else if matches!(self.selected_tab, DashboardTab::Storage) {
-                            if self.selected_file_idx < self.files.len() {
-                                let entry = &self.files[self.selected_file_idx];
-                                if entry.is_dir {
-                                    if entry.name == "." {
-                                        // Do nothing
-                                    } else if entry.name == ".." {
-                                        // Go up
-                                        if let Some(pos) = self.current_path.rfind('\\') {
-                                            if pos == 0 {
-                                                self.current_path = String::from("\\");
-                                            } else {
-                                                self.current_path.truncate(pos);
+                        '\r' | '\n' => {
+                            if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
+                                // Action execution handled in main.rs
+                            } else if matches!(self.selected_tab, DashboardTab::Storage) {
+                                if self.selected_file_idx < self.files.len() {
+                                    let entry = &self.files[self.selected_file_idx];
+                                    if entry.is_dir {
+                                        if entry.name == "." {
+                                            // Do nothing
+                                        } else if entry.name == ".." {
+                                            // Go up
+                                            if let Some(pos) = self.current_path.rfind('\\') {
+                                                if pos == 0 {
+                                                    self.current_path = String::from("\\");
+                                                } else {
+                                                    self.current_path.truncate(pos);
+                                                }
                                             }
+                                        } else {
+                                            // Go down
+                                            if !self.current_path.ends_with('\\') {
+                                                self.current_path.push('\\');
+                                            }
+                                            self.current_path.push_str(&entry.name);
                                         }
-                                    } else {
-                                        // Go down
-                                        if !self.current_path.ends_with('\\') {
-                                            self.current_path.push('\\');
-                                        }
-                                        self.current_path.push_str(&entry.name);
-                                    }
-                                    self.selected_file_idx = 0;
-                                    self.refresh_storage();
-                                }
-                            }
-                        } else if matches!(self.selected_tab, DashboardTab::Devices) {
-                            // Toggle expansion
-                            let mut current_idx = 0;
-                            let mut found = false;
-                            for i in 0..self.categories.len() {
-                                if current_idx == self.selected_device_idx {
-                                    self.categories[i].expanded = !self.categories[i].expanded;
-                                    break;
-                                }
-                                current_idx += 1;
-                                if self.categories[i].expanded {
-                                    for _ in &self.categories[i].devices {
-                                        if current_idx == self.selected_device_idx {
-                                            // Can't toggle a device, only categories
-                                            found = true;
-                                            break;
-                                        }
-                                        current_idx += 1;
+                                        self.selected_file_idx = 0;
+                                        self.refresh_storage();
                                     }
                                 }
-                                if found { break; }
+                            } else if matches!(self.selected_tab, DashboardTab::Devices) {
+                                // Toggle expansion
+                                let mut current_idx = 0;
+                                let mut found = false;
+                                for i in 0..self.categories.len() {
+                                    if current_idx == self.selected_device_idx {
+                                        self.categories[i].expanded = !self.categories[i].expanded;
+                                        break;
+                                    }
+                                    current_idx += 1;
+                                    if self.categories[i].expanded {
+                                        for _ in &self.categories[i].devices {
+                                            if current_idx == self.selected_device_idx {
+                                                // Can't toggle a device, only categories
+                                                found = true;
+                                                break;
+                                            }
+                                            current_idx += 1;
+                                        }
+                                    }
+                                    if found { break; }
+                                }
                             }
                         }
+                        // 'i' => self.cursor.y -= if (self.cursor.y > 10) {10} else { 0 },
+                        // 'k' => self.cursor.y += 10,
+                        // 'j' => self.cursor.x -= if (self.cursor.x > 10) {10} else { 0 },
+                        // 'l' => self.cursor.x += 10,
+                        // 'u' => self.cursor.left_button = true,
+                        '\t' => {
+                            self.selected_tab = match self.selected_tab {
+                                DashboardTab::Overview => DashboardTab::VirtualMachines,
+                                DashboardTab::VirtualMachines => DashboardTab::Resources,
+                                DashboardTab::Resources => DashboardTab::Storage,
+                                DashboardTab::Storage => DashboardTab::Network,
+                                DashboardTab::Network => DashboardTab::Devices,
+                                DashboardTab::Devices => DashboardTab::Console,
+                                DashboardTab::Console => DashboardTab::Test,
+                                DashboardTab::Test => DashboardTab::Overview,
+                                DashboardTab::CreateVM => DashboardTab::VirtualMachines,
+                                DashboardTab::Editor => DashboardTab::Storage,
+                            };
+                        }
+                        '/' => {
+                            match self.selected_tab {
+                                DashboardTab::Overview => unsafe {
+                                    let stat = crate::state::KernelState::new(0, 0x0);
+                                    crate::state::SAVE();
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
                     }
-                    // 'i' => self.cursor.y -= if (self.cursor.y > 10) {10} else { 0 },
-                    // 'k' => self.cursor.y += 10,
-                    // 'j' => self.cursor.x -= if (self.cursor.x > 10) {10} else { 0 },
-                    // 'l' => self.cursor.x += 10,
-                    // 'u' => self.cursor.left_button = true,
-                    '\t' => {
-                        self.selected_tab = match self.selected_tab {
-                            DashboardTab::Overview => DashboardTab::VirtualMachines,
-                            DashboardTab::VirtualMachines => DashboardTab::Resources,
-                            DashboardTab::Resources => DashboardTab::Storage,
-                            DashboardTab::Storage => DashboardTab::Network,
-                            DashboardTab::Network => DashboardTab::Devices,
-                            DashboardTab::Devices => DashboardTab::Console,
-                            DashboardTab::Console => DashboardTab::Test,
-                            DashboardTab::Test => DashboardTab::Overview,
-                            DashboardTab::CreateVM => DashboardTab::VirtualMachines,
-                        };
-                    }
-                    _ => {}
+
                 }
                 // if (self.cursor.left_button) {
                 //     self.cursor.left_button = false;

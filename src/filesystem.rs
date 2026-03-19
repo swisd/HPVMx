@@ -15,15 +15,33 @@ use uefi::proto::device_path::text::{AllowShortcuts, DisplayOnly};
 use uefi::proto::media::file::{File, FileMode, FileAttribute, FileInfo};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi_raw::protocol::device_path::{DeviceSubType, DeviceType};
-
+use crate::hpvmlog::LogEntry;
+use crate::state::{KernelState, Persistable};
 
 /// Internal global state for CWD and Device Aliases
+#[derive(Clone)]
 pub struct State {
     cwd: String,
     pub device_map: Vec<(String, String)>,
 }
 
+
+impl Persistable for &mut State {
+    fn magic() -> u32 { 0x54535346 } // "FSST" in hex
+
+    fn get_heap_bytes(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        let size = core::mem::size_of::<State>();
+        let ptr = &self as *const _ as *const u8;
+        unsafe {
+            data.extend_from_slice(core::slice::from_raw_parts(ptr, size));
+        }
+        data
+    }
+}
+
 static mut STATE: Option<State> = None;
+
 
 pub struct FileSystem;
 
@@ -330,6 +348,21 @@ impl FileSystem {
             file.set_position(0xFFFFFFFFFFFFFFFF).map_err(|_| "Seek error")?;
         }
         file.write(data.as_bytes()).map_err(|_| "Write error")?;
+        Ok(())
+    }
+
+    pub fn write_to_file_bytes(path: &str, data: &[u8], mode: char) -> Result<(), &'static str> {
+        let mut root = Self::get_root()?;
+        let path_cstr = Self::path_to_cstr16(path)?;
+
+        let handle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
+            .map_err(|_| "Open for write failed")?;
+        let mut file = handle.into_regular_file().ok_or("Not a file")?;
+
+        if mode == 'a' {
+            file.set_position(0xFFFFFFFFFFFFFFFF).map_err(|_| "Seek error")?;
+        }
+        file.write(data).map_err(|_| "Write error")?;
         Ok(())
     }
 

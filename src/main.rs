@@ -26,6 +26,7 @@ mod hpvmlog;
 mod consts;
 mod types;
 mod rng;
+mod state;
 
 extern crate alloc;
 use alloc::string::{String, ToString};
@@ -50,7 +51,7 @@ use uefi::proto::console::pointer::Pointer as SimplePointer;
 use kernel::KernelLoader;
 use filesystem::FileSystem;
 use vmm::HypervisorManager;
-use ui::WinNTShell;
+//use ui::WinNTShell;
 use ui::DashboardUI;
 //use sysinfo;
 use types::*;
@@ -608,20 +609,21 @@ fn read_line_int(buf: &mut String) -> i32 {
 fn enter(itm: &str) {
     match itm {
         "ui" => {
-            let mut shell = WinNTShell::new();
-            shell.init_desktop();
-            shell.draw();
-
-            loop {
-
-                let mut events = [uefi::system::with_stdin(|i| i.wait_for_key_event().unwrap())];
-                uefi::boot::wait_for_event(&mut events).unwrap();
-
-                if let Some(key) = uefi::system::with_stdin(|i| i.read_key().unwrap()) {
-                    shell.handle_input(key);
-                    shell.draw();
-                }
-            }
+            hpvm_warn!("ui", "NTSHELL is deprecated, use dashboard instead");
+            // let mut shell = WinNTShell::new();
+            // shell.init_desktop();
+            // shell.draw();
+            //
+            // loop {
+            //
+            //     let mut events = [uefi::system::with_stdin(|i| i.wait_for_key_event().unwrap())];
+            //     uefi::boot::wait_for_event(&mut events).unwrap();
+            //
+            //     if let Some(key) = uefi::system::with_stdin(|i| i.read_key().unwrap()) {
+            //         shell.handle_input(key);
+            //         shell.draw();
+            //     }
+            // }
         }
         _ => {}
     }
