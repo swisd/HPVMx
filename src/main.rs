@@ -66,6 +66,7 @@ static mut HEAP_STORAGE: [u8; 2 * 1024 * 1024] = [0; 2 * 1024 * 1024];
 static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
 
 use crate::paging::PagingManager;
+use crate::ui::DashboardTab;
 //use crate::graphics::Cursor;
 
 
@@ -1027,7 +1028,7 @@ fn show_dashboard_ui() {
 
     // Enter dashboard interaction loop
     let mut last_refresh = 0;
-    let refresh_rate = 30;
+    let refresh_rate = 15;
 
     let mut RNG = crate::rng::XorShiftRng::new(20);
 

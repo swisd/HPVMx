@@ -772,7 +772,7 @@ impl DashboardUI {
                     let right_w = core::cmp::min(width - right_x - margin, 360);
                     let right_h = core::cmp::min(height - right_y - 100, 260);
                     pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
-                    pg.draw_text(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF);
+                    pg.draw_text_bg(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF, 0x222222);
                     pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00, 30);
                     
                     pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
@@ -796,13 +796,13 @@ impl DashboardUI {
                 }
                 DashboardTab::Console => {
                     pg.draw_text(20, 100, "System Log", 0x00FF00);
-                    pg.draw_rect_outline(margin, 130, width - margin * 2, height - 130 - margin * 2, 0x888888);
+                    pg.draw_rect_outline(margin, 130, width - margin * 2, height - 130 - margin * 6, 0x888888);
                     
                     let mut y = 140;
                     let logs = crate::hpvmlog::get_logs();
                     
                     // Show last N logs that fit on screen
-                    let max_visible = (height - 130 - margin * 2 - 20) / line_h;
+                    let max_visible = (height - 130 - (margin * 6) - 20) / line_h;
                     let start_idx = logs.len().saturating_sub(max_visible);
                     
                     for i in start_idx..logs.len() {
@@ -816,7 +816,7 @@ impl DashboardUI {
                         let log_line = if tag.is_empty() { msg.clone() } else { alloc::format!("[{}] {}", tag, msg) };
                         pg.draw_text(margin + 10, y, &log_line, color_hex);
                         y += line_h;
-                        if y + line_h > height - margin * 2 { break; }
+                        if y + line_h > height - margin * 6 { break; }
                     }
                 }
                 DashboardTab::Devices => {
