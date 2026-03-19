@@ -2,7 +2,10 @@ use uefi::proto::console::text::Color;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
+use crate::filesystem::State;
+use crate::state::Persistable;
 
+#[derive(Clone)]
 pub struct LogEntry {
     pub level: Color,
     pub tag: String,
@@ -44,6 +47,30 @@ pub fn get_logs() -> Vec<(Color, String, String)> {
         }
     }
 }
+
+#[allow(static_mut_refs)]
+pub unsafe fn get_log_buffer() -> &'static Option<Vec<LogEntry>> {
+    unsafe {
+        let option = &LOG_BUFFER;
+        option
+    }
+}
+
+impl Persistable for &'static Option<Vec<LogEntry>> {
+    fn magic() -> u32 { 0x474F4C48 } // "HLOG" in hex
+
+    fn get_heap_bytes(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        let size = core::mem::size_of::<Option<Vec<LogEntry>>>();
+        let ptr = &self as *const _ as *const u8;
+        unsafe {
+            data.extend_from_slice(core::slice::from_raw_parts(ptr, size));
+        }
+        data
+    }
+}
+
+
 
 #[macro_export] macro_rules! hpvm_log {
     ($color:expr, $prefix:expr, $($arg:tt)*) => {
