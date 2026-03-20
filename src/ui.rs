@@ -6,6 +6,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::proto::console::text::{Color, Key, ScanCode};
+use uefi::runtime::VariableKey;
 
 mod graphics;
 pub mod pixel_graphics;
@@ -250,6 +251,11 @@ impl DashboardUI {
                 pg.draw_text(width - 100, 16, &time_str, 0xFFFF00); // Yellow clock
             }
 
+            pg.draw_text(40, 5, "   __ _____ _   ____  ___", 0xFFFFFF);
+            pg.draw_text(40, 12, "  / // / _ \\ | / /  |/  /_ __", 0xFFFFFF);
+            pg.draw_text(40, 19, " / _  / ___/ |/ / /|_/ /\\ \\ /", 0xFFFFFF);
+            pg.draw_text(40, 28, "/_//_/_/   |___/_/  /_//_\\_\\", 0xFFFFFF);
+
             // Draw navigation
             pg.fill_rect(0, 48, width, 32, 0x444444); // Dark Gray
             let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test";
@@ -297,7 +303,20 @@ impl DashboardUI {
                     pg.draw_text_bg(40, y, "STATE BACKUP", 0xFF7700, 0x444444);
                     y += 20;
                     pg.fill_rect(40, y, 70, 30, 0x553333);
-                    pg.draw_text(42, y+2, "SAVE [/]", 0xBBBBAA)
+                    pg.draw_text(42, y+2, "SAVE [/]", 0xBBBBAA);
+
+
+                    y = 100;
+                    //pg.draw_rect_outline(420, y, 320, 420, 0xCCCCCC);
+                    let time_data_0 = format!("{:?}", uefi::runtime::get_time_and_caps().unwrap().0);
+                    let time_data_1 = format!("{:?}", uefi::runtime::get_time_and_caps().unwrap().1);
+                    pg.draw_text(420, y, &*time_data_0, 0xFFFFFF);
+                    y += 10;
+                    pg.draw_text(420, y, &*time_data_1, 0xFFFFFF);
+
+
+
+                    // let text_new_0 = format!("{:?}", uefi::runtime::get_variable(VariableKey::));
                 }
                 DashboardTab::VirtualMachines => {
                     // Title
@@ -583,7 +602,7 @@ impl DashboardUI {
                     } else {
                         let actions_y = list_h + margin*8;
                         pg.draw_text(margin, actions_y, "Actions for Selected Item", 0xCCCCCC);
-                        let actions = ["Props", "Delete", "Clone", "Copy", "Cut", "Compress", "Copy Path", "_"];
+                        let actions = ["Props", "Delete", "Clone", "Copy", "Cut", "Compress", "Copy Path", "New"];
                         let mut action_x = margin;
                         let action_y = actions_y + 20;
                         for (idx, action) in actions.iter().enumerate() {

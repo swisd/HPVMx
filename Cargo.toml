@@ -26,3 +26,4 @@ uefi-raw = "0.13.0"
 # Hypervisor dependencies
 bitflags = "2.4.0"
 uefi-async = "0.2.8"
+elf = { version = "0.8.0", default-features = false }

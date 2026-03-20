@@ -27,6 +27,7 @@ mod consts;
 mod types;
 mod rng;
 mod state;
+mod loader;
 
 extern crate alloc;
 use alloc::string::{String, ToString};
@@ -149,6 +150,7 @@ fn main() -> Status {
     hpvm_info!("page", "setting active paging mapper");
     let mut mapper = unsafe { PagingManager::get_active_mapper(x86_64::VirtAddr::new(16384)) };
 
+
     hpvm_info!("fs", "building devicelist");
 
     while !(FileSystem::is_handle()) {
@@ -267,7 +269,13 @@ fn main() -> Status {
             },
             "clear" => { uefi::system::with_stdout(|s| s.clear().unwrap()); }
             "ls" => FileSystem::list_files(),
-            "cd" => { FileSystem::cd(command[1]) }
+            "cd" => {
+                if (command.len() == 2) {
+                    FileSystem::cd(command[1])
+                } else {
+                    message!("\n", "Usage: cd [directory]")
+                }
+            }
             "pwd" => { FileSystem::get_cwd(); }
             "mkdir" => {
                 if parts.len() < 2 {
@@ -511,6 +519,15 @@ fn main() -> Status {
                     //do nothing
                 }
             }
+            "load-into" => unsafe {
+                if command.len() == 2 {
+                    loader::load_and_jump_os(command[1])
+                } else {
+                    message!("\n", "Usage: load-into [efi path]")
+                }
+
+            }
+
 
             _ => message!("\n", "unknown command: {:?}", command),
         }
@@ -1264,7 +1281,7 @@ fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
 //     }
 // }
 
-pub fn init_mouse() {
+fn init_mouse() {
     if let Ok(handle) = boot::get_handle_for_protocol::<SimplePointer>() {
         let _ = boot::connect_controller(handle, None, None, true);
         if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<SimplePointer>(handle) {
@@ -1286,3 +1303,5 @@ pub fn init_mouse() {
     // Actually, let's keep it simple for now as the Dashboard loop will call update_from_mouse
     // which will open it.
 }
+
+
