@@ -735,14 +735,15 @@ impl DashboardUI {
                     pg.draw_rect_outline(550, y + 30, 100, 20, 0x888888); pg.draw_text(555, y + 32, "Ctrl+Alt+Del", 0xFFFF00);
 
 
-                    let y = 700;
+                    let y = 130;
+                    let x = 650;
 
                     // Table Data (3D setup)
                     let headers = ["ID", "Name", "Status"];
                     let row1 = ["01", "Kernel", "Running"];
                     let row2 = ["02", "GOP", "Active"];
                     let rows = [&row1[..], &row2[..]];
-                    pg.draw_table_view(500, y, 250, 100, &headers, &rows);
+                    pg.draw_table_view(x, y, 250, 100, &headers, &rows);
 
                     // Tree Data (Nested JSON-style)
                     let children = [
@@ -754,7 +755,7 @@ impl DashboardUI {
                         children: &children,
                         expanded: true,
                     };
-                    pg.draw_tree_view(200, y, 200, 150, &root);
+                    pg.draw_tree_view(x, y + 200, 200, 150, &root);
                 }
                 DashboardTab::Editor => {
                     if let Some(ref ed) = self.editor {
