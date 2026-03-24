@@ -42,12 +42,12 @@ use buddy_system_allocator::LockedHeap;
 use uefi::boot::{MemoryType};
 use uefi::mem::memory_map::MemoryMap;
 use uefi::proto::console::text::{Key, ScanCode};
-
 use uefi::proto::console::text::Color;
 use uefi::runtime::ResetType;
 //use uefi::system::with_stdout;
 use uefi_raw::table::system::SystemTable;
 use uefi::proto::console::pointer::Pointer as SimplePointer;
+use uefi::proto::device_path::DevicePath;
 //use ui::UI;
 use kernel::KernelLoader;
 use filesystem::FileSystem;
@@ -56,6 +56,11 @@ use vmm::HypervisorManager;
 use ui::DashboardUI;
 //use sysinfo;
 use types::*;
+use crate::paging::PagingManager;
+use crate::rng::XorShiftRng;
+use crate::ui::DashboardTab;
+
+
 
 //#[global_allocator]
 #[allow(dead_code, unused)]
@@ -67,8 +72,7 @@ static mut HEAP_STORAGE: [u8; 2 * 1024 * 1024] = [0; 2 * 1024 * 1024];
 #[allow(dead_code, unused)]
 static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
 
-use crate::paging::PagingManager;
-use crate::ui::DashboardTab;
+
 //use crate::graphics::Cursor;
 
 
@@ -170,13 +174,25 @@ fn main() -> Status {
         }
     }
 
+    // 1. Get all handles
+    let handles = boot::find_handles::<DevicePath>().unwrap();
+
+    // 2. Force UEFI to connect drivers to every handle it finds
+    for handle in handles {
+        let _ = boot::connect_controller(handle, None, None, true);
+    }
+
+    // 3. Now check for SimplePointer again
+    let mouse_handles = boot::find_handles::<SimplePointer>().unwrap_or_default();
+    hpvm_info!("mouse", "Now found {} pointer handles", mouse_handles.len());
 
 
 
 
 
 
-    init_mouse();
+
+    init_mouse_deep_scan();
 
     hpvm_info!("HPVMx", "init sequence complete.");
 
@@ -1010,7 +1026,7 @@ fn show_dashboard_ui() {
                     name: alloc::string::String::from(name),
                     state: state.to_string(),
                     cpu_usage: 25,  // Placeholder
-                    memory_usage_mb: 512,  // Placeholder
+                    memory_usage_mb: 128,  // Placeholder
                     disk_usage_mb: 10240,  // Placeholder
                     uptime_seconds: 3600,  // Placeholder
                 };
@@ -1049,7 +1065,7 @@ fn show_dashboard_ui() {
     let mut last_refresh = 0;
     let refresh_rate = 15;
 
-    let mut RNG = crate::rng::XorShiftRng::new(20);
+    let mut RNG: XorShiftRng = crate::rng::XorShiftRng::new(20);
 
     // Basic example using the uefi crate
 
@@ -1096,11 +1112,11 @@ fn show_dashboard_ui() {
                         cpu_count: 3,
                         cpu_usage: RNG.rand_range(10, 35) as u32,
                         cpu_core_usage: core_usage,
-                        disk_read_kbps: RNG.rand_range(50, 200), // Mocked
-                        disk_write_kbps: RNG.rand_range(50, 200), // Mocked
-                        net_rx_kbps: if RNG.rand_range(0, 500) < 400 {0} else { 300 } ,//(net_stats.rx_bytes / 1024) % 1000, // Very rough
-                        net_tx_kbps: if RNG.rand_range(0, 500) < 400 {0} else { 300 } ,//(net_stats.tx_bytes / 1024) % 1000, // Very rough
-                        gpu_usage: RNG.rand_range(50, 200) as u32, // Mocked
+                        disk_read_kbps: RNG.rand_range(50, 250), // Mocked
+                        disk_write_kbps: RNG.rand_range(50, 250), // Mocked
+                        net_rx_kbps: if RNG.rand_range(0, 500) < 400 {0} else { 150 } ,//(net_stats.rx_bytes / 1024) % 1000, // Very rough
+                        net_tx_kbps: if RNG.rand_range(0, 500) < 400 {0} else { 150 } ,//(net_stats.tx_bytes / 1024) % 1000, // Very rough
+                        gpu_usage: RNG.rand_range(1, 30) as u32, // Mocked
                         cpu_history: alloc::vec![],
                         mem_history: alloc::vec![],
                         disk_read_history: alloc::vec![],
@@ -1270,17 +1286,6 @@ fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
     }
 }
 
-// async fn draw(){
-//     let mut pacer = Pacer::new(60); // Target 60 FPS
-//     let mut cursor = graphics::Cursor::new();
-//     loop {
-//         cursor.update_from_mouse();
-//         uefi::system::with_stdout(|stdout| {
-//             cursor.render(stdout);
-//         });
-//     }
-// }
-
 fn init_mouse() {
     if let Ok(handle) = boot::get_handle_for_protocol::<SimplePointer>() {
         let _ = boot::connect_controller(handle, None, None, true);
@@ -1302,6 +1307,38 @@ fn init_mouse() {
     // as we don't have easy access to the type without importing it.
     // Actually, let's keep it simple for now as the Dashboard loop will call update_from_mouse
     // which will open it.
+}
+
+fn init_mouse_deep_scan() {
+
+
+    // 1. Force UEFI to connect every device it sees on the PCI/USB bus
+    // This is critical because passed-through USB devices aren't always auto-started
+    if let Ok(all_handles) = boot::find_handles::<uefi::proto::device_path::DevicePath>() {
+        for handle in all_handles {
+            let _ = boot::connect_controller(handle, None, None, true);
+        }
+    }
+
+    // 2. Now find ALL SimplePointer handles (expecting 2: Virtual and Physical)
+    if let Ok(handles) = boot::find_handles::<SimplePointer>() {
+        hpvm_info!("usbhid", "Found {} SimplePointer handles", handles.len());
+
+        for (i, handle) in handles.iter().enumerate() {
+            if let Ok(mut mouse) = boot::open_protocol_exclusive::<SimplePointer>(*handle) {
+                // Reset is mandatory for Logitech receivers to begin reporting
+                let r = mouse.reset(false);
+                hpvm_info!("usbhid", "Handle [{}]: Reset result {:?}", i, r);
+
+                // Read the resolution - physical mice usually have small numbers (1, 2, 4)
+                // unlike the virtual tablet's 65536
+                #[allow(irrefutable_let_patterns)]
+                if let mode = mouse.mode() {
+                    hpvm_info!("usbhid", "Handle [{}]: Res X={}", i, mode.resolution[0]);
+                }
+            }
+        }
+    }
 }
 
 

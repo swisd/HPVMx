@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Rust Symbol Library Editor (64K)</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a1a; color: #cfcfcf; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .main-layout { display: flex; gap: 25px; max-width: 1200px; width: 100%; justify-content: center; }
+
+        .editor-card { background: #252526; padding: 20px; border-radius: 8px; border: 1px solid #444; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        #canvas-grid { display: grid; grid-template-columns: repeat(8, 24px); grid-template-rows: repeat(16, 24px); border: 2px solid #333; background: #000; cursor: pointer; margin-bottom: 15px; }
+        .pixel { width: 24px; height: 24px; border: 1px solid #1e1e1e; }
+        .pixel.on { background-color: #00ff95; box-shadow: inset 0 0 8px rgba(0,0,0,0.5); }
+
+        .button-group { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+        button { background: #3e3e42; color: white; border: 1px solid #555; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+        button:hover { background: #4e4e52; }
+        button.accent { background: #007acc; border-color: #005a9e; }
+
+        input { background: #3e3e42; color: white; padding: 8px; border-radius: 4px; border: 1px solid #555; }
+        .jump-box { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; background: #333; padding: 10px; border-radius: 4px; }
+
+        .side-panel { display: flex; flex-direction: column; gap: 20px; flex-grow: 1; min-width: 450px; }
+        #preview-canvas { background: #000; border: 1px solid #444; height: 100px; width: 100%; image-rendering: pixelated; margin-top: 10px; }
+        textarea { width: 100%; height: 300px; background: #1e1e1e; color: #d7ba7d; font-family: 'Consolas', monospace; font-size: 12px; padding: 10px; border: 1px solid #444; border-radius: 4px; resize: none; }
+        h3 { margin-top: 0; color: #9cdcfe; font-weight: normal; border-bottom: 1px solid #444; padding-bottom: 8px; }
+        .hint { font-size: 11px; color: #888; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="main-layout">
+    <div class="editor-card">
+        <h3 id="char-label">Symbol Slot: 0</h3>
+
+        <div class="jump-box">
+            <span>Slot Index:</span>
+            <input type="number" id="jump-idx" value="0" min="0" max="65535" style="width: 100px;">
+            <button class="accent" onclick="jumpTo()">Jump</button>
+        </div>
+
+        <div id="canvas-grid"></div>
+
+        <div class="button-group">
+            <button onclick="shift('up')">↑</button>
+            <button onclick="shift('down')">↓</button>
+            <button onclick="shift('left')">←</button>
+            <button onclick="shift('right')">→</button>
+            <button onclick="clearGrid()" style="margin-left:auto">Clear</button>
+        </div>
+
+        <div class="button-group" style="margin-top:20px; border-top: 1px solid #444; padding-top: 15px;">
+            <button onclick="copyBuffer()">Copy</button>
+            <button onclick="pasteBuffer()">Paste</button>
+            <button onclick="downloadJSON()">Export JSON</button>
+        </div>
+    </div>
+
+    <div class="side-panel">
+        <div class="editor-card">
+            <h3>Visual Preview</h3>
+            <div class="hint">Type indices separated by commas (e.g. 0,1,2,65)</div>
+            <input type="text" id="preview-input" value="0,1,2,3" style="width:96%; margin-top:5px; color:#00ff95;">
+            <canvas id="preview-canvas" width="400" height="100"></canvas>
+            <div class="hint" id="active-count">Active Symbols: 0</div>
+        </div>
+
+        <div class="editor-card">
+            <h3>Rust Code Generator</h3>
+            <textarea id="output-code" spellcheck="false" placeholder="Rust code output..."></textarea>
+            <div class="button-group">
+                <button class="accent" onclick="generateCode()" style="flex:1">Generate Code</button>
+                <button onclick="importCode()" style="flex:1">Import Code</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const grid = document.getElementById('canvas-grid');
+    const jumpInput = document.getElementById('jump-idx');
+    const previewInput = document.getElementById('preview-input');
+    const previewCanvas = document.getElementById('preview-canvas');
+    const output = document.getElementById('output-code');
+    const ctx = previewCanvas.getContext('2d');
+
+    let symbolLibrary = new Map();
+    let currentIdx = 0;
+    let clipboard = null;
+
+    function initGrid() {
+        grid.innerHTML = '';
+        for (let r = 0; r < 16; r++) {
+            for (let c = 0; c < 8; c++) {
+                const d = document.createElement('div');
+                d.className = 'pixel';
+                d.onclick = () => togglePixel(r, c);
+                grid.appendChild(d);
+            }
+        }
+        updateUI();
+    }
+
+    function getActiveData(idx = currentIdx) {
+        if (!symbolLibrary.has(idx)) {
+            symbolLibrary.set(idx, new Array(16).fill(0));
+        }
+        return symbolLibrary.get(idx);
+    }
+
+    function togglePixel(r, c) {
+        let data = getActiveData();
+        data[r] ^= (1 << (7 - c));
+        updateUI();
+    }
+
+    function updateUI() {
+        const data = getActiveData();
+        const pixels = document.querySelectorAll('.pixel');
+        data.forEach((byte, r) => {
+            for (let c = 0; c < 8; c++) {
+                const isOn = (byte >> (7 - c)) & 1;
+                pixels[(r * 8) + c].className = isOn ? 'pixel on' : 'pixel';
+            }
+        });
+        document.getElementById('char-label').textContent = `Symbol Slot: ${currentIdx}`;
+        document.getElementById('active-count').textContent = `Active Symbols: ${symbolLibrary.size}`;
+        renderPreview();
+    }
+
+    function renderPreview() {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
+        ctx.fillStyle = "#00ff95";
+
+        // Parse input indices (e.g. "0, 1, 2, 65")
+        const indices = previewInput.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+
+        indices.forEach((symbolIdx, i) => {
+            if (symbolIdx < 0 || symbolIdx > 65535) return;
+            const data = symbolLibrary.get(symbolIdx) || new Array(16).fill(0);
+            const xOff = i * 10; // 8 pixels + 2 gap
+
+            data.forEach((byte, y) => {
+                for (let x = 0; x < 8; x++) {
+                    if ((byte >> (7 - x)) & 1) {
+                        ctx.fillRect((xOff + x) * 3, (y + 5) * 3, 3, 3);
+                    }
+                }
+            });
+        });
+    }
+
+    function jumpTo() {
+        currentIdx = Math.max(0, Math.min(65535, parseInt(jumpInput.value) || 0));
+        jumpInput.value = currentIdx;
+        updateUI();
+    }
+
+    function shift(dir) {
+        let char = getActiveData();
+        if (dir === 'up') { char.shift(); char.push(0); }
+        else if (dir === 'down') { char.unshift(0); char.pop(); }
+        else if (dir === 'left') symbolLibrary.set(currentIdx, char.map(b => (b << 1) & 0xFF));
+        else if (dir === 'right') symbolLibrary.set(currentIdx, char.map(b => (b >> 1)));
+        updateUI();
+    }
+
+    function copyBuffer() { clipboard = [...getActiveData()]; }
+    function pasteBuffer() { if(clipboard) { symbolLibrary.set(currentIdx, [...clipboard]); updateUI(); } }
+    function clearGrid() { symbolLibrary.set(currentIdx, new Array(16).fill(0)); updateUI(); }
+
+    function generateCode() {
+        let res = "pub fn load_symbol_library(library: &mut [[u8; 16]; 65536]) {\n";
+        const sortedKeys = Array.from(symbolLibrary.keys()).sort((a, b) => a - b);
+        sortedKeys.forEach(idx => {
+            const data = symbolLibrary.get(idx);
+            if (data.some(b => b !== 0)) {
+                const bytes = data.map(b => '0x' + b.toString(16).toUpperCase().padStart(2, '0')).join(', ');
+                res += `    library[${idx}] = [${bytes}];\n`;
+            }
+        });
+        res += "}";
+        output.value = res;
+    }
+
+    function importCode() {
+        const text = output.value;
+        const regex = /library\[(\d+)\]\s*=\s*\[([^\]]+)\]/g;
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+            const idx = parseInt(match[1]);
+            const bytes = match[2].split(',').map(s => parseInt(s.trim(), 16));
+            symbolLibrary.set(idx, bytes);
+        }
+        updateUI();
+    }
+
+    function downloadJSON() {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(Object.fromEntries(symbolLibrary)));
+        const dlAnchor = document.createElement('a');
+        dlAnchor.setAttribute("href", dataStr);
+        dlAnchor.setAttribute("download", "symbols.json");
+        dlAnchor.click();
+    }
+
+    previewInput.oninput = renderPreview;
+    initGrid();
+</script>
+</body>
+</html>

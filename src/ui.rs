@@ -6,7 +6,10 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::proto::console::text::{Color, Key, ScanCode};
+use uefi::runtime;
 use uefi::runtime::VariableKey;
+use uefi_raw::Status;
+use uefi_raw::table::runtime::ResetType;
 
 mod graphics;
 pub mod pixel_graphics;
@@ -16,6 +19,8 @@ mod terminal;
 
 pub use graphics::{Graphics, Rect};
 use crate::message;
+use crate::ui::pixel_graphics::{PixelGraphics, TreeViewNode};
+
 
 // Add new UI module structure
 pub mod resource_monitor;
@@ -80,6 +85,7 @@ pub enum DashboardTab {
     Test,
     CreateVM, // New state for VM creation UI
     Editor,
+    Settings,
 }
 
 #[derive(PartialEq)]
@@ -251,15 +257,16 @@ impl DashboardUI {
                 pg.draw_text(width - 100, 16, &time_str, 0xFFFF00); // Yellow clock
             }
 
-            pg.draw_text(40, 5, "   __ _____ _   ____  ___", 0xFFFFFF);
-            pg.draw_text(40, 12, "  / // / _ \\ | / /  |/  /_ __", 0xFFFFFF);
-            pg.draw_text(40, 19, " / _  / ___/ |/ / /|_/ /\\ \\ /", 0xFFFFFF);
-            pg.draw_text(40, 28, "/_//_/_/   |___/_/  /_//_\\_\\", 0xFFFFFF);
+            pg.draw_text(40, 1, "   __ _____ _   ____  ___", 0xFFFFFF);
+            pg.draw_text(40, 11, "  / // / _ \\ | / /  |/  /_ __", 0xFFFFFF);
+            pg.draw_text(40, 21, " / _  / ___/ |/ / /|_/ /\\ \\ /", 0xFFFFFF);
+            pg.draw_text(40, 31, "/_//_/_/   |___/_/  /_//_\\_\\", 0xFFFFFF);
 
             // Draw navigation
             pg.fill_rect(0, 48, width, 32, 0x444444); // Dark Gray
-            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test";
+            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings";
             pg.draw_text(10, 56, nav_text, 0xFFFFFF);
+            let page_y = 100;
 
             // Layout constants for consistent spacing across tabs
             let header_h = 48usize;
@@ -442,6 +449,13 @@ impl DashboardUI {
                     pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF, 30);
                     pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000, 30);
 
+                    let gpu_y = disk_y + 80;
+                    pg.draw_text(panel_x+ 10, gpu_y, "GPU Usage:", 0xCCCCCC);
+                    pg.draw_line_graph(panel_x + 10, gpu_y+20, 165, 50, &self.resources.gpu_history, 100, 0xFF7700, 30);
+
+
+
+
                     // Right CPU core list panel or Total CPU Graph
                     let right_x = panel_x + panel_w + gutter * 2;
                     let right_y = panel_y;
@@ -459,6 +473,9 @@ impl DashboardUI {
                         pg.draw_text(right_x + 10, row_y, &alloc::format!("C{}:{:>2}%", i, usage), 0xCCCCCC);
                         pg.draw_progress_bar(right_x + 70, row_y, right_w - 80, 12, usage as usize, 100, 0x00FF00);
                     }
+
+                    // draw u64 le text for all stats
+
                 }
                 DashboardTab::Network => {
                     pg.draw_text(20, 100, "Network Status", 0x00FF00);
@@ -472,7 +489,7 @@ impl DashboardUI {
                 }
                 DashboardTab::Console => {
                     pg.draw_text(20, 100, "System Log", 0x00FF00);
-                    pg.draw_rect_outline(margin, 130, width - margin * 2, height - 130 - margin * 6, 0x888888);
+                    pg.draw_rect_outline(margin, 130, width - margin * 2, height - 135 - margin * 6, 0x888888);
                     
                     let mut y = 140;
                     let logs = crate::hpvmlog::get_logs();
@@ -494,6 +511,8 @@ impl DashboardUI {
                         y += line_h;
                         if y + line_h > height - margin * 6 { break; }
                     }
+
+                    pg.draw_rect_outline(margin, height-95, width - margin * 8, 35, 0x999999);
                 }
                 DashboardTab::Devices => {
                     pg.draw_text(20, 100, "Device Manager", 0x00FF00);
@@ -624,8 +643,9 @@ impl DashboardUI {
                     pg.fill_rect(130, y, 30, 25, 0x444444); pg.draw_text(138, y+5, "?", 0xFFFFFF); // ToolButton
                     y += 35;
                     
-                    pg.draw_checkbox(20, y, true); pg.draw_text(40, y, "CheckBox (Checked)", 0xFFFFFF); y += 25;
-                    pg.draw_checkbox(20, y, false); pg.draw_text(40, y, "CheckBox (Unchecked)", 0xFFFFFF); y += 25;
+                    pg.draw_checkbox(20, y, true, false, false, "CheckBox (Checked)", 0xFFFFFF); y += 25;
+                    pg.draw_checkbox(20, y, false, false, false, "CheckBox (Unchecked)", 0xFFFFFF);  y += 25;
+                    pg.draw_checkbox(20, y, false, true, false,"CheckBox (Blocked/Denied)", 0xFFFFFF);  y += 25;
                     
                     pg.draw_radio_button(20, y, true); pg.draw_text(40, y, "RadioButton 1", 0xFFFFFF); y += 25;
                     pg.draw_radio_button(20, y, false); pg.draw_text(40, y, "RadioButton 2", 0xFFFFFF); y += 35;
@@ -681,8 +701,9 @@ impl DashboardUI {
                     pg.draw_text(x3 + 5, y + 25, "Val 1", 0xFFFFFF); pg.draw_text(x3 + 65, y + 25, "Data 2", 0xFFFFFF);
                     //y += 70;
 
+
                     // Group Box & ToolBox
-                    let y = 400;
+                    let y = 450;
                     pg.draw_rect_outline(20, y, 200, 100, 0x888888);
                     pg.fill_rect(30, y - 8, 80, 16, 0x222222);
                     pg.draw_text(35, y - 8, "GroupBox", 0xAAAAAA);
@@ -698,18 +719,42 @@ impl DashboardUI {
                     pg.draw_text(470, y + 30, "That is clipped", 0xFFFFFF);
                     
                     // Lines
-                    pg.draw_line(20, 500, 780, 500, 0x555555); // Horizontal Line
-                    pg.draw_line(400, 505, 400, 550, 0x555555); // Vertical Line
+
+                    let y = 600;
+                    pg.draw_line(20, y, 780, y, 0x555555); // Horizontal Line
+                    pg.draw_line(400, y + 5, 400, y + 50, 0x555555); // Vertical Line
                     
-                    pg.draw_text(20, 510, "Labels & Browser:", 0xAAAAAA);
-                    pg.draw_text(20, 530, "Standard Label", 0xFFFFFF);
-                    pg.draw_rect_outline(150, 510, 230, 40, 0x444444);
-                    pg.draw_text(155, 515, "Text Browser with <b>rich</b> content", 0xAAAAAA);
+                    pg.draw_text(20, y + 10, "Labels & Browser:", 0xAAAAAA);
+                    pg.draw_text(20, y + 30, "Standard Label", 0xFFFFFF);
+                    pg.draw_rect_outline(150, y + 10, 230, 40, 0x444444);
+                    pg.draw_text(155, y + 15, "Text Browser with <b>rich</b> content", 0xAAAAAA);
                     
-                    pg.draw_text(420, 510, "Dial & Key Sequence:", 0xAAAAAA);
+                    pg.draw_text(420, y + 10, "Dial & Key Sequence:", 0xAAAAAA);
                     // Mock Dial
-                    pg.draw_radio_button(420, 530, false); pg.draw_line(426, 536, 432, 530, 0xFF0000);
-                    pg.draw_rect_outline(550, 530, 100, 20, 0x888888); pg.draw_text(555, 532, "Ctrl+Alt+Del", 0xFFFF00);
+                    pg.draw_radio_button(420, y + 30, false); pg.draw_line(426, y + 36, 432, y + 30, 0xFF0000);
+                    pg.draw_rect_outline(550, y + 30, 100, 20, 0x888888); pg.draw_text(555, y + 32, "Ctrl+Alt+Del", 0xFFFF00);
+
+
+                    let y = 700;
+
+                    // Table Data (3D setup)
+                    let headers = ["ID", "Name", "Status"];
+                    let row1 = ["01", "Kernel", "Running"];
+                    let row2 = ["02", "GOP", "Active"];
+                    let rows = [&row1[..], &row2[..]];
+                    pg.draw_table_view(500, y, 250, 100, &headers, &rows);
+
+                    // Tree Data (Nested JSON-style)
+                    let children = [
+                        TreeViewNode { label: "bin", children: &[], expanded: false },
+                        TreeViewNode { label: "boot", children: &[], expanded: false },
+                    ];
+                    let root = TreeViewNode {
+                        label: "Root (/) ",
+                        children: &children,
+                        expanded: true,
+                    };
+                    pg.draw_tree_view(200, y, 200, 150, &root);
                 }
                 DashboardTab::Editor => {
                     if let Some(ref ed) = self.editor {
@@ -765,11 +810,56 @@ impl DashboardUI {
                         pg.draw_text(margin, height - 70, ":w - Save | :q - Quit | i - Insert | Esc - Normal", 0x888888);
                     }
                 }
+                DashboardTab::Settings => {
+
+                    pg.draw_text(5, page_y - 15, "this page is in development.... coming soon!", 0xFFFFFF);
+
+
+                    // settings ideas
+                    // .. general boot settings (for now)
+
+                    pg.draw_rect_outline(10, page_y + 2, (width/3)-10, (height*2)/3, 0xFFFFFF);
+
+
+
+                    // features section
+                    //
+                    // [] = checkbox   () = radiobutton
+                    //
+                    // [] extra debug info
+                    // [] folder absolute sizes
+
+                    pg.draw_rect_outline((width/3) + 10, page_y + 2, (width/3) - 10, (height*2)/3, 0xFFFFFF);
+                    let mut x = (width/3) + 20;
+                    let mut y = page_y + 10;
+
+
+                    pg.draw_text(x, y, "Optional Features", 0xFFFFFF);
+                    y += 25;
+
+                    pg.draw_checkbox(x, y, false, false, false, "Extra Debug Info", 0xFFFFFF);
+                    y += 20;
+                    pg.draw_checkbox(x, y, false, false, false, "Folder Absolute Sizes", 0xFFFFFF);
+                    y += 20;
+                    pg.draw_checkbox(x, y, true, false, false, "State Save/Restore", 0xFFFFFF);
+                    y += 20;
+                    pg.draw_checkbox(x, y, true, false, false, "Extended Symbol Library", 0xFFFFFF);
+                    y += 20;
+                    pg.draw_checkbox(x, y, false, true, false, "Ring0 UDMI/UDXI", 0xFFFFFF)
+
+
+
+
+
+                }
+                _ => {
+                    pg.draw_text(5, 5, "this page is unavailable", 0xFFFFFF)
+                }
             }
 
             // Draw footer
             pg.fill_rect(0, height - 48, width, 48, 0x000080); // Blue
-            pg.draw_text(10, height - 32, "Press 'Q' to exit dashboard | Use keys O, V, R, S, N, D, C, T to switch tabs", 0xFFFFFF);
+            pg.draw_text(10, height - 32, " Use keys O, V, R, S, N, D, C, T, Z to switch tabs | X to shutdown", 0xFFFFFF);
 
             // Update and draw cursor
             self.cursor.update_from_mouse(width, height);
@@ -1163,6 +1253,7 @@ impl DashboardUI {
                         'd' => self.selected_tab = DashboardTab::Devices,
                         'c' => self.selected_tab = DashboardTab::Console,
                         't' => self.selected_tab = DashboardTab::Test,
+                        'z' => self.selected_tab = DashboardTab::Settings,
                         ' ' => {
                             if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
                                 self.selected_tab = DashboardTab::CreateVM;
@@ -1235,9 +1326,10 @@ impl DashboardUI {
                                 DashboardTab::Network => DashboardTab::Devices,
                                 DashboardTab::Devices => DashboardTab::Console,
                                 DashboardTab::Console => DashboardTab::Test,
-                                DashboardTab::Test => DashboardTab::Overview,
+                                DashboardTab::Test => DashboardTab::Settings,
                                 DashboardTab::CreateVM => DashboardTab::VirtualMachines,
                                 DashboardTab::Editor => DashboardTab::Storage,
+                                DashboardTab::Settings => DashboardTab::Overview,
                             };
                         }
                         '/' => {
@@ -1249,6 +1341,15 @@ impl DashboardUI {
                                 _ => {}
                             }
                         }
+                        '1' => { self.cursor.x -= 4; }
+                        '2' => { self.cursor.y += 4; }
+                        '3' => { self.cursor.y -= 4; }
+                        '4' => { self.cursor.x += 4; }
+                        'x' => {
+                            runtime::reset(ResetType::SHUTDOWN, Status::SUCCESS, Some(&[0]))
+                        }
+
+
                         _ => {}
                     }
 

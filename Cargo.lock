@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "HPVMx"
-version = "0.8.9"
+version = "0.9.12"
 dependencies = [
  "bitflags 2.10.0",
  "buddy_system_allocator",
