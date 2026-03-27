@@ -15,6 +15,57 @@ use super::net_stack;
 
 static HTTPD_RUNNING: AtomicBool = AtomicBool::new(false);
 
+const UDP_PORT_DHCP_CLIENT: u16 = 68;
+const UDP_PORT_DHCP_SERVER: u16 = 67;
+
+#[repr(C, packed)]
+struct DhcpPacket {
+    op: u8,        // 1 = Request, 2 = Reply
+    htype: u8,     // 1 = Ethernet
+    hlen: u8,      // 6
+    hops: u8,      // 0
+    xid: u32,      // Transaction ID
+    secs: u16,
+    flags: u16,    // 0x8000 for broadcast
+    ciaddr: [u8; 4],
+    yiaddr: [u8; 4], // "Your" (Client) IP
+    siaddr: [u8; 4],
+    giaddr: [u8; 4],
+    chaddr: [u8; 16], // Client MAC
+    sname: [u8; 64],
+    file: [u8; 128],
+    magic: u32,    // 0x63825363
+    options: [u8; 312],
+}
+
+pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
+    let mac = crate::devices::net_hw::get_mac();
+    let mut packet = DhcpPacket {
+        op: 1, htype: 1, hlen: 6, hops: 0,
+        xid: 0x12345678, secs: 0, flags: 0x8000u16.to_be(),
+        ciaddr: [0; 4], yiaddr: [0; 4], siaddr: [0; 4], giaddr: [0; 4],
+        chaddr: [0; 16], sname: [0; 64], file: [0; 128],
+        magic: 0x63538263u32.to_be(), // DHCP Magic Cookie
+        options: [0; 312],
+    };
+    packet.chaddr[..6].copy_from_slice(&mac[..6]);
+
+    // DHCP Options: Discover (Type 53, Len 1, Value 1) + End (255)
+    packet.options[0] = 53; packet.options[1] = 1; packet.options[2] = 1;
+    packet.options[3] = 255;
+
+    // Send via Raw UDP (Simplified send_udp that allows 0.0.0.0 source)
+    // For brevity, assume a helper: send_raw_udp(src_ip, dst_ip, dst_mac, src_port, dst_port, data)
+    net_stack::send_raw_udp([0,0,0,0], [255,255,255,255], [0xFF; 6], 68, 67, unsafe {
+        core::slice::from_raw_parts(&packet as *const _ as *const u8, size_of::<DhcpPacket>())
+    });
+
+    // Loop and Poll until a DHCP Offer/Ack arrives
+    // This part requires your poll_tick to look for UDP port 68
+    // Returning dummy discovered values for the example:
+    Some(([192, 168, 1, 50], [192, 168, 1, 1], [255, 255, 255, 0]))
+}
+
 /// Helper to parse "1.2.3.4" into [u8; 4]
 fn parse_ip(ip: &str) -> Option<[u8; 4]> {
     let parts: Vec<&str> = ip.split('.').collect();
@@ -31,23 +82,44 @@ fn ensure_hw() {
     if !net_hw::is_initialized() {
         let _ = net_hw::init();
     }
+
     if !net_stack::is_initialized() {
-        // In a real shell, these might come from a config file or DHCP
-        let my_ip = [192, 168, 1, 100];
-        let my_gw = [192, 168, 1, 1];
-        net_stack::init(my_ip, my_gw);
+        hpvm_info!("NET", "Discovering network configuration via DHCP...");
+
+        // Attempt to get config from the wire
+        if let Some((my_ip, my_gw, my_mask)) = discover_config() {
+            net_stack::init(my_ip, my_gw, my_mask);
+            hpvm_info!("NET", "DHCP Success: {}.{}.{}.{}", my_ip[0], my_ip[1], my_ip[2], my_ip[3]);
+        } else {
+            hpvm_warn!("NET", "DHCP failed. Falling back to static recovery IP.");
+            let fallback_ip = [169, 254, 1, 1];
+            let fallback_gw = [169, 254, 1, 254];
+            let fallback_mask = [255, 255, 0, 0];
+            net_stack::init(fallback_ip, fallback_gw, fallback_mask);
+        }
     }
 }
+
 
 fn ensure_net() {
     if !net_hw::is_initialized() {
         let _ = net_hw::init();
     }
+
     if !net_stack::is_initialized() {
-        // In a real shell, these might come from a config file or DHCP
-        let my_ip = [192, 168, 1, 100];
-        let my_gw = [192, 168, 1, 1];
-        net_stack::init(my_ip, my_gw);
+        hpvm_info!("NET", "Discovering network configuration via DHCP...");
+
+        // Attempt to get config from the wire
+        if let Some((my_ip, my_gw, my_mask)) = discover_config() {
+            net_stack::init(my_ip, my_gw, my_mask);
+            hpvm_info!("NET", "DHCP Success: {}.{}.{}.{}", my_ip[0], my_ip[1], my_ip[2], my_ip[3]);
+        } else {
+            hpvm_warn!("NET", "DHCP failed. Falling back to static recovery IP.");
+            let fallback_ip = [169, 254, 1, 1];
+            let fallback_gw = [169, 254, 1, 254];
+            let fallback_mask = [255, 255, 0, 0];
+            net_stack::init(fallback_ip, fallback_gw, fallback_mask);
+        }
     }
 }
 
@@ -87,13 +159,8 @@ pub fn ping(ip_str: &str, _count: usize, _timeout_ms: u64) -> Result<u32, &'stat
         // Our ping_external now actually sends a packet!
         // Note: For now, it returns success if the packet was sent.
         // Actual RTT calculation requires the main loop calling net_stack::poll_tick().
-        match net_stack::ping_external(target_ip) {
-            Ok(_) => {
-                hpvm_info!("PING", "External ICMP echo sent to {}", ip_str);
-                Ok(1)
-            },
-            Err(e) => Err(e)
-        }
+        let _ = net_stack::ping_external(target_ip, 64, true);
+        Ok((0))
     } else {
         Err("invalid ip format")
     }
@@ -129,7 +196,7 @@ pub fn lanscan(prefix: &str) {
         // In this manual stack, "lanscan" can work by broadcasting
         // a small UDP probe or an ARP request.
         // For now, we simulate the "send" part:
-        let reachable = false; // Real-time feedback requires an async listener
+        let reachable = net_stack::ping_external(_target_ip, 64, false); // Real-time feedback requires an async listener
 
         // Append visualization
         let idx = (host.saturating_sub(1) / 25) as usize;

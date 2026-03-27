@@ -1,5 +1,5 @@
 //! UEFI Network Module (0.36.1) - Basic ICMP/IP over SNP
-#![allow(dead_code)]
+#![allow(dead_code, static_mut_refs)]
 
 use crate::Color;
 use crate::hpvm_log;
@@ -20,6 +20,11 @@ const TCP_FLAG_FIN: u8 = 0x01;
 const TCP_FLAG_SYN: u8 = 0x02;
 const TCP_FLAG_RST: u8 = 0x04;
 const TCP_FLAG_ACK: u8 = 0x10;
+
+
+const MAX_ARP_ENTRIES: usize = 16;
+
+// --- Headers ---
 
 #[repr(C, packed)]
 struct EthHeader {
@@ -86,7 +91,6 @@ struct UdpHeader {
 
 // --- Module State ---
 
-static STACK_INIT: AtomicBool = AtomicBool::new(false);
 static HTTPD: AtomicBool = AtomicBool::new(false);
 
 /// Report which networking backend is active.
@@ -108,14 +112,31 @@ pub struct NetStats {
     pub tx_bytes: u64,
 }
 
+
+
+// --- State Management ---
+
+#[derive(Copy, Clone, Debug)]
+struct ArpEntry {
+    ip: [u8; 4],
+    mac: [u8; 6],
+    valid: bool,
+}
+
 struct NetState {
     ip_addr: [u8; 4],
     gateway: [u8; 4],
+    subnet_mask: [u8; 4], // Added Mask
     mac_addr: [u8; 6],
     stats: NetStats,
+    arp_cache: [ArpEntry; MAX_ARP_ENTRIES],
+    ping_success: bool,
 }
 
 static mut NET_STATE: MaybeUninit<Option<NetState>> = MaybeUninit::uninit();
+static STACK_INIT: AtomicBool = AtomicBool::new(false);
+
+// --- Helpers ---
 
 fn calculate_checksum(data: &[u8]) -> u16 {
     let mut sum: u32 = 0;
@@ -132,21 +153,150 @@ fn calculate_checksum(data: &[u8]) -> u16 {
     !(sum as u16)
 }
 
-// --- Implementation ---
 
-pub fn init(ip: [u8; 4], gw: [u8; 4]) {
+
+
+
+
+
+
+// --- New Subnet Logic ---
+
+/// Checks if a destination IP is within our local subnet.
+fn is_local(dest_ip: [u8; 4]) -> bool {
+    let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
+    for i in 0..4 {
+        if (dest_ip[i] & state.subnet_mask[i]) != (state.ip_addr[i] & state.subnet_mask[i]) {
+            return false;
+        }
+    }
+    true
+}
+
+
+
+pub fn init(ip: [u8; 4], gw: [u8; 4], mask: [u8; 4]) {
     if STACK_INIT.load(Ordering::SeqCst) { return; }
-
     let mac = crate::devices::net_hw::get_mac();
-    let mc: &[u8; 6] = mac[0..6].try_into().expect("e"); // Ensure your net_hw provides this
-    let state = NetState { ip_addr: ip, gateway: gw, mac_addr: *mc, stats: NetStats::default() };
+    let mc: [u8; 6] = mac[0..6].try_into().unwrap_or([0; 6]);
+
+    let state = NetState {
+        ip_addr: ip,
+        gateway: gw,
+        subnet_mask: mask,
+        mac_addr: mc,
+        stats: NetStats {
+            rx_bytes: 0,
+            rx_pkts: 0,
+            tx_bytes: 0,
+            tx_pkts: 0,
+        },
+        arp_cache: [ArpEntry { ip: [0; 4], mac: [0; 6], valid: false }; MAX_ARP_ENTRIES],
+        ping_success: false,
+    };
 
     #[allow(static_mut_refs)]
     unsafe { NET_STATE.write(Some(state)); }
     STACK_INIT.store(true, Ordering::SeqCst);
-    hpvm_info!("NET", "loopback stub initialized (127.0.0.1/8)");
-
+    hpvm_info!("NET", "Stack initialized at {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
+    hpvm_info!("NET", "Mask: {}.{}.{}.{}", mask[0], mask[1], mask[2], mask[3]);
     hpvm_info!("NET", "SNP stack up: {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
+}
+
+/// Resolves a MAC address. If target is remote, resolves the Gateway's MAC instead.
+fn resolve_mac(target_ip: [u8; 4], timeout_loops: u32) -> Option<[u8; 6]> {
+    let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
+
+    // Logic: If target is not local, we must talk to the Gateway.
+    let ip_to_resolve = if is_local(target_ip) {
+        target_ip
+    } else {
+        state.gateway
+    };
+
+    // Check Cache
+    if let Some(mac) = find_mac(ip_to_resolve) {
+        return Some(mac);
+    }
+
+    // ARP Request
+    send_arp_packet(ARP_REQUEST, ip_to_resolve, [0; 6]);
+    for _ in 0..timeout_loops {
+        poll_tick();
+        if let Some(mac) = find_mac(ip_to_resolve) {
+            return Some(mac);
+        }
+    }
+    None
+}
+
+pub fn ping_external(target_ip: [u8; 4], timeout: u32, print: bool) -> bool {
+    unsafe { NET_STATE.assume_init_mut().as_mut().unwrap().ping_success = false; }
+
+    // Use our new resolution logic
+    let mac = match resolve_mac(target_ip, timeout / 10) {
+        Some(m) => m,
+        None => {
+            if print {
+                hpvm_warn!("PING", "Routing failed: Host/Gateway unreachable");
+            }
+            return false;
+        }
+    };
+
+    send_icmp_echo(8, target_ip, mac, 0xBEAF, 1, b"ping");
+
+    for _ in 0..timeout {
+        poll_tick();
+        unsafe {
+            if NET_STATE.assume_init_ref().as_ref().unwrap().ping_success {
+                if print {
+                    hpvm_info!("PING", "Reply from {}.{}.{}.{}", target_ip[0], target_ip[1], target_ip[2], target_ip[3]);
+                }
+                return true;
+            }
+        }
+    }
+    false
+}
+
+// --- Helper functions (Checksum, Poll, Handle, Send) remain the same as previous versions ---
+// [Included in full for completeness]
+
+fn update_arp_cache(ip: [u8; 4], mac: [u8; 6]) {
+    unsafe {
+        if let Some(st) = NET_STATE.assume_init_mut().as_mut() {
+            // Check if IP already exists
+            for entry in st.arp_cache.iter_mut() {
+                if entry.valid && entry.ip == ip {
+                    entry.mac = mac;
+                    return;
+                }
+            }
+            // Otherwise, find empty slot
+            for entry in st.arp_cache.iter_mut() {
+                if !entry.valid {
+                    entry.ip = ip;
+                    entry.mac = mac;
+                    entry.valid = true;
+                    hpvm_info!("ARP", "Cached {}.{}.{}.{} -> {:02X}:{:02X}:...", ip[0], ip[1], ip[2], ip[3], mac[0], mac[1]);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn find_mac(ip: [u8; 4]) -> Option<[u8; 6]> {
+    unsafe {
+        let st = NET_STATE.assume_init_ref().as_ref()?;
+        for entry in st.arp_cache.iter() {
+            if entry.valid && entry.ip == ip {
+                return Some(entry.mac);
+            }
+        }
+    }
+    None
 }
 
 #[inline]
@@ -162,15 +312,27 @@ pub fn poll_tick() {
 
         // Drain the SNP RX buffer
         while let Ok(sz) = crate::devices::net_hw::rx(&mut buf) {
-            process_packet(&buf[..sz]);
+            let frame = &buf[..sz];
+            if frame.len() < size_of::<EthHeader>() { continue; }
 
-            unsafe {
-                if let Some(st) = NET_STATE.assume_init_mut().as_mut() {
-                    st.stats.rx_pkts += 1;
-                    st.stats.rx_bytes += sz as u64;
-                }
+            let eth = unsafe { &*(frame.as_ptr() as *const EthHeader) };
+            match u16::from_be(eth.ethertype) {
+                ETHERTYPE_ARP => handle_arp(&frame[size_of::<EthHeader>()..]),
+                ETHERTYPE_IPV4 => handle_ipv4(&frame[size_of::<EthHeader>()..], eth.src),
+                _ => {}
             }
         }
+        //         process_packet(&buf[..sz]);
+        //
+        //         unsafe {
+        //             if let Some(st) = NET_STATE.assume_init_mut().as_mut() {
+        //                 st.stats.rx_pkts += 1;
+        //                 st.stats.rx_bytes += sz as u64;
+        //             }
+        //         }
+        //     }
+        // }
+
     }
 }
 
@@ -208,30 +370,35 @@ fn handle_arp(packet: &[u8]) {
     let arp = unsafe { &*(packet.as_ptr() as *const ArpPacket) };
     #[allow(static_mut_refs)]
     let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
-
-    if u16::from_be(arp.opcode) == ARP_REQUEST && arp.target_ip == state.ip_addr {
-        // Send ARP Reply
-        let mut reply = [0u8; size_of::<EthHeader>() + size_of::<ArpPacket>()];
-        let (eth_part, arp_part) = reply.split_at_mut(size_of::<EthHeader>());
-
-        let eth_out = unsafe { &mut *(eth_part.as_mut_ptr() as *mut EthHeader) };
-        eth_out.dst = arp.sender_mac;
-        eth_out.src = state.mac_addr;
-        eth_out.ethertype = ETHERTYPE_ARP.to_be();
-
-        let arp_out = unsafe { &mut *(arp_part.as_mut_ptr() as *mut ArpPacket) };
-        arp_out.hw_type = 1u16.to_be();
-        arp_out.proto_type = 0x0800u16.to_be();
-        arp_out.hw_size = 6;
-        arp_out.proto_size = 4;
-        arp_out.opcode = ARP_REPLY.to_be();
-        arp_out.sender_mac = state.mac_addr;
-        arp_out.sender_ip = state.ip_addr;
-        arp_out.target_mac = arp.sender_mac;
-        arp_out.target_ip = arp.sender_ip;
-
-        let _ = snp_tx(&reply);
+    if arp.target_ip == state.ip_addr || u16::from_be(arp.opcode) == ARP_REPLY {
+        update_arp_cache(arp.sender_ip, arp.sender_mac);
     }
+    if u16::from_be(arp.opcode) == ARP_REQUEST && arp.target_ip == state.ip_addr {
+        send_arp_packet(ARP_REPLY, arp.sender_ip, arp.sender_mac);
+    }
+}
+
+fn send_arp_packet(opcode: u16, target_ip: [u8; 4], target_mac: [u8; 6]) {
+    let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
+    let mut frame = [0u8; size_of::<EthHeader>() + size_of::<ArpPacket>()];
+
+    let eth = unsafe { &mut *(frame.as_mut_ptr() as *mut EthHeader) };
+    eth.dst = if opcode == ARP_REQUEST { [0xFF; 6] } else { target_mac };
+    eth.src = state.mac_addr;
+    eth.ethertype = ETHERTYPE_ARP.to_be();
+
+    let arp = unsafe { &mut *(frame.as_mut_ptr().add(size_of::<EthHeader>()) as *mut ArpPacket) };
+    arp.hw_type = 1u16.to_be();
+    arp.proto_type = 0x0800u16.to_be();
+    arp.hw_size = 6;
+    arp.proto_size = 4;
+    arp.opcode = opcode.to_be();
+    arp.sender_mac = state.mac_addr;
+    arp.sender_ip = state.ip_addr;
+    arp.target_mac = if opcode == ARP_REQUEST { [0; 6] } else { target_mac };
+    arp.target_ip = target_ip;
+
+    let _ = crate::devices::net_hw::tx(&frame);
 }
 
 
@@ -250,12 +417,9 @@ fn handle_ipv4(packet: &[u8], src_mac: [u8; 6]) {
         IP_PROTO_ICMP => {
             let icmp = unsafe { &*(payload.as_ptr() as *const IcmpHeader) };
             if icmp.msg_type == 0 { // Echo Reply
-                hpvm_info!("PING", "Received reply from {}.{}.{}.{}",
-                ip.src[0], ip.src[1], ip.src[2], ip.src[3]);
-                // Here you could set a global flag "LAST_PING_SUCCESS = true"
-            }
-            if icmp.msg_type == 8 { // Echo Request
-                send_icmp_reply(ip.src, src_mac, icmp.ident, icmp.seq, &payload[size_of::<IcmpHeader>()..]);
+                unsafe { NET_STATE.assume_init_mut().as_mut().unwrap().ping_success = true; }
+            } else if icmp.msg_type == 8 { // Echo Request
+                send_icmp_echo(0, ip.src, src_mac, icmp.ident, icmp.seq, &payload[size_of::<IcmpHeader>()..]);
             }
         }
         IP_PROTO_UDP => {
@@ -267,6 +431,66 @@ fn handle_ipv4(packet: &[u8], src_mac: [u8; 6]) {
         _ => {}
     }
 }
+
+
+/// Sends a UDP packet even if the stack isn't fully initialized (useful for DHCP).
+pub fn send_raw_udp(
+    src_ip: [u8; 4],
+    dst_ip: [u8; 4],
+    dst_mac: [u8; 6],
+    src_port: u16,
+    dst_port: u16,
+    data: &[u8],
+) -> Result<(), &'static str> {
+    let mut frame = [0u8; 1514];
+    let mac = crate::devices::net_hw::get_mac();
+    let src_mac: [u8; 6] = mac[0..6].try_into().unwrap_or([0; 6]);
+
+    let udp_len = (size_of::<UdpHeader>() + data.len()) as u16;
+    let ip_len = (size_of::<Ipv4Header>() as u16) + udp_len;
+    let total_len = size_of::<EthHeader>() + (ip_len as usize);
+
+    if total_len > frame.len() { return Err("Payload too large"); }
+
+    // 1. Ethernet Header
+    let eth = unsafe { &mut *(frame.as_mut_ptr() as *mut EthHeader) };
+    eth.dst = dst_mac;
+    eth.src = src_mac;
+    eth.ethertype = ETHERTYPE_IPV4.to_be();
+
+    // 2. IPv4 Header
+    let ip = unsafe { &mut *(frame.as_mut_ptr().add(size_of::<EthHeader>()) as *mut Ipv4Header) };
+    ip.ver_ihl = 0x45;
+    ip.tos = 0;
+    ip.len = ip_len.to_be();
+    ip.id = 0xABCDu16.to_be(); // Random ID
+    ip.off = 0;
+    ip.ttl = 64;
+    ip.proto = IP_PROTO_UDP;
+    ip.src = src_ip;
+    ip.dst = dst_ip;
+    ip.checksum = 0;
+    ip.checksum = calculate_checksum(&frame[size_of::<EthHeader>()..size_of::<EthHeader>() + size_of::<Ipv4Header>()]).to_be();
+
+    // 3. UDP Header
+    let udp = unsafe { &mut *(frame.as_mut_ptr().add(size_of::<EthHeader>() + size_of::<Ipv4Header>()) as *mut UdpHeader) };
+    udp.src_port = src_port.to_be();
+    udp.dst_port = dst_port.to_be();
+    udp.len = udp_len.to_be();
+    udp.checksum = 0; // Optional in IPv4; set to 0 for simplicity
+
+    // 4. Copy Data Payload
+    frame[size_of::<EthHeader>() + size_of::<Ipv4Header>() + size_of::<UdpHeader>()..total_len]
+        .copy_from_slice(data);
+
+    // 5. Transmit
+    match crate::devices::net_hw::tx(&frame[..total_len]) {
+        Ok(_) => Ok(()),
+        Err(_) => Err("Hardware TX failed"),
+    }
+}
+
+
 
 
 /// Send a UDP packet to a specific IP/Port
@@ -354,7 +578,7 @@ fn send_tcp_packet(_dst_ip: [u8; 4], _dst_mac: [u8; 6], src_port: u16, dst_port:
     tcp.dst_port = dst_port.to_be();
     tcp.seq = seq.to_be();
     tcp.ack = ack.to_be();
-    tcp.off_flags = (( (size_of::<TcpHeader>() as u16 / 4) << 12) | flags as u16).to_be();
+    tcp.off_flags = (((size_of::<TcpHeader>() as u16 / 4) << 12) | flags as u16).to_be();
     tcp.window = 8192u16.to_be();
     tcp.checksum = 0;
 
@@ -365,17 +589,6 @@ fn send_tcp_packet(_dst_ip: [u8; 4], _dst_mac: [u8; 6], src_port: u16, dst_port:
 
     let _ = snp_tx(&frame[..total_len]);
 }
-
-
-
-
-
-
-
-
-
-
-
 
 fn send_icmp_reply(dst_ip: [u8; 4], dst_mac: [u8; 6], ident: u16, seq: u16, payload: &[u8]) {
     #[allow(static_mut_refs)]
@@ -434,12 +647,6 @@ fn handle_udp(src_ip: [u8; 4], port: u16, data: &[u8]) {
     }
 }
 
-
-
-
-
-
-
 pub fn httpd_start(_port: u16) {
     //init();
     if HTTPD.swap(true, Ordering::SeqCst) {
@@ -497,53 +704,139 @@ pub fn snp_tx(frame: &[u8]) -> Result<(), &'static str> {
 }
 
 /// Sends a real ICMP Echo Request (Ping) to an external IP.
-pub fn ping_external(target_ip: [u8; 4]) -> Result<(), &'static str> {
-    #[allow(static_mut_refs)]
-    let state = unsafe { NET_STATE.assume_init_ref().as_ref().ok_or("Stack not init")? };
+// pub fn ping_external(target_ip: [u8; 4]) -> Result<(), &'static str> {
+//     #[allow(static_mut_refs)]
+//     let state = unsafe { NET_STATE.assume_init_ref().as_ref().ok_or("Stack not init")? };
+//
+//     // 1. Define Packet Sizes
+//     let icmp_len = size_of::<IcmpHeader>(); // Basic 8-byte ping, no extra payload
+//     let ip_len = size_of::<Ipv4Header>() + icmp_len;
+//     let total_len = size_of::<EthHeader>() + ip_len;
+//
+//     let mut frame = [0u8; 1514];
+//
+//     // 2. Build Ethernet Header
+//     // Note: To reach an external IP, we send the packet to the GATEWAY's MAC.
+//     // In a full stack, you'd use ARP to find this. Here we assume a broadcast
+//     // or a known gateway MAC for the demo.
+//     let eth = unsafe { &mut *(frame.as_mut_ptr() as *mut EthHeader) };
+//     eth.dst = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]; // Broadcast (simplest for no-ARP setup)
+//     eth.src = state.mac_addr;
+//     eth.ethertype = ETHERTYPE_IPV4.to_be();
+//
+//     // 3. Build IPv4 Header
+//     let ip = unsafe { &mut *(frame.as_mut_ptr().add(size_of::<EthHeader>()) as *mut Ipv4Header) };
+//     ip.ver_ihl = 0x45; // Version 4, Header Length 5 (20 bytes)
+//     ip.tos = 0;
+//     ip.len = (ip_len as u16).to_be();
+//     ip.id = 0x1234u16.to_be();
+//     ip.off = 0;
+//     ip.ttl = 64;
+//     ip.proto = IP_PROTO_ICMP;
+//     ip.src = state.ip_addr;
+//     ip.dst = target_ip;
+//     ip.checksum = 0;
+//     // Calculate IP Checksum (Header only)
+//     ip.checksum = calculate_checksum(&frame[size_of::<EthHeader>()..size_of::<EthHeader>() + size_of::<Ipv4Header>()]).to_be();
+//
+//     // 4. Build ICMP Header
+//     let icmp = unsafe { &mut *(frame.as_mut_ptr().add(size_of::<EthHeader>() + size_of::<Ipv4Header>()) as *mut IcmpHeader) };
+//     icmp.msg_type = 8; // Echo Request
+//     icmp.code = 0;
+//     icmp.checksum = 0;
+//     icmp.ident = 0xBEAFu16.to_be();
+//     icmp.seq = 1u16.to_be();
+//
+//     // Calculate ICMP Checksum (Header + Payload)
+//     let icmp_slice = &frame[size_of::<EthHeader>() + size_of::<Ipv4Header>()..total_len];
+//     icmp.checksum = calculate_checksum(icmp_slice).to_be();
+//
+//     // 5. Transmit
+//     snp_tx(&frame[..total_len])
+// }
 
-    // 1. Define Packet Sizes
-    let icmp_len = size_of::<IcmpHeader>(); // Basic 8-byte ping, no extra payload
+
+/// Generic ICMP sender: msg_type 8 for Request, 0 for Reply
+fn send_icmp_echo(msg_type: u8, dst_ip: [u8; 4], dst_mac: [u8; 6], ident: u16, seq: u16, payload: &[u8]) {
+    let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
+    let mut frame = [0u8; 1024];
+
+    let icmp_len = size_of::<IcmpHeader>() + payload.len();
     let ip_len = size_of::<Ipv4Header>() + icmp_len;
     let total_len = size_of::<EthHeader>() + ip_len;
 
-    let mut frame = [0u8; 1514];
-
-    // 2. Build Ethernet Header
-    // Note: To reach an external IP, we send the packet to the GATEWAY's MAC.
-    // In a full stack, you'd use ARP to find this. Here we assume a broadcast
-    // or a known gateway MAC for the demo.
     let eth = unsafe { &mut *(frame.as_mut_ptr() as *mut EthHeader) };
-    eth.dst = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]; // Broadcast (simplest for no-ARP setup)
+    eth.dst = dst_mac;
     eth.src = state.mac_addr;
     eth.ethertype = ETHERTYPE_IPV4.to_be();
 
-    // 3. Build IPv4 Header
     let ip = unsafe { &mut *(frame.as_mut_ptr().add(size_of::<EthHeader>()) as *mut Ipv4Header) };
-    ip.ver_ihl = 0x45; // Version 4, Header Length 5 (20 bytes)
-    ip.tos = 0;
+    ip.ver_ihl = 0x45;
     ip.len = (ip_len as u16).to_be();
-    ip.id = 0x1234u16.to_be();
-    ip.off = 0;
     ip.ttl = 64;
     ip.proto = IP_PROTO_ICMP;
     ip.src = state.ip_addr;
-    ip.dst = target_ip;
+    ip.dst = dst_ip;
     ip.checksum = 0;
-    // Calculate IP Checksum (Header only)
     ip.checksum = calculate_checksum(&frame[size_of::<EthHeader>()..size_of::<EthHeader>() + size_of::<Ipv4Header>()]).to_be();
 
-    // 4. Build ICMP Header
     let icmp = unsafe { &mut *(frame.as_mut_ptr().add(size_of::<EthHeader>() + size_of::<Ipv4Header>()) as *mut IcmpHeader) };
-    icmp.msg_type = 8; // Echo Request
+    icmp.msg_type = msg_type;
     icmp.code = 0;
+    icmp.ident = ident;
+    icmp.seq = seq;
     icmp.checksum = 0;
-    icmp.ident = 0xBEAFu16.to_be();
-    icmp.seq = 1u16.to_be();
 
-    // Calculate ICMP Checksum (Header + Payload)
+    if !payload.is_empty() {
+        frame[total_len - payload.len()..total_len].copy_from_slice(payload);
+    }
+
     let icmp_slice = &frame[size_of::<EthHeader>() + size_of::<Ipv4Header>()..total_len];
     icmp.checksum = calculate_checksum(icmp_slice).to_be();
 
-    // 5. Transmit
-    snp_tx(&frame[..total_len])
+    let _ = crate::devices::net_hw::tx(&frame[..total_len]);
+}
+
+
+
+/// Public API: High-level Ping
+pub fn ping(target_ip: [u8; 4], timeout_loops: u32) -> bool {
+    let state = unsafe { NET_STATE.assume_init_mut().as_mut().expect("Not init") };
+    state.ping_success = false;
+
+    // 1. Resolve MAC via ARP
+    let mut target_mac = find_mac(target_ip);
+    if target_mac.is_none() {
+        send_arp_packet(ARP_REQUEST, target_ip, [0; 6]);
+        // Wait for ARP reply
+        for _ in 0..timeout_loops / 10 {
+            poll_tick();
+            target_mac = find_mac(target_ip);
+            if target_mac.is_some() { break; }
+        }
+    }
+
+    let mac = match target_mac {
+        Some(m) => m,
+        None => {
+            hpvm_warn!("PING", "ARP failed: destination unreachable");
+            return false;
+        }
+    };
+
+    // 2. Send ICMP Request
+    send_icmp_echo(8, target_ip, mac, 0x1234, 1, b"UEFI-PING-DATA");
+
+    // 3. Wait for Reply
+    for _ in 0..timeout_loops {
+        poll_tick();
+        unsafe {
+            if NET_STATE.assume_init_ref().as_ref().unwrap().ping_success {
+                hpvm_info!("PING", "Success!");
+                return true;
+            }
+        }
+    }
+
+    false
 }
