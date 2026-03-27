@@ -2,6 +2,7 @@ use uefi::proto::console::gop::GraphicsOutput;
 use uefi::boot;
 use core::ptr;
 use alloc::string::ToString;
+use libm::{cos, floor, pow, sin, sqrt};
 
 pub struct PixelGraphics {
     framebuffer: *mut u32,
@@ -9,6 +10,7 @@ pub struct PixelGraphics {
     height: usize,
     stride: usize,
     backbuffer: Option<alloc::vec::Vec<u32>>,
+    pub glitch_y: usize,
 }
 
 pub struct TreeViewNode<'a> {
@@ -84,6 +86,7 @@ impl PixelGraphics {
             height,
             stride,
             backbuffer: None,
+            glitch_y: 0,
         })
     }
 
@@ -98,6 +101,10 @@ impl PixelGraphics {
         self
     }
 
+    pub fn backbuffer_slice_mut(&mut self) -> Option<&mut [u32]> {
+        self.backbuffer.as_mut().map(|vec| vec.as_mut_slice())
+    }
+
     pub fn flip(&mut self) {
         if let Some(ref buffer) = self.backbuffer {
             unsafe {
@@ -105,6 +112,11 @@ impl PixelGraphics {
             }
         }
     }
+
+
+
+    // Most of these functions are just display,
+    // you will need to keep track of variables, positions, and data yourself
 
     #[inline]
     pub fn draw_pixel(&mut self, x: usize, y: usize, color: u32) {
@@ -261,17 +273,24 @@ impl PixelGraphics {
         }
     }
 
-    pub fn draw_checkbox(&mut self, x: usize, y: usize, checked: bool, blocked: bool, disabled: bool, text: &str, color: u32) {
+    pub fn draw_checkbox(&mut self, x: usize, y: usize, checked: bool, blocked: bool, disabled: bool, text: &str) {
         let size = 12;
-        self.draw_rect_outline(x, y, size, size, 0x888888);
-        self.draw_text(x + size + 4, y, text, color);
-        self.fill_rect(x + 1, y + 1, size - 1, size - 1, 0xDDDDDD);
+        let bg = if disabled {0x666666} else { 0x888888 };
+        let fg = if disabled {0x888888} else { 0xFFFFFF };
+        let red = if disabled {0x884444} else { 0x880000 };
+        let green = if disabled {0x448844} else { 0x008800 };
+        let fill = if disabled {0xAAAAAA} else { 0xDDDDDD };
+
+        self.draw_rect_outline(x, y, size, size, bg);
+        self.draw_text(x + size + 4, y, text, fg);
+        self.fill_rect(x + 1, y + 1, size - 1, size - 1, fill);
+
         if blocked {
-            self.draw_line_adv(x + 1, y + 1, x + (size-1), y + (size-1), 0x880000, 3, 0xFFFFFF);
-            self.draw_line_adv(x + (size-1), y + 1, x + 1, y + (size-1), 0x880000, 3, 0xFFFFFF);
+            self.draw_line_adv(x + 1, y + 1, x + (size-1), y + (size-1), red, 3, 0xFFFFFF);
+            self.draw_line_adv(x + (size-1), y + 1, x + 1, y + (size-1), red, 3, 0xFFFFFF);
         } else if checked {
-            self.draw_line_adv(x + 2, y + 6, x + 5, y + 9, 0x008800, 3, 0xFFFFFF);
-            self.draw_line_adv(x + 5, y + 9, x + 10, y + 2, 0x008800, 3, 0xFFFFFF);
+            self.draw_line_adv(x + 2, y + 6, x + 5, y + 9, green, 3, 0xFFFFFF);
+            self.draw_line_adv(x + 5, y + 9, x + 10, y + 2, green, 3, 0xFFFFFF);
         }
     }
 
@@ -299,7 +318,7 @@ impl PixelGraphics {
             (1, 8, 10), (1, 9, 10), (2, 10, 8), (4, 11, 4)
         ];
         for (off_x, off_y, w) in circle {
-            self.fill_rect(x + off_x, y + off_y, w, 1, 0xFFFFFF);
+            self.fill_rect(x + off_x, y + off_y, w, 1, 0xDDDDDD);
             self.draw_pixel(x + off_x, y + off_y, 0x888888);
             self.draw_pixel(x + off_x + w - 1, y + off_y, 0x888888);
         }
@@ -313,6 +332,13 @@ impl PixelGraphics {
         self.draw_line(x, y + height, x + width, y + height, color);
         self.draw_line(x, y, x, y + height, color);
         self.draw_line(x + width, y, x + width, y + height, color);
+    }
+
+    pub fn draw_rect_outline_adv(&mut self, x: usize, y: usize, width: usize, height: usize, color: u32, thickness: usize, style: u32) {
+        self.draw_line_adv(x, y, x + width, y, color, thickness, style);
+        self.draw_line_adv(x, y + height, x + width, y + height, color, thickness, style);
+        self.draw_line_adv(x, y, x, y + height, color, thickness, style);
+        self.draw_line_adv(x + width, y, x + width, y + height, color, thickness, style);
     }
 
     pub fn draw_progress_bar(&mut self, x: usize, y: usize, width: usize, height: usize, value: usize, max: usize, color: u32) {
@@ -402,7 +428,7 @@ impl PixelGraphics {
         let row_height = 20;
 
         // Draw Headers
-        self.fill_rect(x + 1, y + 1, width - 1, row_height, 0x444444);
+        self.fill_rect(x + 1, y + 1, width - 1, row_height, 0x333333);
         for (i, header) in headers.iter().enumerate() {
             let h_x = x + (i * col_width);
             self.draw_text(h_x + 5, y + 2, header, 0xAAAAAA);
@@ -449,10 +475,225 @@ impl PixelGraphics {
         }
     }
 
+    pub fn draw_spinbox(&mut self, x: usize, y: usize, width: usize, value: i32, label: &str) {
+        let height = 24;
+        let btn_width = 20;
+
+        // Main Box
+        self.draw_rect_outline(x, y, width, height, 0x888888);
+        self.fill_rect(x + 1, y + 1, width - btn_width - 1, height - 2, 0x000000);
+
+        // Value Text
+        let val_str = value.to_string();
+        self.draw_text(x + 5, y + 4, &val_str, 0xFFFFFF);
+
+        // Control Buttons (Stacked ^ and v)
+        let btn_x = x + width - btn_width;
+        self.draw_rect_outline(btn_x, y, btn_width, height, 0x888888);
+        self.draw_line(btn_x, y + height / 2, x + width, y + height / 2, 0x888888);
+
+        self.draw_text(btn_x + 6, y + 2, "^", 0x777777);
+        self.draw_text(btn_x + 6, y + 12, "v", 0x777777);
+
+        // Optional Label
+        self.draw_text(x + width + 5, y + 4, label, 0xAAAAAA);
+    }
+
+    pub fn draw_double_spinbox(&mut self, x: usize, y: usize, width: usize, value: f64, precision: usize) {
+        // Simple fixed-point formatting for no_std
+        let mut s = alloc::string::String::new();
+        let int_part = value as i64;
+        s.push_str(&int_part.to_string());
+        s.push('.');
+
+        let mut frac = (value.abs() - floor(value.abs()));
+        for _ in 0..precision {
+            frac *= 10.0;
+            let digit = (frac as i64) % 10;
+            s.push_str(&digit.to_string());
+        }
+
+        self.draw_spinbox(x, y, width, 0, ""); // Draw skeleton
+        self.fill_rect(x + 1, y + 1, width - 21, 22, 0x000000); // Overwrite int with float string
+        self.draw_text(x + 5, y + 4, &s, 0xFFFFFF);
+    }
+
+    pub fn draw_dial(&mut self, x: usize, y: usize, radius: usize, value: usize, max: usize) {
+            let center_x = x + radius;
+            let center_y = y + radius;
+
+            // 1. Draw the High-Resolution Octagon Bezel
+            // Top-left is dark (shadow), Bottom-right is white (highlight)
+            self.draw_octagon_outline(x, y, radius, 0x888888, 0x555555);
+
+            // 2. Fill the inner face of the knob
+            // We shrink the fill slightly to stay inside the bezel
+            self.fill_rect(x + 4, y + 4, (radius * 2) - 8, (radius * 2) - 8, 0x555555);
+
+            // 3. Calculate Angle using libm
+            // Range: 135 degrees (0.75 * PI) to 405 degrees (2.25 * PI)
+            let fraction = value as f64 / max.max(1) as f64;
+            let start_angle = 0.75 * core::f64::consts::PI;
+            let sweep = 1.5 * core::f64::consts::PI;
+            let angle = start_angle + (fraction * sweep);
+
+            // 4. Calculate Needle-Triangle points
+            // Tip of the needle (near the perimeter)
+            let tip_r = radius as f64 - 4.0;
+            let tx = (center_x as f64 + tip_r * cos(angle)) as usize;
+            let ty = (center_y as f64 + tip_r * sin(angle)) as usize;
+
+            // Base of the needle (at the center)
+            // We create two points perpendicular to the needle angle to give it width
+            let base_w = 3.0;
+            let angle_perp1 = angle + (core::f64::consts::PI / 2.0);
+            let angle_perp2 = angle - (core::f64::consts::PI / 2.0);
+
+            let bx1 = (center_x as f64 + base_w * cos(angle_perp1)) as usize;
+            let by1 = (center_y as f64 + base_w * sin(angle_perp1)) as usize;
+
+            let bx2 = (center_x as f64 + base_w * cos(angle_perp2)) as usize;
+            let by2 = (center_y as f64 + base_w * sin(angle_perp2)) as usize;
+
+            // 5. Draw the Needle (Outline of the long triangle)
+            self.draw_line(bx1, by1, tx, ty, 0xCCCCCC);
+            self.draw_line(bx2, by2, tx, ty, 0xCCCCCC);
+            self.draw_line(bx1, by1, bx2, by2, 0xCCCCCC);
+
+            // 6. Center Hub (The "cap" that holds the needle)
+            // self.fill_rect(center_x - 1, center_y - 1, 3, 3, 0x555555);
+        }
+
+    /// Helper to draw a beveled octagon for the dial's outer edge
+    pub fn draw_octagon_outline(&mut self, x: usize, y: usize, r: usize, color_light: u32, color_dark: u32) {
+        let side = (r as f64 * 0.707) as usize;
+        let offset = r - side;
+        let d = r * 2;
+
+        // Flat edges
+        self.draw_line(x + offset, y, x + d - offset, y, color_dark);         // Top
+        self.draw_line(x + offset, y + d, x + d - offset, y + d, color_light); // Bottom
+        self.draw_line(x, y + offset, x, y + d - offset, color_dark);         // Left
+        self.draw_line(x + d, y + offset, x + d, y + d - offset, color_light); // Right
+
+        // Diagonals
+        self.draw_line(x + offset, y, x, y + offset, color_dark);             // Top-Left
+        self.draw_line(x + d - offset, y, x + d, y + offset, color_dark);     // Top-Right
+        self.draw_line(x, y + d - offset, x + offset, y + d, color_light);     // Bottom-Left
+        self.draw_line(x + d, y + d - offset, x + d - offset, y + d, color_light); // Bottom-Right
+    }
+
+
+    // Shaders/Effects
+
+    /// Scanline Shader
+    pub fn apply_scanlines(&mut self) {
+        let stride = self.stride;
+        let height = self.height;
+        let width = self.width;
+
+        if let Some(buffer) = self.backbuffer_slice_mut() {
+            // Apply effect to every 2nd row
+            for y in (0..height).step_by(3) {
+                for x in 0..width {
+                    let idx = y * stride + x;
+                    let pixel = buffer[idx];
+
+                    // Simple 50% darken (Shift right by 1 for each channel)
+                    // Assuming BGRX/RGBX format
+                    let r = ((pixel >> 16) & 0xFF) >> 1;
+                    let g = ((pixel >> 8) & 0xFF) >> 1;
+                    let b = (pixel & 0xFF) >> 1;
+
+                    buffer[idx] = (r << 16) | (g << 8) | b;
+                }
+            }
+        }
+    }
+
+    /// Simulates 16-bit or 8-bit color banding (Dithering-like feel)
+    pub fn apply_dither(&mut self) {
+        if let Some(buffer) = self.backbuffer_slice_mut() {
+            for pixel in buffer.iter_mut() {
+                // Clear the lower 4 bits of each byte to create color steps
+                *pixel &= 0xF0F0F0F0;
+            }
+        }
+    }
+
+    /// "Moving-Glitch" shader, does not work at this time
+    pub fn apply_glitch(&mut self) {
+        let stride = self.stride;
+        let height = self.height;
+        let width = self.width;
+        let glitch_height = 5; // Thickness of the glitch line
+        let glitch_y = self.glitch_y;
+        if let Some(buffer) = self.backbuffer_slice_mut() {
+            // Apply effect only to rows within the glitch band
+            for y_offset in 0..glitch_height {
+                let y = (glitch_y + y_offset) % height;
+
+                for x in 0..width {
+                    let idx = y * stride + x;
+                    let pixel = buffer[idx];
+
+                    // Effect: Invert colors or Shift (for "glitch" feel)
+                    // Here we'll just "brighten" it intensely to look like a scan bar
+                    let r = core::cmp::min(((pixel >> 16) & 0xFF) + 50, 255);
+                    let g = core::cmp::min(((pixel >> 8) & 0xFF) + 50, 255);
+                    let b = core::cmp::min((pixel & 0xFF) + 50, 255);
+
+                    buffer[idx] = (r << 16) | (g << 8) | b;
+                }
+            }
+        }
+
+        // Move the line down for the next frame
+        self.glitch_y = if self.glitch_y < height + 20 { self.glitch_y + 2 } else { 0 }
+    }
+
+    /// Chromatic Aberration edge shader, requires a lot of cpu, resource intensive. Unused but not deprecated
+    pub fn apply_edge_aberration(&mut self, max_strength: f32) {
+        let (width, height, stride) = (self.width, self.height, self.stride);
+        let center_x = (width / 2) as f32;
+        let center_y = (height / 2) as f32;
+        let max_dist = sqrt(pow(center_x as f64, 2.0) + pow(center_y as f64, 2.0));
+
+        if let Some(buffer) = self.backbuffer_slice_mut() {
+            // We iterate backwards to avoid using a second temporary buffer,
+            // though for a true "perfect" effect, a temporary copy is safer.
+            for y in 0..height {
+                let dy = pow((y as f32 - center_y) as f64, 2.0);
+                for x in 0..width {
+                    let dx = pow((x as f32 - center_x) as f64, 2.0);
+
+                    // Calculate normalized distance from center (0.0 to 1.0)
+                    let dist = sqrt(dx + dy) / max_dist;
+
+                    // Intensity scales with distance (stronger at edges)
+                    let offset = (dist * max_strength as f64) as usize;
+                    if offset == 0 { continue; }
+
+                    let idx = y * stride + x;
+
+                    // Sample Red from the left and Blue from the right
+                    let r_idx = y * stride + x.saturating_sub(offset);
+                    let b_idx = y * stride + core::cmp::min(x + offset, width - 1);
+
+                    let r = (buffer[r_idx] >> 16) & 0xFF;
+                    let g = (buffer[idx] >> 8) & 0xFF;
+                    let b = buffer[b_idx] & 0xFF;
+
+                    buffer[idx] = (r << 16) | (g << 8) | b;
+                }
+            }
+        }
+    }
+
 
 }
 
-// Simple 8x16 font data
+/// Simple 8x16 font data
 fn get_font_data(c: char) -> [u8; 16] {
     let code = c as usize;
     if code < 256 {

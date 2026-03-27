@@ -1,10 +1,12 @@
 #![allow(dead_code, deprecated)]
 
 
+use crate::hpvm_log;
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::char;
 use uefi::proto::console::text::{Color, Key, ScanCode};
 use uefi::runtime;
 use uefi::runtime::VariableKey;
@@ -13,18 +15,14 @@ use uefi_raw::table::runtime::ResetType;
 
 mod graphics;
 pub mod pixel_graphics;
-mod dashboard;
-mod vm_manager;
-mod terminal;
+
 
 pub use graphics::{Graphics, Rect};
-use crate::message;
+use crate::{handle_vm_command, hpvm_warn, message, terminal};
+use crate::pm::PackageManager;
 use crate::ui::pixel_graphics::{PixelGraphics, TreeViewNode};
 
 
-// Add new UI module structure
-pub mod resource_monitor;
-pub mod console;
 
 
 #[derive(Clone, Debug)]
@@ -69,7 +67,10 @@ pub struct DashboardUI {
     pub vm_action_idx: usize, // For VM actions (0: Start, 1: Stop, 2: Reset, 3: Zero, 4: Delete)
     pub selected_vm_idx: usize,
     pub filesys_action_idx: usize,
+    pub term_selected: bool,
+    pub term_buf: String,
     pub editor: Option<TextEditor>,
+    pub package_manager: PackageManager,
 
 }
 
@@ -154,7 +155,7 @@ pub struct SystemResources {
 }
 
 impl DashboardUI {
-    pub fn new() -> Self {
+    pub fn new(package_manager: PackageManager) -> Self {
         Self {
             selected_tab: DashboardTab::Overview,
             vms: alloc::vec::Vec::new(),
@@ -192,7 +193,10 @@ impl DashboardUI {
             vm_action_idx: 0,
             selected_vm_idx: 0,
             filesys_action_idx: 0,
+            term_selected: false,
+            term_buf: "".to_string(),
             editor: None,
+            package_manager: package_manager,
         }
     }
 
@@ -271,10 +275,10 @@ impl DashboardUI {
             // Layout constants for consistent spacing across tabs
             let header_h = 48usize;
             let nav_h = 32usize;
-            let content_top = header_h + nav_h; // 80px from top
+            let content_top = header_h + nav_h; // 80px fro5m top
             let margin = 16usize; // outer margin
             let gutter = 12usize; // space between widgets/rows
-            let line_h = 20usize; // standard text line height
+            let line_h = 15usize; // standard text line height
 
             // Content area based on selected tab
             match self.selected_tab {
@@ -315,8 +319,8 @@ impl DashboardUI {
 
                     y = 100;
                     //pg.draw_rect_outline(420, y, 320, 420, 0xCCCCCC);
-                    let time_data_0 = format!("{:?}", uefi::runtime::get_time_and_caps().unwrap().0);
-                    let time_data_1 = format!("{:?}", uefi::runtime::get_time_and_caps().unwrap().1);
+                    let time_data_0 = format!("{:?}", runtime::get_time_and_caps().unwrap().0);
+                    let time_data_1 = format!("{:?}", runtime::get_time_and_caps().unwrap().1);
                     pg.draw_text(420, y, &*time_data_0, 0xFFFFFF);
                     y += 10;
                     pg.draw_text(420, y, &*time_data_1, 0xFFFFFF);
@@ -493,10 +497,36 @@ impl DashboardUI {
                     
                     let mut y = 140;
                     let logs = crate::hpvmlog::get_logs();
-                    
-                    // Show last N logs that fit on screen
-                    let max_visible = (height - 130 - (margin * 6) - 20) / line_h;
-                    let start_idx = logs.len().saturating_sub(max_visible);
+
+
+                    let max_y = height - (margin * 6) - 20; // Bottom boundary
+                    let available_height = max_y - 140;     // Space between start y (140) and boundary
+                    let mut total_lines_needed = 0;
+                    let mut start_idx = logs.len();
+
+                    // Iterate backwards to find how many logs (and their newlines) actually fit
+                    for i in (0..logs.len()).rev() {
+                        let (_, tag, msg) = &logs[i];
+                        // Count 1 line + any additional newlines in the message
+                        let lines_in_this_log = if tag.is_empty() {
+                            msg.split('\n').count()
+                        } else {
+                            // Tagged logs usually follow "[tag] msg" format
+                            alloc::format!("[{}] {}", tag, msg).split('\n').count()
+                        };
+
+                        if (total_lines_needed + lines_in_this_log) * (line_h-4) > available_height {
+                            break; // This log won't fit entirely
+                        }
+
+                        total_lines_needed += lines_in_this_log;
+                        start_idx = i;
+                    }
+
+
+                    // // Show last N logs that fit on screen
+                    // let max_visible = (height - 130 - (margin * 6) - 20) / line_h;
+                    // let start_idx = logs.len().saturating_sub(max_visible);
                     
                     for i in start_idx..logs.len() {
                         let (color, tag, msg) = &logs[i];
@@ -507,12 +537,19 @@ impl DashboardUI {
                             _ => 0xFFFFFF,
                         };
                         let log_line = if tag.is_empty() { msg.clone() } else { alloc::format!("[{}] {}", tag, msg) };
-                        pg.draw_text(margin + 10, y, &log_line, color_hex);
-                        y += line_h;
-                        if y + line_h > height - margin * 6 { break; }
+                        for section in log_line.split("\n") {
+                            pg.draw_text(margin + 10, y, section, color_hex);
+                            y += (line_h-4);
+                        }
+                        if y + (line_h-4) > height - margin * 6 { break; }
                     }
 
                     pg.draw_rect_outline(margin, height-95, width - margin * 8, 35, 0x999999);
+                    if self.term_selected {
+                        pg.draw_rect_outline_adv(margin - 1, height-96, (width - margin * 8)+2, 37, 0x888844, 3, 0xFFFFFF);
+                    }
+                    pg.draw_text(margin + 5, height - 60, "press enter to send, end to enter type mode, and esc to exit", 0x888888);
+                    pg.draw_text(margin + 5, height - 85, alloc::format!("HPVMx> {}", self.term_buf).as_str(), 0xDDDDDD);
                 }
                 DashboardTab::Devices => {
                     pg.draw_text(20, 100, "Device Manager", 0x00FF00);
@@ -549,7 +586,7 @@ impl DashboardUI {
                     let list_x = margin;
                     let list_y = base_y + 28;
                     let list_w = core::cmp::min(width - margin * 2, 760);
-                    let list_h = core::cmp::min(height - list_y - 90, 360);
+                    let list_h = core::cmp::min(height - list_y - 90, 460);
                     pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
 
                     // Header row with better spacing and column guides
@@ -643,9 +680,10 @@ impl DashboardUI {
                     pg.fill_rect(130, y, 30, 25, 0x444444); pg.draw_text(138, y+5, "?", 0xFFFFFF); // ToolButton
                     y += 35;
                     
-                    pg.draw_checkbox(20, y, true, false, false, "CheckBox (Checked)", 0xFFFFFF); y += 25;
-                    pg.draw_checkbox(20, y, false, false, false, "CheckBox (Unchecked)", 0xFFFFFF);  y += 25;
-                    pg.draw_checkbox(20, y, false, true, false,"CheckBox (Blocked/Denied)", 0xFFFFFF);  y += 25;
+                    pg.draw_checkbox(20, y, true, false, false, "CheckBox (Checked)"); y += 25;
+                    pg.draw_checkbox(20, y, false, false, false, "CheckBox (Unchecked)");  y += 25;
+                    pg.draw_checkbox(20, y, false, true, false,"CheckBox (Blocked/Denied)");  y += 25;
+                    pg.draw_checkbox(20, y, true, false, true, "CheckBox (Disabled)"); y += 25;
                     
                     pg.draw_radio_button(20, y, true); pg.draw_text(40, y, "RadioButton 1", 0xFFFFFF); y += 25;
                     pg.draw_radio_button(20, y, false); pg.draw_text(40, y, "RadioButton 2", 0xFFFFFF); y += 35;
@@ -654,9 +692,11 @@ impl DashboardUI {
                     pg.draw_rect_outline(20, y, 150, 20, 0x888888); pg.fill_rect(21, y+1, 148, 18, 0xFFFFFF);
                     pg.draw_text(25, y+2, "Editable text..ſ", 0x000000); y += 30;
                     
-                    pg.draw_text(20, y, "SpinBox / DoubleSpinBox:", 0xAAAAAA); y += 20;
-                    pg.draw_rect_outline(20, y, 60, 20, 0x888888); pg.draw_text(25, y+2, "42", 0xFFFFFF); pg.draw_text(65, y+2, "[^v]", 0xAAAAAA);
-                    pg.draw_rect_outline(100, y, 60, 20, 0x888888); pg.draw_text(105, y+2, "3.14", 0xFFFFFF); //y += 30;
+                    pg.draw_text(20, y, "SpinBox / DoubleSpinBox:", 0xAAAAAA); y += 15;
+                    pg.draw_spinbox(20, y, 60, 42, "int");
+                    pg.draw_double_spinbox(120, y, 60, 3.14, 2);
+
+                    y+= 30;
 
                     // Column 2
                     let mut y = 130;
@@ -731,12 +771,12 @@ impl DashboardUI {
                     
                     pg.draw_text(420, y + 10, "Dial & Key Sequence:", 0xAAAAAA);
                     // Mock Dial
-                    pg.draw_radio_button(420, y + 30, false); pg.draw_line(426, y + 36, 432, y + 30, 0xFF0000);
+                    pg.draw_dial(420, y + 30, 12, 25, 100);
                     pg.draw_rect_outline(550, y + 30, 100, 20, 0x888888); pg.draw_text(555, y + 32, "Ctrl+Alt+Del", 0xFFFF00);
 
 
                     let y = 130;
-                    let x = 650;
+                    let x = 750;
 
                     // Table Data (3D setup)
                     let headers = ["ID", "Name", "Status"];
@@ -809,6 +849,7 @@ impl DashboardUI {
                         }
 
                         pg.draw_text(margin, height - 70, ":w - Save | :q - Quit | i - Insert | Esc - Normal", 0x888888);
+                        pg.draw_text(margin + 600, height - 70, &*format!(":{}", ed.command_buffer), 0xFFFFFF);
                     }
                 }
                 DashboardTab::Settings => {
@@ -830,7 +871,7 @@ impl DashboardUI {
                     // [] extra debug info
                     // [] folder absolute sizes
 
-                    pg.draw_rect_outline((width/3) + 10, page_y + 2, (width/3) - 10, (height*2)/3, 0xFFFFFF);
+                    pg.draw_rect_outline_adv((width/3) + 10, page_y + 2, (width/3) - 10, (height*2)/3, 0x777777, 1, 0x3FFFFF);
                     let mut x = (width/3) + 20;
                     let mut y = page_y + 10;
 
@@ -838,15 +879,19 @@ impl DashboardUI {
                     pg.draw_text(x, y, "Optional Features", 0xFFFFFF);
                     y += 25;
 
-                    pg.draw_checkbox(x, y, false, false, false, "Extra Debug Info", 0xFFFFFF);
+                    pg.draw_checkbox(x, y, false, false, false, "Extra Debug Info");
                     y += 20;
-                    pg.draw_checkbox(x, y, false, false, false, "Folder Absolute Sizes", 0xFFFFFF);
+                    pg.draw_checkbox(x, y, false, false, true, "Folder Absolute Sizes");
                     y += 20;
-                    pg.draw_checkbox(x, y, true, false, false, "State Save/Restore", 0xFFFFFF);
+                    pg.draw_checkbox(x, y, true, false, false, "State Save/Restore");
                     y += 20;
-                    pg.draw_checkbox(x, y, true, false, false, "Extended Symbol Library", 0xFFFFFF);
+                    pg.draw_checkbox(x, y, true, false, false, "Extended Symbol Library");
                     y += 20;
-                    pg.draw_checkbox(x, y, false, true, false, "Ring0 UDMI/UDXI", 0xFFFFFF)
+                    pg.draw_checkbox(x, y, false, true, false, "Ring0 UDMI/UDXI");
+                    y += 20;
+                    pg.draw_checkbox(x, y, false, false, true, "ControlLang Support");
+                    y += 20;
+                    pg.draw_checkbox(x, y, true, false, false, "PG VShaders");
 
 
 
@@ -865,6 +910,12 @@ impl DashboardUI {
             // Update and draw cursor
             self.cursor.update_from_mouse(width, height);
             pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
+
+            //pg.apply_scanlines();
+            pg.apply_dither();
+            //pg.apply_glitch();
+            //pg.apply_edge_aberration(5.0);
+
 
             pg.flip();
 
@@ -1146,7 +1197,7 @@ impl DashboardUI {
                         if self.filesys_action_idx == 0 || self.filesys_action_idx == 1 { // Open/Edit
                             let entry = &self.files[self.selected_file_idx];
                             if !entry.is_dir {
-                                let full_path = format!("{}{}", self.current_path, entry.name);
+                                let full_path = format!("{}/{}", self.current_path, entry.name);
                                 if let Ok(data) = crate::FileSystem::read_file(&full_path) {
                                     // Detect if binary: check for null bytes or invalid UTF-8
                                     let is_hex = core::str::from_utf8(&data).is_err();
@@ -1234,13 +1285,66 @@ impl DashboardUI {
                     }
                 }
             }
+            DashboardTab::Console => {
+                match key {
+                    Key::Printable(c) => {
+                        if self.term_selected {
+                            let ch = char::from(c);
+                            match ch {
+                                '\u{8}' => { self.term_buf.pop(); }
+                                '\r' | '\n' => {
+                                    let unclean = self.term_buf.trim();
+
+                                    // Handle backspaces by removing previous char(s)
+                                    let mut command = String::with_capacity(unclean.len());
+                                    let mut consecutive_backspaces = 0;
+
+                                    for c in unclean.chars() {
+                                        if c == '\u{8}' {
+                                            consecutive_backspaces += 1;
+                                            if consecutive_backspaces >= 2 {
+                                                command.pop(); // Remove additional char for consecutive backspaces
+                                            }
+                                            command.pop(); // Remove char before backspace
+                                        } else {
+                                            consecutive_backspaces = 0;
+                                            command.push(c);
+                                        }
+                                    }
+
+                                    let body = command.split(" ").collect::<Vec<&str>>();
+                                    let body = command.split(" ").collect::<Vec<&str>>();
+                                    if !command.is_empty() {
+                                        let command = command.split(" ").collect::<Vec<&str>>();
+                                        let parts = command.clone();
+
+                                        terminal::cmd(command, &parts, body, &mut self.package_manager);
+                                    } else {
+                                        hpvm_warn!("dashboard", "empty command");
+                                    }
+                                    self.term_buf.clear();
+                                }
+                                _ => { self.term_buf.push(ch) }
+                            }
+                        }
+                    }
+
+                    Key::Special(ScanCode::ESCAPE) => {
+                        self.term_selected = false;
+                    }
+                    Key::Special(ScanCode::END) => {
+                        self.term_selected = true;
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
         }
 
         match key {
             Key::Printable(c) => {
                 let ch = char::from(c).to_ascii_lowercase();
-                if !(matches!(self.selected_tab, DashboardTab::Editor)) {
+                if !(matches!(self.selected_tab, DashboardTab::Editor)) && !self.term_selected {
                     match ch {
                         // 'q' => {
                         //     self.exit_requested = true;

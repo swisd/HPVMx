@@ -1,6 +1,6 @@
 [package]
 name = "HPVMx"
-version = "0.9.13"
+version = "1.2.4"
 edition = "2024"
 
 [[bin]]
@@ -19,7 +19,7 @@ raw-cpuid = "11.6.0"
 spinning = "0.1.0"
 buddy_system_allocator = "0.12.0"
 uefi = { version = "0.36.1", features = ["alloc", "logger", "panic_handler", "unstable", "default", "global_allocator"] }
-smoltcp = { version = "0.12.0", default-features = false, features = ["proto-ipv4", "medium-ip", "socket-raw"] }
+smoltcp = { version = "0.13.0", default-features = false, features = ["proto-ipv4", "medium-ip", "socket-raw"] }
 # ixgbe/e1000 drivers needed
 log = "0.4.29"
 uefi-raw = "0.13.0"
@@ -27,3 +27,6 @@ uefi-raw = "0.13.0"
 bitflags = "2.4.0"
 uefi-async = "0.2.8"
 elf = { version = "0.8.0", default-features = false }
+libm = "0.2.16"
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+serde-json-core = "0.5.0"

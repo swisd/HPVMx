@@ -1,0 +1,8 @@
+{
+  "name": "test-package",
+  "version": "0.0.1",
+  "description": "Micro-C Testing package",
+  "author": "swisd",
+  "deps": [],
+  "package_type": "Executable"
+}

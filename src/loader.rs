@@ -2,7 +2,7 @@ use crate::Color;
 use crate::hpvm_log;
 use elf::{ElfBytes, endian::AnyEndian};
 use uefi::prelude::*;
-use uefi::boot as boot_t;
+use uefi::{boot as boot_t, print, println};
 use uefi::boot::AllocateType;
 use uefi_raw::table::boot::MemoryType;
 use crate::{hpvm_info, FileSystem};
@@ -11,8 +11,8 @@ use crate::{hpvm_info, FileSystem};
 #[allow(unsafe_code, unsafe_op_in_unsafe_fn)]
 pub unsafe fn load_and_jump_os(path: &str) -> ! {
     // 1. Get Framebuffer info (unchanged)
-    let gop_handle = uefi::boot::get_handle_for_protocol::<uefi::proto::console::gop::GraphicsOutput>().unwrap();
-    let mut gop = uefi::boot::open_protocol_exclusive::<uefi::proto::console::gop::GraphicsOutput>(gop_handle).unwrap();
+    let gop_handle = boot::get_handle_for_protocol::<uefi::proto::console::gop::GraphicsOutput>().unwrap();
+    let mut gop = boot::open_protocol_exclusive::<uefi::proto::console::gop::GraphicsOutput>(gop_handle).unwrap();
     let fb_ptr = gop.frame_buffer().as_mut_ptr();
     let fb_size = gop.frame_buffer().size();
     hpvm_info!("loader", "{:?}  {:?}  {:?}", gop_handle, fb_ptr, fb_size);
@@ -38,9 +38,9 @@ pub unsafe fn load_and_jump_os(path: &str) -> ! {
         let pages = (total_size + 0xFFF) / 0x1000;
 
         // 3. Let UEFI find ANY free memory (Avoids the NOT_FOUND conflict)
-        let allocated_addr = uefi::boot::allocate_pages(
-            uefi::boot::AllocateType::AnyPages, // "Give me any free RAM"
-            uefi::boot::MemoryType::LOADER_CODE,
+        let allocated_addr = boot::allocate_pages(
+            AllocateType::AnyPages, // "Give me any free RAM"
+            MemoryType::LOADER_CODE,
             pages as usize
         ).expect("Failed to allocate memory for OS segment");
 
@@ -59,7 +59,7 @@ pub unsafe fn load_and_jump_os(path: &str) -> ! {
         let src_start = phdr.p_offset as usize;
         let src_end = src_start + phdr.p_filesz as usize;
         dest_slice[..phdr.p_filesz as usize].copy_from_slice(&data[src_start..src_end]);
-        hpvm_info!("loader", "vaddr {:?} aligned_vaddr {:?} page_int_offset {:?} total_sz {:?} pages {:?} alloc_addr {:?} dest_ptr {:?}", vaddr, aligned_vaddr, offset_within_page, total_size, pages, allocated_addr, dest_ptr);
+        hpvm_info!("loader", "vaddr {:#x} aligned_vaddr {:#x} page_int_offset {:#x} total_sz {:#x} pages {:?} alloc_addr {:?} dest_ptr {:?}", vaddr, aligned_vaddr, offset_within_page, total_size, pages, allocated_addr, dest_ptr);
     }
 
     // 4. Calculate Dynamic Entry Point
@@ -67,14 +67,17 @@ pub unsafe fn load_and_jump_os(path: &str) -> ! {
     let entry_point = file.ehdr.e_entry + load_base.expect("No loadable segments found");
     // let entry_offset: u64 = file.ehdr.e_entry - file.ehdr.;   // Fix this to add offset
     let actual_jump_address = entry_point; // + entry_offset;
+    hpvm_info!("loader", "ac_jump_addr {:#x} e_entry {:#x} load_base {:#x}", actual_jump_address, file.ehdr.e_entry, load_base.expect("No loadable segments found"));
 
     // 5. Exit Boot Services (Safety: Disable interrupts first)
     // Note: You should ideally pass the memory map to the kernel here!
     let _mmap = unsafe {
-        x86_64::instructions::interrupts::disable(); // Recommended if available
-        boot::exit_boot_services(Some(MemoryType::LOADER_DATA))
-    };
 
+        x86_64::instructions::interrupts::disable(); // Recommended if available
+        hpvm_info!("loader", "exit boot_services");
+        boot::exit_boot_services(Some(MemoryType::LOADER_DATA))
+
+    };
     // 6. Hand over to OS
     let entry_fn: extern "C" fn(fb: *mut u32, size: usize) -> ! = core::mem::transmute(actual_jump_address);
     entry_fn(fb_ptr as *mut u32, fb_size);

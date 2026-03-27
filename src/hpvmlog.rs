@@ -12,7 +12,7 @@ pub struct LogEntry {
     pub message: String,
 }
 
-const MAX_LOGS: usize = 128;
+const MAX_LOGS: usize = 4096;
 pub static mut LOG_BUFFER: Option<Vec<LogEntry>> = None;
 static LOG_COUNT: AtomicUsize = AtomicUsize::new(0);
 
