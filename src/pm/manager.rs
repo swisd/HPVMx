@@ -99,9 +99,10 @@ impl PackageManager {
         FileSystem::get_cwd();
         hpvm_info!("pm", "loading packages from {}registry.prg", self.package_path);
         let reg = FileSystem::read_file_to_string("registry.prg").expect("could not open registry");
-        let packages = reg.split("\n").collect::<Vec<&str>>();
+        let pkgs = reg.replace("\r", "");
+        let packages = pkgs.split("\n").collect::<Vec<&str>>();
         for package in packages {
-            hpvm_info!("pm", "found package {}", package.to_string());
+            hpvm_info!("pm", "found package '{}'", package.to_string());
             let pack_path = self.package_path.clone() + "/" + package + "/";
             FileSystem::cd(&*pack_path);
             let json = FileSystem::read_file_to_string("package.json").unwrap();

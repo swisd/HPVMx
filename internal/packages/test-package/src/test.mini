@@ -1,7 +1,0 @@
-;; Simple Graphics Driver in Micro-C
-(import "std/uefi")
-
-(export "draw_blue_screen"
-  (let fb (uefi_get_framebuffer))
-  (loop i 0 100000
-    (poke (+ fb (* i 4)) 0x0000FF))) ;; Write Blue to FB

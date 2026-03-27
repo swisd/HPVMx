@@ -1,0 +1,13 @@
+;; Micro-C S-Expression Style
+(def main ()
+  (let fb 0xFD000000)
+  (let color 0x00FF0000)
+
+  ;; Basic If Statement
+  (if (eq color 0x00FF0000)
+    (poke fb color)
+    (poke fb 0))
+
+  ;; Basic Loop (0 to 100)
+  (loop i 0 100
+    (poke (+ fb (* i 4)) color)))

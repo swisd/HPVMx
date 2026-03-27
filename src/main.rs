@@ -30,6 +30,7 @@ mod state;
 mod loader;
 mod terminal;
 mod pm;
+mod micro_c;
 
 extern crate alloc;
 use alloc::string::{String, ToString};
