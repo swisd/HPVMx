@@ -8,12 +8,15 @@ use crate::filesystem::FileSystem;
 use serde::{Deserialize, Serialize};
 use uefi::proto::media::file::File;
 use crate::{hpvm_info, message};
+use crate::types::{VersionString, BYTEARRAY};
 
 static VERSION: &str = "0.1.0";
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UUID(BYTEARRAY);
 
 #[derive(Clone)]
 pub struct PackageManager {
-    pub version: String,
+    pub version: VersionString,
     pub package_path: String,
     pub registry: BTreeMap<String, Package>,
     pub buffer: Vec<u8>,
@@ -97,7 +100,7 @@ pub enum MiniPackageType {
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Package {
     pub name: String,
-    pub version: String,
+    pub version: VersionString,
     pub description: String,
     pub author: String,
     //pub license: String,
@@ -112,10 +115,50 @@ pub struct Package {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MiniPackage {
     pub name: String,
-    pub version: String,
+    pub version: VersionString,
     pub description: String,
     pub mini_package_type: MiniPackageType,
 }
+
+// Might add build function later
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BuildReport {
+    /// Package that was built
+    pub package: String,
+    /// Version that was built
+    pub version: VersionString,
+    /// Output file path
+    pub output_path: String,
+    /// Build duration
+    pub duration_ms: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InstallReport {
+    /// Packages that were installed
+    pub installed: Vec<PackageChange>,
+    /// Packages that were updated
+    pub updated: Vec<PackageChange>,
+    /// Packages that were removed
+    pub removed: Vec<PackageChange>,
+    /// New state ID
+    pub state_id: UUID,
+    /// Total execution time
+    pub duration_ms: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PackageChange {
+    /// Package name
+    pub name: String,
+    /// Previous version
+    pub from_version: Option<VersionString>,
+    /// New version
+    pub to_version: Option<VersionString>,
+    /// Size in bytes
+    pub size: Option<u64>,
+}
+
 
 impl PackageManager {
     pub fn new() -> Self {

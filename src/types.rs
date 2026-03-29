@@ -1412,29 +1412,29 @@ pub mod net {
 
 
 
-type BoxedVec<T> = Box<Vec<T>>;
-type BoxedResult<T, E> = Box<Result<T, E>>;
-type BoxedOption<T> = Box<Option<T>>;
-type BoxedBox<T> = Box<Box<T>>;
+pub type BoxedVec<T> = Box<Vec<T>>;
+pub type BoxedResult<T, E> = Box<Result<T, E>>;
+pub type BoxedOption<T> = Box<Option<T>>;
+pub type BoxedBox<T> = Box<Box<T>>;
 
-type VecBox<T> = Vec<Box<T>>;
+pub type VecBox<T> = Vec<Box<T>>;
 
+pub type AtomicBox<T> = Atomic<Box<T>>;
 
-type AtomicBox<T> = Atomic<Box<T>>;
+pub type DualVec<T> = Vec<Vec<T>>;
+pub type TripleVec<T> = Vec<Vec<Vec<T>>>;
+pub type QuadVec<T> = Vec<Vec<Vec<Vec<T>>>>;
+pub type DualBox<T> = Box<Box<T>>;
+pub type TripleBox<T> = Box<Box<Box<T>>>;
+pub type QuadBox<T> = Box<Box<Box<Box<T>>>>;
+pub type DualOption<T> = Option<Option<T>>;
+pub type TripleOption<T> = Option<Option<Option<T>>>;
+pub type QuadOption<T> = Option<Option<Option<Option<T>>>>;
 
-
-type DualVec<T> = Vec<Vec<T>>;
-type TripleVec<T> = Vec<Vec<Vec<T>>>;
-type QuadVec<T> = Vec<Vec<Vec<Vec<T>>>>;
-type DualBox<T> = Box<Box<T>>;
-type TripleBox<T> = Box<Box<Box<T>>>;
-type QuadBox<T> = Box<Box<Box<Box<T>>>>;
-type DualOption<T> = Option<Option<T>>;
-type TripleOption<T> = Option<Option<Option<T>>>;
-type QuadOption<T> = Option<Option<Option<Option<T>>>>;
-
-
-
-type Synchronous<T> = Vec<Box<Vec<T>>>;
+pub type Synchronous<T> = Vec<Box<Vec<T>>>;
 
 // type DynBoxedVec<T> = BoxedVec<dyn T>;
+
+
+
+pub type VersionString = String;
