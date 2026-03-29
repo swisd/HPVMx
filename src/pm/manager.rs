@@ -6,6 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use crate::filesystem::FileSystem;
 use serde::{Deserialize, Serialize};
+use uefi::proto::media::file::File;
 use crate::{hpvm_info, message};
 
 static VERSION: &str = "0.1.0";
@@ -15,10 +16,67 @@ pub struct PackageManager {
     pub version: String,
     pub package_path: String,
     pub registry: BTreeMap<String, Package>,
+    pub buffer: Vec<u8>,
+    pub state: StateManager,
+    pub config: Config,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
-#[derive(Debug)]
+#[derive(Clone)]
+pub struct StateManager {}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct Config {
+    pub general: GeneralConfig,
+    pub paths: PathConfig,
+    pub verification: VerificationConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneralConfig {
+    pub color: u32,
+    pub parallel_downloads: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathConfig {
+    pub store_path: Option<String>,
+    pub state_path: Option<String>,
+    pub build_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VerificationConfig {
+    pub enabled: bool,
+    pub level: String, // "quick", "standard", or "full"
+    pub discrepancy_handling: DiscrepancyHandling,
+    pub user_file_policy: UserFilePolicy,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum DiscrepancyHandling {
+    /// Fail the operation when discrepancies are found
+    FailFast,
+    /// Report discrepancies but continue operation
+    ReportOnly,
+    /// Automatically heal discrepancies when possible
+    AutoHeal,
+    /// Auto-heal but fail if healing is not possible
+    AutoHealOrFail,
+}
+
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum UserFilePolicy {
+    /// Preserve user-created files
+    Preserve,
+    /// Remove user-created files
+    Remove,
+    /// Backup user-created files before removal
+    Backup,
+}
+
+
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub enum PackageType {
     Library,
     Executable,
@@ -28,6 +86,13 @@ pub enum PackageType {
     PShader,
 }
 
+#[derive(Clone, Deserialize, Serialize, Debug)]
+pub enum MiniPackageType {
+    Library,
+    Executable,
+    Driver,
+    PShader,
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Package {
@@ -44,9 +109,12 @@ pub struct Package {
     pub package_type: PackageType
 }
 
-#[derive(serde::Deserialize, Debug)]
-pub struct MiniPkg {
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MiniPackage {
     pub name: String,
+    pub version: String,
+    pub description: String,
+    pub mini_package_type: MiniPackageType,
 }
 
 impl PackageManager {
@@ -55,17 +123,40 @@ impl PackageManager {
             version: VERSION.to_string(),
             package_path: "/pm/package/".to_string(),
             registry: BTreeMap::new(),
+            buffer: Vec::new(),
+            state: StateManager {},
+            config: Config {
+                general: GeneralConfig {
+                    color: 0xFFFFFF,
+                    parallel_downloads: 0
+                },
+                paths: PathConfig {
+                    store_path: None,
+                    state_path: None,
+                    build_path: None,
+                },
+                verification: VerificationConfig {
+                    enabled: false,
+                    level: "".to_string(),
+                    discrepancy_handling: DiscrepancyHandling::FailFast,
+                    user_file_policy: UserFilePolicy::Preserve,
+                }
+            },
         }
     }
 
     pub fn get_version(&self) -> String {
         self.version.clone()
     }
+
     pub fn clone(&self) -> Self {
         PackageManager {
             version: self.version.clone(),
             package_path: self.package_path.clone(),
             registry: self.registry.clone(),
+            buffer: self.buffer.clone(),
+            state: self.state.clone(),
+            config: self.config.clone(),
         }
     }
     // Adds a package to the internal registry
@@ -200,7 +291,8 @@ impl PackageManager {
             return;
         } else {
             for (pname, package) in self.registry.iter() {
-                message!("", "package: {}; type: {:?}; version: {:?}; author: {:?};", pname, package.package_type, package.version, package.author);
+                message!("", "package: {}; type: {:?}; version: {:?}; author: {:?};",
+                    pname, package.package_type, package.version, package.author);
             }
         }
     }
