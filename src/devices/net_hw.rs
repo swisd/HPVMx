@@ -65,7 +65,7 @@ pub fn link_up() -> bool {
 /// Transmit a raw Ethernet frame via SNP (best-effort).
 pub fn tx(frame: &[u8]) -> Result<(), &'static str> {
     let Some(snp) = snp_open() else { return Err("no snp"); };
-    // Safety: UEFI SNP expects DMA-safe buffer; firmware copies internally.
+    // Safety: UEFI SNP expects a DMA-safe buffer; firmware copies internally.
     match snp.transmit(0, frame, None, None, None) {
         Ok(_) => Ok(()),
         Err(_) => Err("tx failed"),

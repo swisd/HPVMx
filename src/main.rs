@@ -7,8 +7,6 @@
 #![no_main]
 
 
-
-
 mod ui;
 mod kernel;
 mod filesystem;

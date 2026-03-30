@@ -9,8 +9,8 @@ use crate::{hpvm_info, hpvm_warn};
 
 // --- Protocol Constants & Headers ---
 
-const ETHERTYPE_IPV4: u16 = 0x0800;
-const ETHERTYPE_ARP: u16 = 0x0806;
+pub const ETHERTYPE_IPV4: u16 = 0x0800;
+pub const ETHERTYPE_ARP: u16 = 0x0806;
 const ARP_REQUEST: u16 = 1;
 const ARP_REPLY: u16 = 2;
 const IP_PROTO_ICMP: u8 = 1;
@@ -27,10 +27,10 @@ const MAX_ARP_ENTRIES: usize = 16;
 // --- Headers ---
 
 #[repr(C, packed)]
-struct EthHeader {
+pub struct EthHeader {
     dst: [u8; 6],
     src: [u8; 6],
-    ethertype: u16,
+    pub(crate) ethertype: u16,
 }
 
 #[repr(C, packed)]
@@ -104,7 +104,7 @@ pub fn backend_name() -> &'static str {
     }
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct NetStats {
     pub rx_pkts: u64,
     pub rx_bytes: u64,
@@ -116,21 +116,22 @@ pub struct NetStats {
 
 // --- State Management ---
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 struct ArpEntry {
     ip: [u8; 4],
     mac: [u8; 6],
     valid: bool,
 }
 
-struct NetState {
-    ip_addr: [u8; 4],
-    gateway: [u8; 4],
-    subnet_mask: [u8; 4], // Added Mask
-    mac_addr: [u8; 6],
-    stats: NetStats,
+#[derive(Copy, Clone, Debug, Default)]
+pub struct NetState {
+    pub ip_addr: [u8; 4],
+    pub gateway: [u8; 4],
+    pub subnet_mask: [u8; 4], // Added Mask
+    pub mac_addr: [u8; 6],
+    pub stats: NetStats,
     arp_cache: [ArpEntry; MAX_ARP_ENTRIES],
-    ping_success: bool,
+    pub ping_success: bool,
 }
 
 static mut NET_STATE: MaybeUninit<Option<NetState>> = MaybeUninit::uninit();
@@ -152,13 +153,6 @@ fn calculate_checksum(data: &[u8]) -> u16 {
     }
     !(sum as u16)
 }
-
-
-
-
-
-
-
 
 // --- New Subnet Logic ---
 
@@ -200,7 +194,7 @@ pub fn init(ip: [u8; 4], gw: [u8; 4], mask: [u8; 4]) {
     STACK_INIT.store(true, Ordering::SeqCst);
     hpvm_info!("NET", "Stack initialized at {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
     hpvm_info!("NET", "Mask: {}.{}.{}.{}", mask[0], mask[1], mask[2], mask[3]);
-    hpvm_info!("NET", "SNP stack up: {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
+    hpvm_info!("NET", "SNP stack up: IP: {}.{}.{}.{}  GW: {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3], gw[0], gw[1], gw[2], gw[3]);
 }
 
 /// Resolves a MAC address. If target is remote, resolves the Gateway's MAC instead.
@@ -428,6 +422,11 @@ fn handle_ipv4(packet: &[u8], src_mac: [u8; 6]) {
                 handle_udp(ip.src, u16::from_be(udp.dst_port), &payload[size_of::<UdpHeader>()..]);
             }
         }
+        IP_PROTO_TCP  => {
+            if HTTPD.load(Ordering::SeqCst) {
+                handle_tcp(ip.src, src_mac, payload);
+            }
+        }
         _ => {}
     }
 }
@@ -542,52 +541,106 @@ fn handle_tcp(src_ip: [u8; 4], src_mac: [u8; 6], packet: &[u8]) {
     // We only care about HTTP port 80
     if dst_port != 80 { return; }
 
-    if (flags & TCP_FLAG_SYN as u16) != 0 {
-        // SYN received -> Send SYN/ACK
+    let seq = u32::from_be(tcp.seq);
+    let ack = u32::from_be(tcp.ack);
+
+    // 1. Connection Request (SYN) -> Reply with SYN/ACK
+    if (flags & (TCP_FLAG_SYN as u16)) != 0 {
+        hpvm_info!("HTTPD", "Connection request from {}.{}.{}.{}", src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
         send_tcp_packet(src_ip, src_mac, 80, u16::from_be(tcp.src_port),
-                        0, u32::from_be(tcp.seq) + 1, TCP_FLAG_SYN | TCP_FLAG_ACK, &[]);
-    } else if (flags & TCP_FLAG_ACK as u16) != 0 {
-        // ACK received -> Check for HTTP GET in payload
+                        0, seq + 1, TCP_FLAG_SYN | TCP_FLAG_ACK, &[]);
+    }
+    // 2. Data Transfer (ACK)
+    else if (flags & (TCP_FLAG_ACK as u16)) != 0 {
         let header_len = ((u16::from_be(tcp.off_flags) >> 12) * 4) as usize;
         let payload = &packet[header_len..];
 
         if payload.starts_with(b"GET") {
-            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\nConnection: close\r\n\r\nHello from UEFI!";
+            let body = "<html><body><h1>HPVM UEFI Server</h1><p>Status: OK</p></body></html>";
+            let response = [
+                "HTTP/1.1 200 OK\r\n",
+                "Content-Type: text/html\r\n",
+                "Connection: close\r\n",
+                "\r\n"
+            ].join("");
+
+            // In a real stack, we'd handle window sizes. Here we just blast the response.
+            // We combine headers and body
+            let mut full_res = response.into_bytes();
+            full_res.extend_from_slice(body.as_bytes());
+
             send_tcp_packet(src_ip, src_mac, 80, u16::from_be(tcp.src_port),
-                            u32::from_be(tcp.ack), u32::from_be(tcp.seq) + payload.len() as u32,
-                            TCP_FLAG_ACK | TCP_FLAG_FIN, response.as_bytes());
+                            ack, seq + payload.len() as u32, TCP_FLAG_ACK | TCP_FLAG_FIN, &full_res);
         }
     }
 }
 
-fn send_tcp_packet(_dst_ip: [u8; 4], _dst_mac: [u8; 6], src_port: u16, dst_port: u16,
+
+
+fn send_tcp_packet(dst_ip: [u8; 4], dst_mac: [u8; 6], src_port: u16, dst_port: u16,
                    seq: u32, ack: u32, flags: u8, data: &[u8]) {
     #[allow(static_mut_refs)]
-    let _state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
+    let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
     let mut frame = [0u8; 1514];
 
     let tcp_len = size_of::<TcpHeader>() + data.len();
     let ip_len = size_of::<Ipv4Header>() + tcp_len;
     let total_len = size_of::<EthHeader>() + ip_len;
 
-    // Fill Eth/IP (Same as UDP logic, just change proto to IP_PROTO_TCP)
-    // ... [Omitted for brevity, use same pattern as send_udp] ...
+    // --- Ethernet & IP (Standard Logic) ---
+    let eth = unsafe { &mut *(frame.as_mut_ptr() as *mut EthHeader) };
+    eth.dst = dst_mac; eth.src = state.mac_addr; eth.ethertype = ETHERTYPE_IPV4.to_be();
 
-    let tcp = unsafe { &mut *(frame.as_mut_ptr().add(size_of::<EthHeader>() + size_of::<Ipv4Header>()) as *mut TcpHeader) };
+    let ip = unsafe { &mut *(frame.as_mut_ptr().add(size_of::<EthHeader>()) as *mut Ipv4Header) };
+    ip.ver_ihl = 0x45; ip.len = (ip_len as u16).to_be();
+    ip.proto = IP_PROTO_TCP; ip.src = state.ip_addr; ip.dst = dst_ip;
+    ip.ttl = 64; ip.checksum = 0;
+    ip.checksum = calculate_checksum(&frame[size_of::<EthHeader>()..size_of::<EthHeader>()+20]).to_be();
+
+    // --- TCP Header ---
+    let tcp_offset = size_of::<EthHeader>() + size_of::<Ipv4Header>();
+    let tcp = unsafe { &mut *(frame.as_mut_ptr().add(tcp_offset) as *mut TcpHeader) };
     tcp.src_port = src_port.to_be();
     tcp.dst_port = dst_port.to_be();
     tcp.seq = seq.to_be();
     tcp.ack = ack.to_be();
-    tcp.off_flags = (((size_of::<TcpHeader>() as u16 / 4) << 12) | flags as u16).to_be();
+    tcp.off_flags = (((5 << 12) | flags as u16)).to_be(); // 5 words (20 bytes)
     tcp.window = 8192u16.to_be();
     tcp.checksum = 0;
 
-    frame[total_len - data.len()..total_len].copy_from_slice(data);
+    // Copy Data
+    if !data.is_empty() {
+        frame[tcp_offset + size_of::<TcpHeader>()..total_len].copy_from_slice(data);
+    }
 
-    // Note: TCP checksum requires a pseudo-header. Most UEFI SNP drivers can offload this,
-    // but for "pure" software, you'd calculate it here.
+    // --- TCP Checksum (Pseudo-header + TCP) ---
+    // This is a simplified version; normally you'd sum src_ip, dst_ip, proto, and tcp_len.
+    tcp.checksum = calculate_tcp_checksum(state.ip_addr, dst_ip, &frame[tcp_offset..total_len]).to_be();
 
     let _ = snp_tx(&frame[..total_len]);
+}
+
+fn calculate_tcp_checksum(src: [u8; 4], dst: [u8; 4], tcp_segment: &[u8]) -> u16 {
+    let mut sum: u32 = 0;
+    // Pseudo-header
+    sum += u16::from_be_bytes([src[0], src[1]]) as u32;
+    sum += u16::from_be_bytes([src[2], src[3]]) as u32;
+    sum += u16::from_be_bytes([dst[0], dst[1]]) as u32;
+    sum += u16::from_be_bytes([dst[2], dst[3]]) as u32;
+    sum += IP_PROTO_TCP as u32;
+    sum += tcp_segment.len() as u32;
+
+    // Add actual TCP segment
+    let mut chunks = tcp_segment.chunks_exact(2);
+    while let Some(chunk) = chunks.next() {
+        sum += u16::from_be_bytes([chunk[0], chunk[1]]) as u32;
+    }
+    if let Some(&rem) = chunks.remainder().first() {
+        sum += u16::from_be_bytes([rem, 0]) as u32;
+    }
+
+    while sum >> 16 != 0 { sum = (sum & 0xFFFF) + (sum >> 16); }
+    !(sum as u16)
 }
 
 fn send_icmp_reply(dst_ip: [u8; 4], dst_mac: [u8; 6], ident: u16, seq: u16, payload: &[u8]) {
@@ -680,6 +733,16 @@ pub fn stats() -> NetStats {
             state.stats
         } else {
             NetStats::default()
+        }
+    }
+}
+
+pub fn get_state() -> NetState {
+    unsafe {
+        if let Some(mut state) = NET_STATE.assume_init_mut().as_mut() {
+            state.clone()
+        } else {
+            NetState::default()
         }
     }
 }

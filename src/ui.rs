@@ -17,10 +17,9 @@ mod graphics;
 pub mod pixel_graphics;
 
 
-pub use graphics::{Graphics, Rect};
 use crate::{handle_vm_command, hpvm_warn, message, terminal};
 use crate::pm::PackageManager;
-use crate::ui::pixel_graphics::{PixelGraphics, TreeViewNode};
+use pixel_graphics::{PixelGraphics, TreeViewNode};
 
 
 
@@ -482,14 +481,40 @@ impl DashboardUI {
 
                 }
                 DashboardTab::Network => {
-                    pg.draw_text(20, 100, "Network Status", 0x00FF00);
+
+                    let x = 20;
+                    let mut y = 100;
+                    pg.draw_text(x, y, "Network Status", 0x00FF00);
                     let net_stats = crate::devices::net_stack::stats();
-                    pg.draw_text(20, 130, &alloc::format!("Backend: {}", crate::devices::net_stack::backend_name()), 0xFFFFFF);
-                    pg.draw_text(20, 160, "Statistics:", 0xAAAAAA);
-                    pg.draw_text(40, 180, &alloc::format!("RX Packets: {}", net_stats.rx_pkts), 0xCCCCCC);
-                    pg.draw_text(40, 200, &alloc::format!("TX Packets: {}", net_stats.tx_pkts), 0xCCCCCC);
-                    pg.draw_text(40, 220, &alloc::format!("RX Bytes:   {}", net_stats.rx_bytes), 0xCCCCCC);
-                    pg.draw_text(40, 240, &alloc::format!("TX Bytes:   {}", net_stats.tx_bytes), 0xCCCCCC);
+                    y += 30;
+                    pg.draw_text(x, y, &alloc::format!("Backend: {}", crate::devices::net_stack::backend_name()), 0xFFFFFF);
+                    y += 30;
+                    pg.draw_text(x, y, "Statistics:", 0xAAAAAA);
+
+                    let x = 40;
+                    let mut y = 180;
+                    pg.draw_text(x, y, &alloc::format!("RX Packets: {}", net_stats.rx_pkts), 0xCCCCCC);
+                    y += 20;
+                    pg.draw_text(x, y, &alloc::format!("TX Packets: {}", net_stats.tx_pkts), 0xCCCCCC);
+                    y += 20;
+                    pg.draw_text(x, y, &alloc::format!("RX Bytes:   {}", net_stats.rx_bytes), 0xCCCCCC);
+                    y += 20;
+                    pg.draw_text(x, y, &alloc::format!("TX Bytes:   {}", net_stats.tx_bytes), 0xCCCCCC);
+
+                    y += 100;
+                    let state = crate::devices::net_stack::get_state();
+                    pg.draw_text(x, y, &alloc::format!("IP: {}.{}.{}.{}", state.ip_addr[0], state.ip_addr[1], state.ip_addr[2], state.ip_addr[3]), 0xCCCCCC);
+                    y += 20;
+                    pg.draw_text(x, y, &alloc::format!("GW: {}.{}.{}.{}", state.gateway[0], state.gateway[1], state.gateway[2], state.gateway[3]), 0xCCCCCC);
+                    y += 20;
+                    pg.draw_text(x, y, &alloc::format!("MASK: {}.{}.{}.{}", state.subnet_mask[0], state.subnet_mask[1], state.subnet_mask[2], state.subnet_mask[3]), 0xCCCCCC);
+                    y += 20;
+                    pg.draw_text(x, y, &alloc::format!("MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", state.mac_addr[0], state.mac_addr[1], state.mac_addr[2], state.mac_addr[3], state.mac_addr[4], state.mac_addr[5]), 0xCCCCCC);
+                    y += 40;
+
+
+
+
                 }
                 DashboardTab::Console => {
                     pg.draw_text(20, 100, "System Log", 0x00FF00);
@@ -912,9 +937,9 @@ impl DashboardUI {
             pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
 
             //pg.apply_scanlines();
-            pg.apply_dither();
+            //pg.apply_dither();
             //pg.apply_glitch();
-            //pg.apply_edge_aberration(5.0);
+            //pg.apply_edge_aberration(0.5);
 
 
             pg.flip();

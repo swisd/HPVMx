@@ -10,7 +10,7 @@ use uefi::proto::media::file::File;
 use crate::{hpvm_info, message};
 use crate::types::{VersionString, BYTEARRAY};
 
-static VERSION: &str = "0.1.0";
+static VERSION: &str = "0.3.2";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UUID(BYTEARRAY);
 

@@ -8,7 +8,7 @@ $VHD_PATH = "C:\RS\HPVMx\boot.vhd"
 $MOUNT_LETTER = "X"
 $EFI_PATH = "target\x86_64-unknown-uefi\release\HPVMx.efi"
 
-# the vhd must have the id X: and be at least 256 MB
+# the vhd must have the id X:\ and be at least 256 MB
 Mount-DiskImage -ImagePath $VHD_PATH
 
 # 2. Copy the binary

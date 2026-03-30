@@ -233,7 +233,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
         ,
         "ping" => {
             if parts.len() < 2 { message!("\n", "Usage: ping [ip]"); } else {
-                let _ = devices::net::ping(parts[1], 1, 1000);
+                let _ = devices::net::ping(parts[1], 4, 250);
             }
         }
         ,
@@ -720,6 +720,7 @@ fn show_dashboard_ui(package_manager: &PackageManager) {
             let net_stats = crate::devices::net_stack::stats();
             let mut core_usage = Vec::new();
             for i in 0..8 { core_usage.push(25 + i); }
+            devices::net_stack::poll_tick();
 
             dashboard.set_resources(ui::SystemResources {
                 total_memory_mb: stats.total_memory_mb,

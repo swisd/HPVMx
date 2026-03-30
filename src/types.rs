@@ -5,6 +5,7 @@
 // Types
 
 use alloc::boxed::Box;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::f64::math::sqrt;
@@ -54,16 +55,18 @@ pub type ARRAY64 = [u64; 4];
 pub type ARRAY128 = [u128; 2];
 pub type ARRAY256 = [u128; 4];
 pub type ARRAY512 = [u128; 8];
-// pub // type SET = HashSet<u8>;
-// pub // type SET2 = HashSet<u16>;
-// pub // type SET4 = HashSet<u32>;
-// pub // type SET8 = HashSet<u64>;
-// pub // type SET16 = HashSet<u128>;
-// pub // type SET32 = HashSet<u32>;
-// pub // type SET64 = HashSet<u64>;
-// pub // type SET128 = HashSet<u128>;
-// pub // type SET256 = HashSet<u128>;
-// pub // type SET512 = HashSet<u128>;
+// pub type SET = HashSet<u8>;
+// pub type SET2 = HashSet<u16>;
+// pub type SET4 = HashSet<u32>;
+// pub type SET8 = HashSet<u64>;
+// pub type SET16 = HashSet<u128>;
+// pub type SET32 = HashSet<u32>;
+// pub type SET64 = HashSet<u64>;
+// pub type SET128 = HashSet<u128>;
+// pub type SET256 = HashSet<u128>;
+// pub type SET512 = HashSet<u128>;
+pub type TREEMAP<K, V> = BTreeMap<K, V>;
+pub type TREESET<T> = BTreeSet<T>;
 pub type TUPLE = (u8, u16, u32, u64, u128);
 pub type TUPLE2 = (u16, u32, u64, u128);
 pub type TUPLE4 = (u32, u64, u128);

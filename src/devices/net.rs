@@ -9,7 +9,9 @@ use crate::hpvm_log;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
+use uefi::boot;
 use crate::{hpvm_error, hpvm_warn};
+use crate::devices::net_stack::{EthHeader, ETHERTYPE_IPV4};
 use super::net_hw;
 use super::net_stack;
 
@@ -38,6 +40,65 @@ struct DhcpPacket {
     options: [u8; 312],
 }
 
+#[repr(C, packed)]
+struct DhcpReply {
+    _unused: [u8; 16],   // op, htype, hlen, hops, xid, secs, flags, ciaddr
+    yiaddr: [u8; 4],     // "Your" (client) IP address
+    _unused2: [u8; 216], // siaddr, giaddr, chaddr, sname, file
+    magic: u32,          // Magic Cookie (0x63538263)
+    options: [u8; 312],
+}
+
+fn parse_dhcp_offer(data: &[u8]) -> Option<([u8; 4], [u8; 4], [u8; 4])> {
+    if data.len() < size_of::<DhcpReply>() { return None; }
+
+    let reply = unsafe { &*(data.as_ptr() as *const DhcpReply) };
+
+    // Verify Magic Cookie (0x63538263 in big-endian)
+    if u32::from_be(reply.magic) != 0x63538263 { return None; }
+
+    let mut offered_ip = reply.yiaddr;
+    let mut subnet_mask = [0u8; 4];
+    let mut router = [0u8; 4];
+    let mut is_offer_or_ack = false;
+
+    let mut cursor = 0;
+    while cursor < reply.options.len() {
+        let opt_type = reply.options[cursor];
+        if opt_type == 255 { break; } // End of options
+        if opt_type == 0 { // Padding
+            cursor += 1;
+            continue;
+        }
+
+        let opt_len = reply.options[cursor + 1] as usize;
+        let opt_value = &reply.options[cursor + 2..cursor + 2 + opt_len];
+
+        match opt_type {
+            53 => { // DHCP Message Type
+                // Value 2 = Offer, Value 5 = Ack
+                if opt_value[0] == 2 || opt_value[0] == 5 {
+                    is_offer_or_ack = true;
+                }
+            }
+            1 => { // Subnet Mask
+                if opt_len == 4 { subnet_mask.copy_from_slice(opt_value); }
+            }
+            3 => { // Router (Gateway)
+                if opt_len >= 4 { router.copy_from_slice(&opt_value[0..4]); }
+            }
+            _ => {}
+        }
+        cursor += 2 + opt_len;
+    }
+
+    if is_offer_or_ack {
+        Some((offered_ip, router, subnet_mask))
+    } else {
+        None
+    }
+}
+
 pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
     let mac = crate::devices::net_hw::get_mac();
     let mut packet = DhcpPacket {
@@ -60,10 +121,113 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
         core::slice::from_raw_parts(&packet as *const _ as *const u8, size_of::<DhcpPacket>())
     });
 
+    let mut timeout = 1000;
+    let mut cfg: ([u8; 4], [u8; 4], [u8; 4]) = ([0; 4], [0; 4], [0; 4]);
+
+    while timeout > 0 {
+        // 2. Poll the hardware
+        if let Some(config) = poll_for_dhcp_response() {
+            cfg = config;
+            hpvm_info!("dhcp", "cfg: {:?}", cfg);
+            break;
+        }
+
+        timeout -= 1;
+        boot::stall(core::time::Duration::from_micros(32_000));
+        // Optional: arch::pause() or similar to be nice to the CPU
+    }
+
+    send_dhcp_request(cfg.0, cfg.1);
+
+
+    let mut timeout = 1000;
+    while timeout > 0 {
+        // 2. Poll the hardware
+        if let Some(response) = poll_for_dhcp_response() {
+            hpvm_info!("dhcp", "response: {:?}", response);
+            return Some(response)
+        }
+
+        timeout -= 1;
+        boot::stall(core::time::Duration::from_micros(32_000));
+        // Optional: arch::pause() or similar to be nice to the CPU
+    }
+
     // Loop and Poll until a DHCP Offer/Ack arrives
     // This part requires your poll_tick to look for UDP port 68
     // Returning dummy discovered values for the example:
     Some(([192, 168, 1, 50], [192, 168, 1, 1], [255, 255, 255, 0]))
+}
+
+pub fn send_dhcp_request(offered_ip: [u8; 4], server_ip: [u8; 4]) {
+    let mac = crate::devices::net_hw::get_mac();
+    let mut packet = DhcpPacket {
+        op: 1, htype: 1, hlen: 6, hops: 0,
+        xid: 0x12345678, // Use the same XID as the Discover
+        secs: 0, flags: 0x8000u16.to_be(),
+        ciaddr: [0; 4], yiaddr: [0; 4], siaddr: [0; 4], giaddr: [0; 4],
+        chaddr: [0; 16], sname: [0; 64], file: [0; 128],
+        magic: 0x63538263u32.to_be(),
+        options: [0; 312],
+    };
+    packet.chaddr[..6].copy_from_slice(&mac[..6]);
+
+    let mut cursor = 0;
+
+    // 1. DHCP Message Type: Request (Value 3)
+    packet.options[cursor..cursor+3].copy_from_slice(&[53, 1, 3]);
+    cursor += 3;
+
+    // 2. Requested IP Address (Option 50)
+    packet.options[cursor] = 50;
+    packet.options[cursor + 1] = 4;
+    packet.options[cursor + 2..cursor + 6].copy_from_slice(&offered_ip);
+    cursor += 6;
+
+    // 3. Server Identifier (Option 54) - The IP of the DHCP Server
+    packet.options[cursor] = 54;
+    packet.options[cursor + 1] = 4;
+    packet.options[cursor + 2..cursor + 6].copy_from_slice(&server_ip);
+    cursor += 6;
+
+    // 4. End Option
+    packet.options[cursor] = 255;
+
+    // Broadcast the request
+    net_stack::send_raw_udp(
+        [0, 0, 0, 0],
+        [255, 255, 255, 255],
+        [0xFF; 6],
+        68, 67,
+        unsafe {
+            core::slice::from_raw_parts(&packet as *const _ as *const u8, size_of::<DhcpPacket>())
+        }
+    );
+}
+
+fn poll_for_dhcp_response() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
+    let mut buf = [0u8; 1514];
+
+    // Drain the RX buffer specifically looking for DHCP
+    if let Ok(sz) = crate::devices::net_hw::rx(&mut buf) {
+        let frame = &buf[..sz];
+        if frame.len() < size_of::<EthHeader>() + 20 + 8 { return None; } // Eth + IP + UDP min
+
+        let eth = unsafe { &*(frame.as_ptr() as *const EthHeader) };
+        if u16::from_be(eth.ethertype) != ETHERTYPE_IPV4 { return None; }
+
+        let ip_payload = &frame[size_of::<EthHeader>()..];
+        // Basic check for UDP (Protocol 17) and Port 68
+        if ip_payload[9] == 17 {
+            let udp_payload = &ip_payload[20..]; // Assuming no IP options
+            let dst_port = u16::from_be_bytes([udp_payload[2], udp_payload[3]]);
+
+            if dst_port == 68 {
+                return parse_dhcp_offer(&udp_payload[8..]);
+            }
+        }
+    }
+    None
 }
 
 /// Helper to parse "1.2.3.4" into [u8; 4]
