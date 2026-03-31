@@ -699,7 +699,7 @@ impl DashboardUI {
                     }
                 }
                 DashboardTab::Test => {
-                    pg.draw_text(20, 100, "UI Components Test Bed (Qt6 Style)", 0x00FF00);
+                    pg.draw_text(20, 100, &alloc::format!("UI Components Test Bed (Qt6 Style)  res: {}x{}", width, height), 0x00FF00);
                     
                     // Column 1
                     let mut y = 130;
@@ -966,7 +966,17 @@ impl DashboardUI {
                         children: &categories,
                         expanded: true,
                     };
-                    pg.draw_tree_view(20, 150, 200, 300, &root);
+                    pg.draw_tree_view(60, 160, 285, 450, &root);
+                    pg.draw_table_view(360, 160, 200, 450,  &["property", "value"], &[&["none", "none"]]);
+                    pg.draw_table_view(660, 160,  150, 400, &["property", "value"], &[&["none", "none"]]);
+                    pg.draw_table_view(820, 160,  400, 500, &["col"], &[&["row"]]);
+                    pg.draw_button(660, 580, 120,30,  "Install", false);
+                    pg.draw_button(60, 640, 120, 30,  "Uninstall", false);
+                    pg.draw_button(220, 640, 120,30,  "Update", false);
+                    pg.draw_button(380, 640, 120, 30,  "Disable", false);
+                    pg.draw_button(660, 640,  120, 30,  "____", false);
+                    pg.draw_rect_outline(820, 680, 300, 25, 0xCCCCC0);
+                    pg.draw_button(1140, 680, 100, 25, "Search", false);
                 }
                 _ => {
                     pg.draw_text(5, page_y - 15, "this page is unavailable", 0xFFFFFF)

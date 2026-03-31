@@ -1,0 +1,101 @@
+<PixelDesigner>
+    <Template>
+        <Margin top="100" bottom="75" left="20" right="20" />
+        <Grid size="20" snap="true" />
+        <Layout>
+            <Zone name="Header" type="header" x="0" y="0" w="1280" h="100" color="0xAA2222" />
+            <Zone name="Footer" type="footer" x="0" y="725" w="1280" h="75" color="0xAA2222" />
+            <Zone name="Margin-Left" type="margin" x="0" y="100" w="20" h="625" color="0xAA2222" />
+            <Zone name="Margin-Right" type="margin" x="1260" y="100" w="20" h="625" color="0xAA2222" />
+<!--            <Zone name="Sidebar" type="sidebar" x="0" y="80" w="200" h="920" color="0x111111" />-->
+        </Layout>
+    </Template>
+    <Category name="Shapes">
+        <Tool category="Shapes" name="Pixel" func="draw_pixel">
+            <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
+        </Tool>
+        <Tool category="Shapes" name="Line" func="draw_line">
+            <Arg name="x2" type="usize" default="50"/>
+            <Arg name="y2" type="usize" default="50"/>
+            <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
+        </Tool>
+        <Tool category="Shapes" name="Rectangle" func="fill_rect">
+            <Arg name="width" type="usize" default="100"/>
+            <Arg name="height" type="usize" default="50"/>
+            <Arg name="color" type="u32" hex="true" default="0x444444"/>
+        </Tool>
+        <Tool category="Shapes" name="Outline" func="draw_rect_outline">
+            <Arg name="width" type="usize" default="100"/>
+            <Arg name="height" type="usize" default="50"/>
+            <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
+        </Tool>
+    </Category>
+
+    <Category name="Widgets">
+        <Tool category="Widgets" name="Button" func="draw_button">
+            <Arg name="width" type="usize" default="120"/>
+            <Arg name="height" type="usize" default="40"/>
+            <Arg name="text" type="string" default="Click Me"/>
+            <Arg name="clicked" type="bool" default="false"/>
+        </Tool>
+        <Tool category="Widgets" name="Checkbox" func="draw_checkbox">
+            <Arg name="checked" type="bool" default="false"/>
+            <Arg name="focused" type="bool" default="false"/>
+            <Arg name="is_clicked" type="bool" default="false"/>
+            <Arg name="text" type="string" default="Option"/>
+        </Tool>
+        <Tool category="Widgets" name="Slider" func="draw_slider">
+            <Arg name="width" type="usize" default="150"/>
+            <Arg name="value" type="usize" default="50"/>
+            <Arg name="max" type="usize" default="100"/>
+            <Arg name="is_vertical" type="bool" default="false"/>
+        </Tool>
+        <Tool category="Widgets" name="Progress Bar" func="draw_progress_bar">
+            <Arg name="width" type="usize" default="200"/>
+            <Arg name="height" type="usize" default="25"/>
+            <Arg name="value" type="usize" default="30"/>
+            <Arg name="max" type="usize" default="100"/>
+            <Arg name="color" type="u32" hex="true" default="0x00FF00"/>
+        </Tool>
+    </Category>
+
+    <Category name="Charts">
+
+        <Tool category="Charts" name="Line Graph" func="draw_line_graph">
+            <Arg name="width" type="usize" default="300"/>
+            <Arg name="height" type="usize" default="150"/>
+            <Arg name="max_val" type="u64" default="100"/>
+            <Arg name="color" type="u32" hex="true" default="0x00FFFF"/>
+            <Arg name="len" type="usize" default="10"/>
+        </Tool>
+        <Tool category="Charts" name="LCD Number" func="draw_lcd_number">
+            <Arg name="text" type="string" default="0000"/>
+        </Tool>
+
+    </Category>
+    <Category name="Views">
+
+        <Tool category="Views" name="Table View" func="draw_table_view">
+            <Arg name="width" type="usize" default="400"/>
+            <Arg name="height" type="usize" default="200"/>
+            <Arg name="title" type="string" default="System Log"/>
+        </Tool>
+    </Category>
+
+    <Category name="Misc">
+
+        <Tool category="Misc" name="Header" func="HEADER">
+            <Arg name="width" type="usize" default="1280" />
+            <Arg name="height" type="usize" default="100"/>
+        </Tool>
+        <Tool category="Misc" name="Footer" func="FOOTER">
+            <Arg name="width" type="usize" default="1280" />
+            <Arg name="height" type="usize" default="75"/>
+        </Tool>
+        <Tool category="Misc" name="Window" func="WINDOW">
+            <Arg name="width" type="usize" default="1280" />
+            <Arg name="height" type="usize" default="800"/>
+        </Tool>
+    </Category>
+
+</PixelDesigner>

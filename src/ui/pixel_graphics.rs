@@ -394,6 +394,14 @@ impl PixelGraphics {
         (self.width, self.height)
     }
 
+    pub fn draw_button(&mut self, x: usize, y: usize, width: usize, height: usize, text: &str, is_focused: bool) {
+        let color = if is_focused { 0x00AA00 } else { 0x444444 };
+        self.fill_rect(x, y, width, height, color);
+        let xpos = (x + (height/2usize));
+        let ypos = y + 4;
+        self.draw_text(xpos, ypos, text, 0xFFFFFF);
+    }
+
     pub fn u64_sym_le(&self, value: u64) -> [u8; 16] {
         let mut symbol: [u8; 16] = [
             0x00, 0x47, 0x44, 0x46, 0x44, 0x77, 0x00, 0x00, // Top half (lines 0-7) - Remains the same
