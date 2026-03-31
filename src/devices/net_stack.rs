@@ -114,7 +114,7 @@ pub struct NetStats {
 
 
 
-// --- State Management ---
+// --- State Management ---7
 
 #[derive(Copy, Clone, Debug, Default)]
 struct ArpEntry {
@@ -135,7 +135,7 @@ pub struct NetState {
 }
 
 static mut NET_STATE: MaybeUninit<Option<NetState>> = MaybeUninit::uninit();
-static STACK_INIT: AtomicBool = AtomicBool::new(false);
+pub static STACK_INIT: AtomicBool = AtomicBool::new(false);
 
 // --- Helpers ---
 

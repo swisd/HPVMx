@@ -79,7 +79,7 @@ pub enum UserFilePolicy {
 }
 
 
-#[derive(Clone, Deserialize, Serialize, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug, PartialOrd, PartialEq, Ord, Eq)]
 pub enum PackageType {
     Library,
     Executable,
@@ -159,6 +159,8 @@ pub struct PackageChange {
     pub size: Option<u64>,
 }
 
+type PackageRegistry = BTreeMap<String, Package>;
+type SortablePackageRegistry = BTreeMap<String, BTreeMap<String, Package>>;
 
 impl PackageManager {
     pub fn new() -> Self {
@@ -205,6 +207,7 @@ impl PackageManager {
     // Adds a package to the internal registry
     pub fn install(&mut self, pkg: Package) {
         self.registry.insert(pkg.name.clone(), pkg);
+        // also need to download a package from the registry and install it.
     }
 
     // Checks if all dependencies for a given package are present
@@ -230,7 +233,6 @@ impl PackageManager {
 
     pub fn load_registry(&mut self) {
         FileSystem::cd(&*self.package_path);
-        FileSystem::get_cwd();
         hpvm_info!("pm", "loading packages from {}registry.prg", self.package_path);
         let reg = FileSystem::read_file_to_string("registry.prg").expect("could not open registry");
         let pkgs = reg.replace("\r", "");
@@ -243,6 +245,7 @@ impl PackageManager {
             let clean_json = json.trim_matches(char::from(0)).trim();
             self.load_from_json_no_alloc(clean_json);
         }
+        FileSystem::cd("/")
     }
 
     fn load_from_json(&mut self, json_data: &str) -> Result<(), &'static str> {
@@ -338,6 +341,25 @@ impl PackageManager {
                     pname, package.package_type, package.version, package.author);
             }
         }
+    }
+
+    pub fn get_packages(&self) -> BTreeMap<PackageType, Vec<Package>> {
+        let mut grouped_packages: BTreeMap<PackageType, Vec<Package>> = BTreeMap::new();
+        if self.registry.is_empty() {
+        } else {
+            // 1. Create the grouped map
+
+
+            // 2. Populate it from your registry
+            for (pname, package) in self.registry.iter() {
+                grouped_packages
+                    .entry(package.package_type.clone())
+                    .or_insert_with(Vec::new)
+                    .push(package.clone());
+            }
+
+        }
+        grouped_packages
     }
 
 }

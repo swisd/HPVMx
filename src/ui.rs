@@ -1,6 +1,6 @@
 #![allow(dead_code, deprecated)]
 
-
+use alloc::collections::BTreeMap;
 use crate::hpvm_log;
 use alloc::fmt::format;
 use alloc::format;
@@ -18,7 +18,7 @@ pub mod pixel_graphics;
 
 
 use crate::{handle_vm_command, hpvm_warn, message, terminal};
-use crate::pm::PackageManager;
+use crate::pm::{Package, PackageManager, PackageType};
 use pixel_graphics::{PixelGraphics, TreeViewNode};
 
 
@@ -86,6 +86,7 @@ pub enum DashboardTab {
     CreateVM, // New state for VM creation UI
     Editor,
     Settings,
+    Packages,
 }
 
 #[derive(PartialEq)]
@@ -267,7 +268,7 @@ impl DashboardUI {
 
             // Draw navigation
             pg.fill_rect(0, 48, width, 32, 0x444444); // Dark Gray
-            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings";
+            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages";
             pg.draw_text(10, 56, nav_text, 0xFFFFFF);
             let page_y = 100;
 
@@ -511,6 +512,8 @@ impl DashboardUI {
                     y += 20;
                     pg.draw_text(x, y, &alloc::format!("MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", state.mac_addr[0], state.mac_addr[1], state.mac_addr[2], state.mac_addr[3], state.mac_addr[4], state.mac_addr[5]), 0xCCCCCC);
                     y += 40;
+                    let is_init = crate::devices::net_stack::is_initialized();
+                    pg.draw_text(x, y, &alloc::format!("Initialized: {is_init}", ), 0xFFFFFF)
 
 
 
@@ -571,7 +574,7 @@ impl DashboardUI {
 
                     pg.draw_rect_outline(margin, height-95, width - margin * 8, 35, 0x999999);
                     if self.term_selected {
-                        pg.draw_rect_outline_adv(margin - 1, height-96, (width - margin * 8)+2, 37, 0x888844, 3, 0xFFFFFF);
+                        pg.draw_rect_outline_adv(margin - 1, height-96, (width - margin * 8)+2, 37, 0x888844, 3, 0x0F0F0F0F);
                     }
                     pg.draw_text(margin + 5, height - 60, "press enter to send, end to enter type mode, and esc to exit", 0x888888);
                     pg.draw_text(margin + 5, height - 85, alloc::format!("HPVMx> {}", self.term_buf).as_str(), 0xDDDDDD);
@@ -616,7 +619,7 @@ impl DashboardUI {
 
                     // Header row with better spacing and column guides
                     pg.fill_rect(list_x + 1, list_y + 1, list_w - 2, line_h, 0x333333);
-                    pg.draw_text(list_x + 8, list_y + 4, "TYPE  NAME                                      SIZE (BYTES)  ATTR", 0xCCCCCC);
+                    pg.draw_text(list_x + 8, list_y + 4, "TYPE  NAME                                 SIZE (BYTES)  ATTR", 0xCCCCCC);
                     // Optional column separators
                     pg.draw_line(list_x + 48, list_y + 1, list_x + 48, list_y + list_h - 1, 0x444444);
                     pg.draw_line(list_x + 340, list_y + 1, list_x + 340, list_y + list_h - 1, 0x444444);
@@ -629,9 +632,9 @@ impl DashboardUI {
                         let color = if i == self.selected_file_idx { 0xFFFF00 } else { 0xFFFFFF };
                         idx_types.push(if entry.is_dir { "D" } else { "F" }  );
                         let icon = if entry.is_dir { "Ñ D" } else {
-                            let dec_syn = ["json", "xml"];
+                            let dec_syn = ["json", "xml", "toml", "yaml", "yml"];
                             let sys_syn = ["sys", "efi"];
-                            let prog_syn = ["logical", "py", "dmx", "rts"];
+                            let prog_syn = ["micro", "ufe", "dmx", "bin"];
 
 
                             #[allow(irrefutable_let_patterns)]
@@ -661,9 +664,9 @@ impl DashboardUI {
 
                         let background = if i == self.selected_file_idx { 0x333333 } else { 0x222222 };
                         pg.draw_text_bg(list_x + 8, y, icon, 0xCCCCCC, background);
-                        pg.draw_text_bg(list_x + 56, y, &alloc::format!("{:<28}", entry.name), color, background);
+                        pg.draw_text_bg(list_x + 56, y, &alloc::format!("{:<32}", entry.name), color, background);
                         pg.draw_text_bg(list_x + 348, y, &alloc::format!("{:>12}", size), 0xCCCCCC, background);
-                        pg.draw_text_bg(list_x + 480, y, if entry.is_dir { "DIR" } else { "FILE" }, 0x6666FF, background);
+                        pg.draw_text_bg(list_x + 470, y, if entry.is_dir { "DIR" } else { "FILE" }, 0x6666FF, background);
                         y += line_h;
                     }
 
@@ -923,8 +926,50 @@ impl DashboardUI {
 
 
                 }
+                DashboardTab::Packages => {
+                    pg.draw_text(20, 100, "Packages", 0x00FF00);
+
+                    let grouped_packages: BTreeMap<PackageType, Vec<Package>> = self.package_manager.get_packages();
+
+                    let mut category_children: BTreeMap<PackageType, Vec<TreeViewNode>> = BTreeMap::new();
+
+                    for (p_type, pkgs) in &grouped_packages {
+                        let nodes: Vec<TreeViewNode> = pkgs.iter().map(|p| {
+                            TreeViewNode {
+                                label: &p.name, // Note: p.name must live as long as the tree
+                                children: &[],
+                                expanded: true,
+                            }
+                        }).collect();
+                        category_children.insert(p_type.clone(), nodes);
+                    }
+
+                    // Now create the category-level nodes
+                    let categories: Vec<TreeViewNode> = category_children.iter().map(|(p_type, children)| {
+                        TreeViewNode {
+                            label: match p_type { // Map enum to display string
+                                PackageType::Library => "Libraries",
+                                PackageType::Executable => "Executables",
+                                PackageType::Driver => "Drivers",
+                                PackageType::Extension => "Extensions",
+                                PackageType::PShader => "Shaders",
+                                PackageType::ResourcePack => "ResourcePacks",
+                                _ => "Other",
+                            },
+                            children: children, // Reference the Vec stored in category_children
+                            expanded: true,
+                        }
+                    }).collect();
+
+                    let root = TreeViewNode {
+                        label: "Packages",
+                        children: &categories,
+                        expanded: true,
+                    };
+                    pg.draw_tree_view(20, 150, 200, 300, &root);
+                }
                 _ => {
-                    pg.draw_text(5, 5, "this page is unavailable", 0xFFFFFF)
+                    pg.draw_text(5, page_y - 15, "this page is unavailable", 0xFFFFFF)
                 }
             }
 
@@ -1384,6 +1429,7 @@ impl DashboardUI {
                         'c' => self.selected_tab = DashboardTab::Console,
                         't' => self.selected_tab = DashboardTab::Test,
                         'z' => self.selected_tab = DashboardTab::Settings,
+                        'p' => self.selected_tab = DashboardTab::Packages,
                         ' ' => {
                             if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
                                 self.selected_tab = DashboardTab::CreateVM;
@@ -1459,7 +1505,8 @@ impl DashboardUI {
                                 DashboardTab::Test => DashboardTab::Settings,
                                 DashboardTab::CreateVM => DashboardTab::VirtualMachines,
                                 DashboardTab::Editor => DashboardTab::Storage,
-                                DashboardTab::Settings => DashboardTab::Overview,
+                                DashboardTab::Settings => DashboardTab::Packages,
+                                DashboardTab::Packages => DashboardTab::Overview
                             };
                         }
                         '/' => {

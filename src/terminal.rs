@@ -1,6 +1,7 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
+use libm::expm1;
 use uefi::mem::memory_map::MemoryMap;
 use uefi::{boot, runtime, system};
 use uefi_raw::Status;
@@ -310,6 +311,14 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
 
         "pm" => {
             crate::pm::command(parts, package_manager);
+        }
+
+        "micro-c" => {
+            if parts.len() >= 2 {
+                crate::micro_c::command(parts);
+            } else {
+                message!("\n", "Usage micro-c [args]")
+            }
         }
 
 

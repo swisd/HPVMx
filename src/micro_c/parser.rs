@@ -2,6 +2,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 use alloc::string::{String, ToString};
 use alloc::boxed::Box;
+use crate::message;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
@@ -68,10 +69,18 @@ impl Parser {
     }
 
     /// Helper to parse a whole file containing multiple top-level S-expressions
-    pub fn parse_all(&mut self) -> Result<Vec<Node>, String> {
+    pub fn parse_all(&mut self, print: bool) -> Result<Vec<Node>, String> {
         let mut nodes = Vec::new();
         while self.pos < self.tokens.len() {
-            nodes.push(self.parse()?);
+            let node = self.parse()?;
+            // if print {
+            //     message!("\n", "{:?}", node.clone())
+            // }
+            nodes.push(node);
+
+        }
+        if print {
+            message!("\n", "{:?}", nodes.clone())
         }
         Ok(nodes)
     }

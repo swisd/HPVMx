@@ -121,7 +121,7 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
         core::slice::from_raw_parts(&packet as *const _ as *const u8, size_of::<DhcpPacket>())
     });
 
-    let mut timeout = 1000;
+    let mut timeout = 32;
     let mut cfg: ([u8; 4], [u8; 4], [u8; 4]) = ([0; 4], [0; 4], [0; 4]);
 
     while timeout > 0 {
@@ -140,7 +140,7 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
     send_dhcp_request(cfg.0, cfg.1);
 
 
-    let mut timeout = 1000;
+    let mut timeout = 32;
     while timeout > 0 {
         // 2. Poll the hardware
         if let Some(response) = poll_for_dhcp_response() {
@@ -153,9 +153,7 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
         // Optional: arch::pause() or similar to be nice to the CPU
     }
 
-    // Loop and Poll until a DHCP Offer/Ack arrives
-    // This part requires your poll_tick to look for UDP port 68
-    // Returning dummy discovered values for the example:
+    hpvm_info!("NET", "no dhcp response, using fallback IP. configure static ip in network tab");
     Some(([192, 168, 1, 50], [192, 168, 1, 1], [255, 255, 255, 0]))
 }
 

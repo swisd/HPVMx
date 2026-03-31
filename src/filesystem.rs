@@ -438,11 +438,11 @@ impl FileSystem {
         }
     }
 
-    pub fn get_cwd() -> Result<(), ()> {
+    pub fn get_cwd() -> Result<(String), ()> {
         let state = Self::get_state();
         let current_path = &state.cwd;
         message!("\n", "CWD: {}", current_path);
-        Ok(())
+        Ok(current_path.clone())
     }
 
     /// Read a file and return its contents as a Vec<u8>

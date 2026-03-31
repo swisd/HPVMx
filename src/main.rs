@@ -198,6 +198,9 @@ fn main() -> Status {
 
     init_mouse_deep_scan();
 
+    devices::net_hw::init();
+    devices::net::status();
+
     hpvm_info!("HPVMx", "init sequence complete.");
     let mut PACKAGE_MANAGER: PackageManager = PackageManager::new();
     PACKAGE_MANAGER.load_registry();

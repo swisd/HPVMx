@@ -1,10 +1,12 @@
 mod emitter;
 mod parser;
+mod commands;
 
 use alloc::vec::Vec;
 use parser::*;
 use emitter::*;
 use crate::filesystem::FileSystem;
+pub(crate) use commands::command;
 
 pub fn load_package(path: &str) -> Vec<Node> {
     // 1. Read file from UEFI FAT32
@@ -12,7 +14,7 @@ pub fn load_package(path: &str) -> Vec<Node> {
 
     // 2. Run the parser
     let mut parser = Parser::new(&content);
-    let ast = parser.parse_all().expect("Syntax Error in Micro-C");
+    let ast = parser.parse_all(false).expect("Syntax Error in Micro-C");
 
     // 3. Handle (require "name") - Simple dependency resolution
     let mut expanded_ast = Vec::new();
