@@ -934,18 +934,25 @@ impl DashboardUI {
                     let mut category_children: BTreeMap<PackageType, Vec<TreeViewNode>> = BTreeMap::new();
 
                     for (p_type, pkgs) in &grouped_packages {
-                        let nodes: Vec<TreeViewNode> = pkgs.iter().map(|p| {
+                        let nodes: Vec<TreeViewNode> = pkgs
+                            .iter()
+                            .map(|p| {
                             TreeViewNode {
                                 label: &p.name, // Note: p.name must live as long as the tree
                                 children: &[],
                                 expanded: true,
                             }
-                        }).collect();
-                        category_children.insert(p_type.clone(), nodes);
+                        })
+                            .collect();
+
+                        category_children
+                            .insert(p_type.clone(), nodes);
                     }
 
                     // Now create the category-level nodes
-                    let categories: Vec<TreeViewNode> = category_children.iter().map(|(p_type, children)| {
+                    let categories: Vec<TreeViewNode> = category_children
+                        .iter()
+                        .map(|(p_type, children)| {
                         TreeViewNode {
                             label: match p_type { // Map enum to display string
                                 PackageType::Library => "Libraries",
@@ -959,7 +966,8 @@ impl DashboardUI {
                             children: children, // Reference the Vec stored in category_children
                             expanded: true,
                         }
-                    }).collect();
+                    })
+                        .collect();
 
                     let root = TreeViewNode {
                         label: "Packages",
