@@ -29,12 +29,14 @@ mod loader;
 mod terminal;
 mod pm;
 mod micro_c;
+mod cpucheck;
 
 extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
 use core::ptr::addr_of_mut;
+use core::time::Duration;
 use uefi::prelude::*;
 use uefi::Char16;
 use log::error;
@@ -195,8 +197,9 @@ fn main() -> Status {
 
 
 
-
-    init_mouse_deep_scan();
+    unsafe {
+        init_mouse_deep_scan();
+    }
 
     devices::net_hw::init();
     devices::net::status();
@@ -832,32 +835,39 @@ fn init_mouse() {
     // which will open it.
 }
 
-fn init_mouse_deep_scan() {
+unsafe fn init_mouse_deep_scan() {
+    unsafe {
 
 
-    // 1. Force UEFI to connect every device it sees on the PCI/USB bus
-    // This is critical because passed-through USB devices aren't always auto-started
-    if let Ok(all_handles) = boot::find_handles::<uefi::proto::device_path::DevicePath>() {
-        for handle in all_handles {
-            let _ = boot::connect_controller(handle, None, None, true);
+        // 1. Force UEFI to connect every device it sees on the PCI/USB bus
+        // This is critical because passed-through USB devices aren't always auto-started
+        if let Ok(all_handles) = boot::find_handles::<uefi::proto::device_path::DevicePath>() {
+            for handle in all_handles {
+                let _ = boot::connect_controller(handle, None, None, true);
+            }
         }
-    }
 
-    // 2. Now find ALL SimplePointer handles (expecting 2: Virtual and Physical)
-    if let Ok(handles) = boot::find_handles::<SimplePointer>() {
-        hpvm_info!("usbhid", "Found {} SimplePointer handles", handles.len());
+        // 2. Now find ALL SimplePointer handles (expecting 2: Virtual and Physical)
+        if let Ok(handles) = boot::find_handles::<SimplePointer>() {
+            hpvm_info!("usbhid", "Found {} SimplePointer handles", handles.len());
 
-        for (i, handle) in handles.iter().enumerate() {
-            if let Ok(mut mouse) = boot::open_protocol_exclusive::<SimplePointer>(*handle) {
-                // Reset is mandatory for Logitech receivers to begin reporting
-                let r = mouse.reset(false);
-                hpvm_info!("usbhid", "Handle [{}]: Reset result {:?}", i, r);
+            for (i, handle) in handles.iter().enumerate() {
+                if let Ok(mut mouse) = boot::open_protocol::<SimplePointer>(uefi::boot::OpenProtocolParams {
+                    handle: *handle,
+                    agent: uefi::boot::image_handle(),
+                    controller: None,
+                }, uefi::boot::OpenProtocolAttributes::GetProtocol) {
 
-                // Read the resolution - physical mice usually have small numbers (1, 2, 4)
-                // unlike the virtual tablet's 65536
-                #[allow(irrefutable_let_patterns)]
-                if let mode = mouse.mode() {
-                    hpvm_info!("usbhid", "Handle [{}]: Res X={}", i, mode.resolution[0]);
+                    let r = mouse.reset(false);
+                    boot::stall(Duration::from_millis(100));
+                    hpvm_info!("usbhid", "Handle [{}]: Reset result {:?}", i, r);
+
+                    // Read the resolution - physical mice usually have small numbers (1, 2, 4)
+                    // unlike the virtual tablet's 65536
+                    #[allow(irrefutable_let_patterns)]
+                    if let mode = mouse.mode() {
+                        hpvm_info!("usbhid", "Handle [{}]: Res X={}", i, mode.resolution[0]);
+                    }
                 }
             }
         }

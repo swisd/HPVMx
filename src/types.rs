@@ -9,6 +9,8 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::f64::math::sqrt;
+use core::fmt;
+use core::fmt::{Display, Formatter};
 use core::sync::atomic::Atomic;
 use crate::message;
 
@@ -1441,3 +1443,28 @@ pub type Synchronous<T> = Vec<Box<Vec<T>>>;
 
 
 pub type VersionString = String;
+
+
+
+struct Compressed<T>(pub T);
+
+impl<T: AsRef<[u8]> + Copy + PartialEq> Display for Compressed<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let data = self.0.as_ref();
+        if data.is_empty() { return Ok(()); }
+
+        let mut current_val = data[0];
+        let mut count = 0;
+
+        for &val in data {
+            if val == current_val {
+                count += 1;
+            } else {
+                write!(f, "[{} x {}] ", current_val as char, count)?;
+                current_val = val;
+                count = 1;
+            }
+        }
+        write!(f, "[{} x {}]", current_val as char, count)
+    }
+}

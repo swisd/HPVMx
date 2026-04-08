@@ -4,7 +4,7 @@ echo "Running Build Script..."
 ./build.bat
 echo "Installing..."
 
-$VHD_PATH = "C:\RS\HPVMx\boot.vhd"
+$VHD_PATH = "C:\programming\RS\HPVMx\boot.vhd"
 $MOUNT_LETTER = "X"
 $EFI_PATH = "target\x86_64-unknown-uefi\release\HPVMx.efi"
 

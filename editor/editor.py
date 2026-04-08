@@ -6,21 +6,23 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QGraphicsView,
                              QHBoxLayout, QWidget, QVBoxLayout, QLabel,
                              QTableWidget, QTableWidgetItem, QPushButton, QFileDialog, QMessageBox)
 from PyQt6.QtCore import Qt, QPointF
-from PyQt6.QtGui import QColor, QPen, QBrush, QPainter
+from PyQt6.QtGui import QColor, QPen, QBrush
 
 
 # --- 1. ELEMENT & GRID LOGIC ---
 
 class DesignerElement(QGraphicsRectItem):
     def __init__(self, tool_data, x, y, template):
-        # Default size if width/height not in args
-        w = int(tool_data['args'].get('width', 100))
-        h = int(tool_data['args'].get('height', 40))
+        # Convert ordered list back to dict for easy lookup during init
+        arg_dict = dict(tool_data['args'])
+        w = int(arg_dict.get('width', 100))
+        h = int(arg_dict.get('height', 40))
         super().__init__(0, 0, w, h)
 
         self.template = template
         self.tool_data = tool_data
-        self.properties = tool_data['args'].copy()
+        # We keep properties as a dict for the UI table, but tool_data['args'] defines the order
+        self.properties = arg_dict.copy()
 
         self.setPos(x, y)
         self.setFlags(self.GraphicsItemFlag.ItemIsMovable |
@@ -33,7 +35,6 @@ class DesignerElement(QGraphicsRectItem):
         if change == self.GraphicsItemChange.ItemPositionChange and self.template:
             gs = self.template.grid_size
             new_pos = value
-            # Snap to grid and enforce positive coordinates
             x = max(0, round(new_pos.x() / gs) * gs)
             y = max(0, round(new_pos.y() / gs) * gs)
             return QPointF(x, y)
@@ -57,17 +58,15 @@ class LayoutZone(QGraphicsRectItem):
 class PixelDesignerApp(QMainWindow):
     def __init__(self, xml_path):
         super().__init__()
-        self.setWindowTitle("UEFI Pixel Designer - Fixed Version")
+        self.setWindowTitle("UEFI Pixel Designer")
         self.resize(1400, 900)
 
-        # Load XML
         try:
             self.xml_root = ET.parse(xml_path).getroot()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not load {xml_path}: {e}")
             sys.exit(1)
 
-        # Setup Template
         self.grid_size = 20
         self.init_ui()
         self.load_zones()
@@ -84,10 +83,17 @@ class PixelDesignerApp(QMainWindow):
             parent = QTreeWidgetItem(self.toolbox, [cat.get('name')])
             for t in cat.findall('Tool'):
                 child = QTreeWidgetItem(parent, [t.get('name')])
+
+                # Store args as a list of tuples (name, default) to preserve XML order
+                ordered_args = []
+                for a in t.findall('Arg'):
+                    ordered_args.append((a.get('name'), a.get('default')))
+
                 child.setData(0, Qt.ItemDataRole.UserRole, {
                     'func': t.get('func'),
-                    'args': {a.get('name'): a.get('default') for a in t.findall('Arg')}
+                    'args': ordered_args
                 })
+
         self.toolbox.itemDoubleClicked.connect(self.add_element_from_tool)
         layout.addWidget(self.toolbox, 1)
 
@@ -95,7 +101,7 @@ class PixelDesignerApp(QMainWindow):
         self.scene = QGraphicsScene(0, 0, 1920, 1080)
         self.view = QGraphicsView(self.scene)
         self.view.setBackgroundBrush(QBrush(QColor(33, 33, 33)))
-        self.view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # CRITICAL FOR DELETE KEY
+        self.view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.scene.selectionChanged.connect(self.sync_properties)
         layout.addWidget(self.view, 4)
 
@@ -122,11 +128,13 @@ class PixelDesignerApp(QMainWindow):
         layout.addLayout(right_panel, 1)
 
     def load_zones(self):
-        # Draw Layout Zones from XML Template
+        """
+
+        """
         template = self.xml_root.find('Template')
-        if template:
+        if template is not None:
             layout = template.find('Layout')
-            if layout:
+            if layout is not None:
                 for zone in layout.findall('Zone'):
                     z = LayoutZone(zone.get('name'), int(zone.get('x')), int(zone.get('y')),
                                    int(zone.get('w')), int(zone.get('h')), zone.get('color'))
@@ -135,10 +143,18 @@ class PixelDesignerApp(QMainWindow):
     # --- ACTION HANDLERS ---
 
     def keyPressEvent(self, event):
+        """
+
+        :param event:
+        """
         if event.key() == Qt.Key.Key_Delete:
             self.delete_selected()
 
     def delete_selected(self):
+        """
+
+        :return:
+        """
         items = self.scene.selectedItems()
         if not items: return
         for item in items:
@@ -147,26 +163,41 @@ class PixelDesignerApp(QMainWindow):
         self.props_table.setRowCount(0)
 
     def add_element_from_tool(self, item):
+        """
+
+        :param item:
+        """
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if data:
             el = DesignerElement(data, 100, 100, self)
             self.scene.addItem(el)
 
     def sync_properties(self):
+        """
+
+        """
         self.props_table.blockSignals(True)
         self.props_table.setRowCount(0)
         sel = self.scene.selectedItems()
         if sel and isinstance(sel[0], DesignerElement):
             obj = sel[0]
-            props = {"x": int(obj.x()), "y": int(obj.y())}
-            props.update(obj.properties)
+            props = [("x", int(obj.x())), ("y", int(obj.y()))]
+            # Add other properties in order
+            for name, _ in obj.tool_data['args']:
+                props.append((name, obj.properties.get(name, "")))
+
             self.props_table.setRowCount(len(props))
-            for i, (k, v) in enumerate(props.items()):
+            for i, (k, v) in enumerate(props):
                 self.props_table.setItem(i, 0, QTableWidgetItem(k))
                 self.props_table.setItem(i, 1, QTableWidgetItem(str(v)))
         self.props_table.blockSignals(False)
 
     def update_element_from_table(self, item):
+        """
+
+        :param item:
+        :return:
+        """
         if item.column() != 1: return
         sel = self.scene.selectedItems()
         if not sel: return
@@ -189,75 +220,77 @@ class PixelDesignerApp(QMainWindow):
 
     # --- RUST INTEROP ---
 
-    def import_from_rust(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Import Rust UI", "", "Rust (*.rs)")
-        if not path: return
-
-        with open(path, 'r') as f:
-            content = f.read()
-
-        # Improved Regex: handles pg.func(args...); across multiple lines
-        pattern = r"pg\.(\w+)\s*\((.*?)\)\s*;"
-        matches = re.findall(pattern, content, re.DOTALL)
-
-        if not matches:
-            QMessageBox.warning(self, "Import", "No valid pg.draw calls found in file.")
-            return
-
-        count = 0
-        for func_name, args_raw in matches:
-            # Split args by comma, ignoring commas inside strings
-            args = [a.strip().strip('"') for a in re.split(r',(?=(?:[^"]*"[^"]*")*[^"]*$)', args_raw)]
-
-            tool = self.find_tool_by_func(func_name)
-            if tool and len(args) >= 2:
-                try:
-                    x, y = int(args[0]), int(args[1])
-                    el = DesignerElement(tool, x, y, self)
-                    # Map remaining args
-                    arg_keys = list(tool['args'].keys())
-                    for i, val in enumerate(args[2:]):
-                        if i < len(arg_keys):
-                            el.properties[arg_keys[i]] = val
-                    self.scene.addItem(el)
-                    count += 1
-                except:
-                    continue
-
-        QMessageBox.information(self, "Import", f"Successfully imported {count} elements.")
-
     def find_tool_by_func(self, func_name):
+        """
+
+        :param func_name:
+        :return:
+        """
         for cat in self.xml_root.findall('Category'):
             for t in cat.findall('Tool'):
                 if t.get('func') == func_name:
                     return {
                         'func': t.get('func'),
                         'name': t.get('name'),
-                        'args': {a.get('name'): a.get('default') for a in t.findall('Arg')}
+                        'args': [(a.get('name'), a.get('default')) for a in t.findall('Arg')]
                     }
         return None
 
     def export_to_rust(self):
+        """
+
+        :return:
+        """
         path, _ = QFileDialog.getSaveFileName(self, "Export Rust UI", "", "Rust (*.rs)")
         if not path: return
         with open(path, 'w') as f:
             f.write("use crate::pixel_graphics::PixelGraphics;\n\npub fn render_ui(pg: &mut PixelGraphics) {\n")
             items = [i for i in self.scene.items() if isinstance(i, DesignerElement)]
-            # Sort by Y then X
             for item in sorted(items, key=lambda i: (i.y(), i.x())):
+                # Always start with x, y as standard for the module
                 args = [str(int(item.x())), str(int(item.y()))]
-                for k, v in item.properties.items():
-                    if "0x" in str(v) or str(v).lower() in ['true', 'false']:
-                        args.append(str(v).lower())
+                # Append remaining arguments in the order specified in the tool data
+                for name, _ in item.tool_data['args']:
+                    val = item.properties.get(name)
+                    if "0x" in str(val) or str(val).lower() in ['true', 'false']:
+                        args.append(str(val).lower())
                     else:
-                        args.append(f'"{v}"' if any(c.isalpha() for c in str(v)) else str(v))
+                        args.append(f'"{val}"' if any(c.isalpha() for c in str(val)) else str(val))
                 f.write(f"    pg.{item.tool_data['func']}({', '.join(args)});\n")
             f.write("}\n")
+
+    def import_from_rust(self):
+        """
+
+        :return:
+        """
+        path, _ = QFileDialog.getOpenFileName(self, "Import Rust UI", "", "Rust (*.rs)")
+        if not path: return
+        with open(path, 'r') as f:
+            content = f.read()
+
+        pattern = r"pg\.(\w+)\s*\((.*?)\)\s*;"
+        matches = re.findall(pattern, content, re.DOTALL)
+
+        for func_name, args_raw in matches:
+            args = [a.strip().strip('"') for a in re.split(r',(?=(?:[^"]*"[^"]*")*[^"]*$)', args_raw)]
+            tool = self.find_tool_by_func(func_name)
+            if tool and len(args) >= 2:
+                try:
+                    x, y = int(args[0]), int(args[1])
+                    el = DesignerElement(tool, x, y, self)
+                    # Map imported args to the tool's ordered keys (starting from index 2)
+                    for i, val in enumerate(args[2:]):
+                        if i < len(tool['args']):
+                            key = tool['args'][i][0]
+                            el.properties[key] = val
+                    self.scene.addItem(el)
+                except:
+                    continue
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    # Ensure definitions.xml is present!
     ex = PixelDesignerApp("definitions.xml")
     ex.show()
     sys.exit(app.exec())

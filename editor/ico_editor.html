@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>UEFI Icon Designer Pro</title>
+    <style>
+        body { background: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .main-container { display: flex; gap: 20px; background: #252525; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        #canvas-container { position: relative; border: 1px solid #444; background: #000; cursor: crosshair; }
+        canvas { image-rendering: pixelated; display: block; }
+        .controls { display: flex; flex-direction: column; gap: 15px; width: 250px; }
+        .tool-group { background: #333; padding: 10px; border-radius: 4px; }
+        input[type="color"], input[type="number"], button { width: 100%; margin-top: 5px; box-sizing: border-box; }
+        textarea { width: 800px; height: 120px; margin-top: 20px; background: #111; color: #0f0; border: 1px solid #444; font-family: monospace; padding: 10px; }
+        label { font-size: 12px; color: #aaa; text-transform: uppercase; }
+        .hint { font-size: 11px; color: #777; margin-top: 5px; }
+    </style>
+</head>
+<body>
+<h2>UEFI Icon Designer Pro</h2>
+
+<div class="main-container">
+    <div id="canvas-container">
+        <canvas id="editor" width="400" height="400"></canvas>
+    </div>
+
+    <div class="controls">
+        <div class="tool-group">
+            <label>Brush Color</label>
+            <input type="color" id="colorPicker" value="#00ffcc">
+            <div class="hint">Right-click to erase</div>
+        </div>
+
+        <div class="tool-group">
+            <label>Grid Size</label>
+            <input type="number" id="gridSize" value="16" min="8" max="64">
+            <button onclick="resizeGrid()">Reset/Resize</button>
+        </div>
+
+        <div class="tool-group">
+            <label>Transform</label>
+            <button onclick="shiftPixels(0, -1)">↑ Up</button>
+            <div style="display:flex; gap:5px">
+                <button onclick="shiftPixels(-1, 0)">← L</button>
+                <button onclick="shiftPixels(1, 0)">R →</button>
+            </div>
+            <button onclick="shiftPixels(0, 1)">↓ Down</button>
+        </div>
+
+        <button style="background:#27ae60; color:white; border:none; padding:10px;" onclick="exportCode()">Export to Rust</button>
+        <button style="background:#2980b9; color:white; border:none; padding:10px;" onclick="importFromRust()">Import from Rust</button>
+    </div>
+</div>
+
+<textarea id="ioBuffer" placeholder="Paste Rust array here to import, or click Export..."></textarea>
+
+<script>
+    const canvas = document.getElementById('editor');
+    const ctx = canvas.getContext('2d');
+    const colorPicker = document.getElementById('colorPicker');
+    const sizeInput = document.getElementById('gridSize');
+    const ioBuffer = document.getElementById('ioBuffer');
+
+    let grid = []; // Flat array of hex colors
+    let isDrawing = false;
+
+    function initGrid() {
+        const size = parseInt(sizeInput.value);
+        grid = new Array(size * size).fill("#00000000"); // Start transparent
+        render();
+    }
+
+    function render() {
+        const size = parseInt(sizeInput.value);
+        const cellSize = canvas.width / size;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw Pixels
+        for(let i=0; i<grid.length; i++) {
+            const x = i % size;
+            const y = Math.floor(i / size);
+            if (grid[i] !== "#00000000") {
+                ctx.fillStyle = grid[i];
+                ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+            }
+        }
+
+        // Draw Grid Lines
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 0.5;
+        for(let i=0; i<=size; i++) {
+            ctx.beginPath(); ctx.moveTo(i*cellSize, 0); ctx.lineTo(i*cellSize, canvas.height); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, i*cellSize); ctx.lineTo(canvas.width, i*cellSize); ctx.stroke();
+        }
+    }
+
+    function handleInput(e) {
+        if(!isDrawing) return;
+        const rect = canvas.getBoundingClientRect();
+        const size = parseInt(sizeInput.value);
+        const cellSize = canvas.width / size;
+        const x = Math.floor((e.clientX - rect.left) / cellSize);
+        const y = Math.floor((e.clientY - rect.top) / cellSize);
+
+        if(x >= 0 && x < size && y >= 0 && y < size) {
+            const idx = y * size + x;
+            grid[idx] = (e.buttons === 2) ? "#00000000" : colorPicker.value;
+            render();
+        }
+    }
+
+    canvas.onmousedown = (e) => { isDrawing = true; handleInput(e); };
+    window.onmouseup = () => isDrawing = false;
+    canvas.onmousemove = handleInput;
+    canvas.oncontextmenu = (e) => e.preventDefault(); // Disable context menu for right-click erase
+
+    function shiftPixels(dx, dy) {
+        const size = parseInt(sizeInput.value);
+        let newGrid = new Array(size * size).fill("#00000000");
+        for(let i=0; i<grid.length; i++) {
+            const x = i % size;
+            const y = Math.floor(i / size);
+            const nx = x + dx;
+            const ny = y + dy;
+            if(nx >= 0 && nx < size && ny >= 0 && ny < size) {
+                newGrid[ny * size + nx] = grid[i];
+            }
+        }
+        grid = newGrid;
+        render();
+    }
+
+    function exportCode() {
+        const size = parseInt(sizeInput.value);
+        const hexArray = grid.map(c => {
+            if(c === "#00000000") return "0x00000000";
+            return "0xFF" + c.slice(1).toUpperCase(); // Adding full opacity FF
+        });
+        ioBuffer.value = `pub static ICON_DATA: [u32; ${hexArray.length}] = [\n    ${hexArray.join(", ")}\n];`;
+    }
+
+    function importFromRust() {
+        const text = ioBuffer.value;
+        // Match hex codes 0xXXXXXXXX
+        const matches = text.match(/0x[0-9A-Fa-f]{8}/g);
+        if(!matches) {
+            alert("No valid hex colors found in the buffer!");
+            return;
+        }
+
+        const newSize = Math.sqrt(matches.length);
+        if(!Number.isInteger(newSize)) {
+            alert("Array length is not a perfect square! (e.g., 256 for 16x16)");
+        }
+
+        sizeInput.value = newSize;
+        grid = matches.map(hex => {
+            if(hex === "0x00000000") return "#00000000";
+            return "#" + hex.slice(4); // Convert 0xFFRRGGBB to #RRGGBB
+        });
+        render();
+    }
+
+    function resizeGrid() {
+        if(confirm("This will clear the current canvas. Continue?")) initGrid();
+    }
+
+    initGrid();
+</script>
+</body>
+</html>

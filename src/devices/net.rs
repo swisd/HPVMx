@@ -21,6 +21,7 @@ const UDP_PORT_DHCP_CLIENT: u16 = 68;
 const UDP_PORT_DHCP_SERVER: u16 = 67;
 
 #[repr(C, packed)]
+#[derive(Debug)]
 struct DhcpPacket {
     op: u8,        // 1 = Request, 2 = Reply
     htype: u8,     // 1 = Ethernet
@@ -103,26 +104,42 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
     let mac = crate::devices::net_hw::get_mac();
     let mut packet = DhcpPacket {
         op: 1, htype: 1, hlen: 6, hops: 0,
-        xid: 0x12345678, secs: 0, flags: 0x8000u16.to_be(),
+        xid: 0x12345678, secs: 0, flags: 0x0000u16.to_be(), //0x8000u16.to_be(),
         ciaddr: [0; 4], yiaddr: [0; 4], siaddr: [0; 4], giaddr: [0; 4],
         chaddr: [0; 16], sname: [0; 64], file: [0; 128],
-        magic: 0x63538263u32.to_be(), // DHCP Magic Cookie
+        magic: 0x63825363u32.to_be(), // DHCP Magic Cookie
         options: [0; 312],
     };
     packet.chaddr[..6].copy_from_slice(&mac[..6]);
 
     // DHCP Options: Discover (Type 53, Len 1, Value 1) + End (255)
-    packet.options[0] = 53; packet.options[1] = 1; packet.options[2] = 1;
-    packet.options[3] = 255;
+    // DHCP Options: Discover (Type 53) + Client ID (Option 61) + End (255)
+    let mut cursor = 0;
 
-    // Send via Raw UDP (Simplified send_udp that allows 0.0.0.0 source)
-    // For brevity, assume a helper: send_raw_udp(src_ip, dst_ip, dst_mac, src_port, dst_port, data)
-    net_stack::send_raw_udp([0,0,0,0], [255,255,255,255], [0xFF; 6], 68, 67, unsafe {
+    // Option 53: Message Type (1 = Discover)
+    packet.options[cursor..cursor+3].copy_from_slice(&[53, 1, 1]);
+    cursor += 3;
+
+    // Option 61: Client Identifier (Type 1 [Ethernet] + MAC)
+    packet.options[cursor] = 61;
+    packet.options[cursor + 1] = 7;
+    packet.options[cursor + 2] = 1;
+
+    net_stack::send_raw_udp([0,0,0,0], [255,255,255,255], [0xFF; 6], 67, 68, unsafe {
         core::slice::from_raw_parts(&packet as *const _ as *const u8, size_of::<DhcpPacket>())
     });
 
-    let mut timeout = 32;
+    let mut timeout = 24;
     let mut cfg: ([u8; 4], [u8; 4], [u8; 4]) = ([0; 4], [0; 4], [0; 4]);
+    packet.options[cursor + 3..cursor + 9].copy_from_slice(&mac[..6]);
+    cursor += 9;
+
+    packet.options[cursor] = 255; // End
+
+    // Send via Raw UDP (Simplified send_udp that allows 0.0.0.0 source)
+    // For brevity, assume a helper: send_raw_udp(src_ip, dst_ip, dst_mac, src_port, dst_port, data)
+
+    hpvm_info!("NET", "sending rawudp {:?}", packet);
 
     while timeout > 0 {
         // 2. Poll the hardware
@@ -133,14 +150,14 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
         }
 
         timeout -= 1;
-        boot::stall(core::time::Duration::from_micros(32_000));
+        boot::stall(core::time::Duration::from_micros(128_000));
         // Optional: arch::pause() or similar to be nice to the CPU
     }
 
     send_dhcp_request(cfg.0, cfg.1);
 
 
-    let mut timeout = 32;
+    let mut timeout = 24;
     while timeout > 0 {
         // 2. Poll the hardware
         if let Some(response) = poll_for_dhcp_response() {
@@ -149,7 +166,7 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
         }
 
         timeout -= 1;
-        boot::stall(core::time::Duration::from_micros(32_000));
+        boot::stall(core::time::Duration::from_micros(128_000));
         // Optional: arch::pause() or similar to be nice to the CPU
     }
 
@@ -191,6 +208,7 @@ pub fn send_dhcp_request(offered_ip: [u8; 4], server_ip: [u8; 4]) {
     // 4. End Option
     packet.options[cursor] = 255;
 
+    hpvm_info!("NET", "sending rawudp {:?}", packet);
     // Broadcast the request
     net_stack::send_raw_udp(
         [0, 0, 0, 0],
@@ -458,3 +476,4 @@ pub fn httpd_stop() {
     }
     net_stack::httpd_stop();
 }
+

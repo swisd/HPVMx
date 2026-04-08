@@ -70,6 +70,7 @@ pub struct DashboardUI {
     pub term_buf: String,
     pub editor: Option<TextEditor>,
     pub package_manager: PackageManager,
+    pub iter: u64,
 
 }
 
@@ -197,6 +198,7 @@ impl DashboardUI {
             term_buf: "".to_string(),
             editor: None,
             package_manager: package_manager,
+            iter: 0,
         }
     }
 
@@ -245,6 +247,7 @@ impl DashboardUI {
 
     pub fn draw(&mut self) {
         if let Some(pg) = pixel_graphics::PixelGraphics::new() {
+            self.iter += 1;
             let mut pg = pg.with_backbuffer();
             let (width, height) = pg.resolution();
             
@@ -595,7 +598,8 @@ impl DashboardUI {
                         if cat.expanded {
                             for dev in &cat.devices {
                                 let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xFFFFFF };
-                                pg.draw_text(40, y, &alloc::format!("Ð {}: {}", dev.name, dev.path), color);
+                                pg.draw_icon(35, y - 2, 16, 16, if cat.name == "Network Adapters" {&pixel_graphics::icons::PCI_GREEN_ICON_DATA} else { &pixel_graphics::icons::PCI_BLUE_ICON_DATA });
+                                pg.draw_text(45, y, &alloc::format!(" {}: {}", dev.name, dev.path), color);
                                 y += 20;
                                 current_idx += 1;
                                 if y > height - 60 { break; }
@@ -631,25 +635,21 @@ impl DashboardUI {
                         if y + line_h > list_y + list_h - 2 { break; }
                         let color = if i == self.selected_file_idx { 0xFFFF00 } else { 0xFFFFFF };
                         idx_types.push(if entry.is_dir { "D" } else { "F" }  );
-                        let icon = if entry.is_dir { "Ñ D" } else {
+                        let icon = if entry.is_dir { pixel_graphics::icons::FOLDER_ICON_DATA } else {
                             let dec_syn = ["json", "xml", "toml", "yaml", "yml"];
                             let sys_syn = ["sys", "efi"];
                             let prog_syn = ["micro", "ufe", "dmx", "bin"];
 
 
-                            #[allow(irrefutable_let_patterns)]
-                            if let ext = entry.name.split(".").last().unwrap() {
-                                if dec_syn.contains(&ext) {
-                                    "Ò F"
-                                } else if sys_syn.contains(&ext) {
-                                    "Ó F"
-                                } else if prog_syn.contains(&ext) {
-                                    "Ô F"
-                                } else {
-                                    "Ç F"
-                                }
+                            let ext = entry.name.split(".").last().unwrap();
+                            if dec_syn.contains(&ext) {
+                                pixel_graphics::icons::JSON_ICON_DATA
+                            } else if sys_syn.contains(&ext) {
+                                pixel_graphics::icons::EXECUTABLE_ICON_DATA
+                            } else if prog_syn.contains(&ext) {
+                                pixel_graphics::icons::CODE_ICON_DATA
                             } else {
-                                "Ç F"
+                                pixel_graphics::icons::FILE_ICON_DATA
                             }
                         };
 
@@ -663,7 +663,7 @@ impl DashboardUI {
 
 
                         let background = if i == self.selected_file_idx { 0x333333 } else { 0x222222 };
-                        pg.draw_text_bg(list_x + 8, y, icon, 0xCCCCCC, background);
+                        pg.draw_icon(list_x + 16, y, 16, 16, &icon);
                         pg.draw_text_bg(list_x + 56, y, &alloc::format!("{:<32}", entry.name), color, background);
                         pg.draw_text_bg(list_x + 348, y, &alloc::format!("{:>12}", size), 0xCCCCCC, background);
                         pg.draw_text_bg(list_x + 470, y, if entry.is_dir { "DIR" } else { "FILE" }, 0x6666FF, background);
@@ -824,6 +824,16 @@ impl DashboardUI {
                         expanded: true,
                     };
                     pg.draw_tree_view(x, y + 200, 200, 150, &root);
+
+                    pg.draw_icon(x, y + 400, 16, 16, &pixel_graphics::icons::RAM_ICON_DATA);
+                    pg.draw_icon(x + 24, y + 400, 16, 16, &pixel_graphics::icons::PCI_GREEN_ICON_DATA);
+                    pg.draw_icon(x + 48, y + 400, 16, 16, &pixel_graphics::icons::PCI_BLUE_ICON_DATA);
+                    pg.draw_icon(x + 72, y + 400, 16, 16, &pixel_graphics::icons::CPU_ICON_DATA);
+                    pg.draw_icon(x + 96, y + 400, 16, 16, &pixel_graphics::icons::HOURGLASS_ICON_DATA);
+                    pg.draw_icon(x + 120, y + 400, 16, 16, &pixel_graphics::icons::ETHERNET_ICON_DATA);
+                    pg.draw_icon(x + 144, y + 400, 16, 16, &pixel_graphics::icons::HDD_INTERNAL_ICON_DATA);
+                    pg.draw_icon(x + 168, y + 400, 16, 16, &pixel_graphics::icons::SETTINGS_ICON_DATA);
+                    pg.draw_icon(x + 200, y + 400, 32, 32, &pixel_graphics::icons::GTK_CUBE_32_ICON_DATA);
                 }
                 DashboardTab::Editor => {
                     if let Some(ref ed) = self.editor {
@@ -974,7 +984,7 @@ impl DashboardUI {
                         children: &categories,
                         expanded: true,
                     };
-                    pg.draw_tree_view(60, 160, 285, 450, &root);
+                    pg.draw_tree_view_icon(60, 160, 285, 450, &root, &pixel_graphics::icons::PACKAGE_ICON_DATA);
                     pg.draw_table_view(360, 160, 200, 450,  &["property", "value"], &[&["none", "none"]]);
                     pg.draw_table_view(660, 160,  150, 400, &["property", "value"], &[&["none", "none"]]);
                     pg.draw_table_view(820, 160,  400, 500, &["col"], &[&["row"]]);
@@ -996,7 +1006,11 @@ impl DashboardUI {
             pg.draw_text(10, height - 32, " Use keys O, V, R, S, N, D, C, T, Z to switch tabs | X to shutdown", 0xFFFFFF);
 
             // Update and draw cursor
-            self.cursor.update_from_mouse(width, height);
+            if self.iter % 20 == 0 {
+                unsafe {
+                    self.cursor.update_from_mouse(width, height);
+                }
+            }
             pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
 
             //pg.apply_scanlines();

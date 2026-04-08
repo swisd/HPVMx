@@ -1,10 +1,12 @@
+use crate::{hpvm_info, hpvm_log};
 use core::fmt::Write;
 use core::time::Duration;
 use uefi::proto::console::text::Color;
 use uefi::{StatusExt, Identify};
+use uefi::boot::OpenProtocolAttributes;
 use uefi::proto::console::pointer::Pointer;
 use uefi_raw::protocol::console::AbsolutePointerProtocol;
-use crate::message;
+use crate::{hpvm_warn, message};
 
 #[repr(transparent)]
 struct AbsolutePointer(AbsolutePointerProtocol);
@@ -60,82 +62,115 @@ impl Cursor {
         }
     }
 
-    pub fn update_from_mouse(&mut self, screen_width: usize, screen_height: usize) {
-        // Try absolute first (modern environments/VMs)
-        if self.try_update_absolute(screen_width, screen_height) {
-            return;
+    pub unsafe fn update_from_mouse(&mut self, screen_width: usize, screen_height: usize) {
+        unsafe {
+            // Try absolute first (modern environments/VMs)
+            let val = self.try_update_absolute(screen_width, screen_height);
+            if val == 0 {
+                hpvm_info!("mouse", "abs {}{}", self.x, self.y);
+                return;
+            }
+            hpvm_info!("mouse", "abs err {}", val);
+            // Fallback to relative
+            let val = self.try_update_relative(screen_width, screen_height);
+            if val == 0 {
+                hpvm_info!("mouse", "rel {}{}", self.x, self.y);
+            } else {
+                hpvm_info!("mouse", "rel err {}", val);
+            }
         }
-        // Fallback to relative
-        self.try_update_relative(screen_width, screen_height);
     }
 
-    fn try_update_absolute(&mut self, screen_width: usize, screen_height: usize) -> bool {
-        let Ok(handle) = uefi::boot::get_handle_for_protocol::<AbsolutePointer>() else { return false };
-        let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<AbsolutePointer>(handle) else { return false };
+    unsafe fn try_update_absolute(&mut self, screen_width: usize, screen_height: usize) -> u32 {
+        unsafe {
+            let Ok(handle) = uefi::boot::get_handle_for_protocol::<AbsolutePointer>() else { return 10 };
+            let Ok(mut mouse) = uefi::boot::open_protocol::<AbsolutePointer>(uefi::boot::OpenProtocolParams {
+                handle,
+                agent: uefi::boot::image_handle(),
+                controller: None,
+            }, OpenProtocolAttributes::GetProtocol) else { return 20 };
 
-        if let Ok(Some(state)) = mouse.read_state() {
-            let mode = mouse.mode();
-            
-            // Map absolute coordinates to screen coordinates
-            // Formula: screen_pos = (abs_pos - abs_min) * screen_max / (abs_max - abs_min)
-            let abs_x = state.current_x as f32;
-            let abs_y = state.current_y as f32;
-            
-            let min_x = mode.absolute_min_x as f32;
-            let min_y = mode.absolute_min_y as f32;
-            let max_x = mode.absolute_max_x as f32;
-            let max_y = mode.absolute_max_y as f32;
+            match mouse.read_state() {
+                Ok(Some(state)) => {
+                    let mode = mouse.mode();
 
-            if max_x > min_x && max_y > min_y {
-                self.x = (((abs_x - min_x) * (screen_width as f32 - 1.0)) / (max_x - min_x)) as i32;
-                self.y = (((abs_y - min_y) * (screen_height as f32 - 1.0)) / (max_y - min_y)) as i32;
+                    // Map absolute coordinates to screen coordinates
+                    // Formula: screen_pos = (abs_pos - abs_min) * screen_max / (abs_max - abs_min)
+                    let abs_x = state.current_x as f64;
+                    let abs_y = state.current_y as f64;
+
+                    let min_x = mode.absolute_min_x as f64;
+                    let min_y = mode.absolute_min_y as f64;
+                    let max_x = mode.absolute_max_x as f64;
+                    let max_y = mode.absolute_max_y as f64;
+
+                    if max_x > min_x && max_y > min_y {
+                        // Ensure we don't exceed the bounds of the screen
+                        let new_x = ((abs_x - min_x) * (screen_width as f64)) / (max_x - min_x);
+                        let new_y = ((abs_y - min_y) * (screen_height as f64)) / (max_y - min_y);
+
+                        self.x = (new_x as i32).clamp(0, screen_width as i32 - 1);
+                        self.y = (new_y as i32).clamp(0, screen_height as i32 - 1);
+                    }
+                    hpvm_info!("mouse", "{}, {}", self.x, self.y);
+
+                    self.left_button = state.active_buttons & 0x1 != 0;
+                    self.right_button = state.active_buttons & 0x2 != 0;
+                    return 1;
+                }
+                Ok(None) => 0, // Success, just no movement.
+                Err(_) => 30,  // Actual hardware/firmware error.
             }
-
-            self.left_button = state.active_buttons & 0x1 != 0;
-            self.right_button = state.active_buttons & 0x2 != 0;
-            return true;
         }
-        false
     }
 
     // Absolute pointer path not used in this target environment
 
-    fn try_update_relative(&mut self, screen_width: usize, screen_height: usize) {
-        let Ok(handle) = uefi::boot::get_handle_for_protocol::<Pointer>() else {
-            return;
-        };
-        let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) else {
-            return;
-        };
+    unsafe fn try_update_relative(&mut self, screen_width: usize, screen_height: usize) -> u32 {
+        unsafe {
+            let Ok(handle) = uefi::boot::get_handle_for_protocol::<Pointer>() else {
+                return 10
+            };
+            let Ok(mut mouse) = uefi::boot::open_protocol::<Pointer>(uefi::boot::OpenProtocolParams {
+                handle,
+                agent: uefi::boot::image_handle(),
+                controller: None,
+            }, OpenProtocolAttributes::GetProtocol) else { return 20 };
 
-        if let Ok(Some(state)) = mouse.read_state() {
-            let mode = mouse.mode();
-            
-            // X and Y resolution can be used to scale movement
-            // resolution is in counts/mm. If 0, it's not supported.
-            // We use a base sensitivity and then scale if resolution is available.
-            let mut dx = state.relative_movement[0] as f32;
-            let mut dy = state.relative_movement[1] as f32;
+            match mouse.read_state() {
+                Ok(Some(state)) => {
+                    let mode = mouse.mode();
 
-            // Sensitivity factor - adjust as needed. 
-            // In some environments, 1:1 is too slow.
-            let sensitivity = 1.5f32;
-            dx *= sensitivity;
-            dy *= sensitivity;
+                    // X and Y resolution can be used to scale movement
+                    // resolution is in counts/mm. If 0, it's not supported.
+                    // We use a base sensitivity and then scale if resolution is available.
+                    let mut dx = state.relative_movement[0] as f32;
+                    let mut dy = state.relative_movement[1] as f32;
 
-            // Optional: apply resolution scaling if available
-            if mode.resolution[0] != 0 {
-                // Adjusting based on resolution might help on real hardware
-                // but for now we keep it simple to ensure basic movement first.
+                    // Sensitivity factor - adjust as needed.
+                    // In some environments, 1:1 is too slow.
+                    let sensitivity = 1.5f32;
+                    dx *= sensitivity;
+                    dy *= sensitivity;
+
+                    // Optional: apply resolution scaling if available
+                    if mode.resolution[0] != 0 {
+                        // Adjusting based on resolution might help on real hardware
+                        // but for now we keep it simple to ensure basic movement first.
+                    }
+
+                    if dx != 0.0 || dy != 0.0 {
+                        self.x = (self.x + dx as i32).clamp(0, screen_width as i32 - 1);
+                        self.y = (self.y + dy as i32).clamp(0, screen_height as i32 - 1);
+                    }
+
+                    self.left_button = state.button[0];
+                    self.right_button = state.button[1];
+                    return 0
+                }
+                Ok(None) => 0, // Success, just no movement.
+                Err(_) => 30,  // Actual hardware/firmware error.
             }
-
-            if dx != 0.0 || dy != 0.0 {
-                self.x = (self.x + dx as i32).clamp(0, screen_width as i32 - 1);
-                self.y = (self.y + dy as i32).clamp(0, screen_height as i32 - 1);
-            }
-
-            self.left_button = state.button[0];
-            self.right_button = state.button[1];
         }
     }
 

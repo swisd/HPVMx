@@ -7,9 +7,9 @@
             <Zone name="Footer" type="footer" x="0" y="725" w="1280" h="75" color="0xAA2222" />
             <Zone name="Margin-Left" type="margin" x="0" y="100" w="20" h="625" color="0xAA2222" />
             <Zone name="Margin-Right" type="margin" x="1260" y="100" w="20" h="625" color="0xAA2222" />
-<!--            <Zone name="Sidebar" type="sidebar" x="0" y="80" w="200" h="920" color="0x111111" />-->
         </Layout>
     </Template>
+
     <Category name="Shapes">
         <Tool category="Shapes" name="Pixel" func="draw_pixel">
             <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
@@ -18,6 +18,13 @@
             <Arg name="x2" type="usize" default="50"/>
             <Arg name="y2" type="usize" default="50"/>
             <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
+        </Tool>
+        <Tool category="Shapes" name="Advanced Line" func="draw_line_adv">
+            <Arg name="x2" type="usize" default="50"/>
+            <Arg name="y2" type="usize" default="50"/>
+            <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
+            <Arg name="thickness" type="usize" default="3"/>
+            <Arg name="style" type="u32" hex="true" default="0xFFFFFFFF"/>
         </Tool>
         <Tool category="Shapes" name="Rectangle" func="fill_rect">
             <Arg name="width" type="usize" default="100"/>
@@ -29,26 +36,67 @@
             <Arg name="height" type="usize" default="50"/>
             <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
         </Tool>
+        <Tool category="Shapes" name="Advanced Outline" func="draw_rect_outline_adv">
+            <Arg name="width" type="usize" default="100"/>
+            <Arg name="height" type="usize" default="50"/>
+            <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
+            <Arg name="thickness" type="usize" default="1"/>
+            <Arg name="style" type="u32" hex="true" default="0xFFFFFFFF"/>
+        </Tool>
     </Category>
 
     <Category name="Widgets">
+        draw_text_bg
+        <Tool category="Widgets" name="Label" func="draw_text">
+            <Arg name="text" type="string" default="Label"/>
+            <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
+        </Tool>
+        <Tool category="Widgets" name="Background Label" func="draw_text_bg">
+            <Arg name="text" type="string" default="Label"/>
+            <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
+            <Arg name="bg" type="u32" hex="true" default="0x000000"/>
+        </Tool>
         <Tool category="Widgets" name="Button" func="draw_button">
             <Arg name="width" type="usize" default="120"/>
-            <Arg name="height" type="usize" default="40"/>
+            <Arg name="height" type="usize" default="30"/>
             <Arg name="text" type="string" default="Click Me"/>
-            <Arg name="clicked" type="bool" default="false"/>
+            <Arg name="is_focused" type="bool" default="false"/>
         </Tool>
         <Tool category="Widgets" name="Checkbox" func="draw_checkbox">
             <Arg name="checked" type="bool" default="false"/>
-            <Arg name="focused" type="bool" default="false"/>
-            <Arg name="is_clicked" type="bool" default="false"/>
+            <Arg name="blocked" type="bool" default="false"/>
+            <Arg name="disabled" type="bool" default="false"/>
             <Arg name="text" type="string" default="Option"/>
+        </Tool>
+        <Tool category="Widgets" name="Tristate Checkbox" func="draw_tristate_checkbox">
+            <Arg name="text" type="string" default="Tristate"/>
+            <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
+            <Arg name="some" type="bool" default="false"/>
+            <Arg name="checked" type="bool" default="false"/>
+        </Tool>
+        <Tool category="Widgets" name="Radio Button" func="draw_radio_button">
+            <Arg name="checked" type="bool" default="false"/>
         </Tool>
         <Tool category="Widgets" name="Slider" func="draw_slider">
             <Arg name="width" type="usize" default="150"/>
             <Arg name="value" type="usize" default="50"/>
             <Arg name="max" type="usize" default="100"/>
-            <Arg name="is_vertical" type="bool" default="false"/>
+            <Arg name="vertical" type="bool" default="false"/>
+        </Tool>
+        <Tool category="Widgets" name="Dial" func="draw_dial">
+            <Arg name="radius" type="usize" default="30"/>
+            <Arg name="value" type="usize" default="25"/>
+            <Arg name="max" type="usize" default="100"/>
+        </Tool>
+        <Tool category="Widgets" name="Spinbox" func="draw_spinbox">
+            <Arg name="width" type="usize" default="80"/>
+            <Arg name="value" type="i32" default="0"/>
+            <Arg name="label" type="string" default="Label"/>
+        </Tool>
+        <Tool category="Widgets" name="Double Spinbox" func="draw_double_spinbox">
+            <Arg name="width" type="usize" default="100"/>
+            <Arg name="value" type="f64" default="0.0"/>
+            <Arg name="precision" type="usize" default="2"/>
         </Tool>
         <Tool category="Widgets" name="Progress Bar" func="draw_progress_bar">
             <Arg name="width" type="usize" default="200"/>
@@ -60,7 +108,6 @@
     </Category>
 
     <Category name="Charts">
-
         <Tool category="Charts" name="Line Graph" func="draw_line_graph">
             <Arg name="width" type="usize" default="300"/>
             <Arg name="height" type="usize" default="150"/>
@@ -69,16 +116,39 @@
             <Arg name="len" type="usize" default="10"/>
         </Tool>
         <Tool category="Charts" name="LCD Number" func="draw_lcd_number">
-            <Arg name="text" type="string" default="0000"/>
+            <Arg name="value" type="string" default="0000"/>
         </Tool>
-
     </Category>
-    <Category name="Views">
 
+    <Category name="Views">
+        <Tool category="Views" name="List View" func="draw_list_view">
+            <Arg name="width" type="usize" default="200"/>
+            <Arg name="height" type="usize" default="300"/>
+        </Tool>
         <Tool category="Views" name="Table View" func="draw_table_view">
             <Arg name="width" type="usize" default="400"/>
             <Arg name="height" type="usize" default="200"/>
-            <Arg name="title" type="string" default="System Log"/>
+        </Tool>
+        <Tool category="Views" name="Tree View" func="draw_tree_view">
+            <Arg name="width" type="usize" default="250"/>
+            <Arg name="height" type="usize" default="400"/>
+        </Tool>
+    </Category>
+
+    <Category name="Shaders">
+        <Tool category="Shaders" name="Scanlines" func="apply_scanlines" />
+        <Tool category="Shaders" name="Dither" func="apply_dither" />
+        <Tool category="Shaders" name="Glitch" func="apply_glitch" />
+        <Tool category="Shaders" name="Edge Aberration" func="apply_edge_aberration">
+            <Arg name="max_strength" type="f32" default="1.0"/>
+        </Tool>
+    </Category>
+
+    <Category name="Media">
+        <Tool category="Media" name="Icon" func="draw_icon">
+            <Arg name="width" type="usize" default="16"/>
+            <Arg name="height" type="usize" default="16"/>
+            <Arg name="icon_id" type="string" default="ICON_DATA"/>
         </Tool>
     </Category>
 
