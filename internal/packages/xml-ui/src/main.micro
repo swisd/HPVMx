@@ -1,0 +1,7 @@
+(def main (env)
+ (let window env.xml.XMLUI)
+ (let rect env.xml.XMLUI.frame.fill_rect_1)
+ (let text env.xml.XMLUI.frame.text_label_1)
+ (let color 0xFFFF00FF)
+ (rect.setColor(color))
+)

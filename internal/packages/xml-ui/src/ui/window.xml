@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Window width="default" height="default" name="XMLUI">
+    <Import source="$package/src/main.micro" name="logic" />
+    <Frame width="parent" height="parent" name="frame">
+        <RectOutline x="150" y="100" width="75" height="150" />
+        <Text x="200" y="125" text="XML Defined UI (XML and Micro-C)" name="text_label_1"/>
+        <FillRect x="200" y="150" width="50" height="25" name="fill_rect_1"/>
+        <Icon x="200" y="200" width="32" height="32" data="icons.GTK_CUBE_32_ICON_DATA" />
+        <Button x="200" y="300" text="Press Me!" name="test_btn" action="logic.main"/>
+    </Frame>
+</Window>
