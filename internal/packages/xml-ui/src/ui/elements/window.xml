@@ -1,15 +1,9 @@
 <?xml version='1.0' encoding='utf-8'?>
 <Window width="default" height="default">
-    <HEADER>
-        <Import source="$package/src/ui/elements/generic.xml"/>
-        <Import source="$package/src/ui/elements/specific.xml"/>
-    </HEADER>
-    <Frame positioning="grid">
-        <Variable name="x" value="margin" />
-        <Variable name="y" value="margin" />
-        <Rect style="outline" x="var:x" y="var:y" width="100" height="100" color="0x666666" />
-        <Variable name="x" value="x+50" />
-        <Variable name="y" value="y+50" />
-        <Text x="var:x" y="var:y" data="text" color="0xFFFFFF" />
+    <Frame width="parent" height="parent">
+        <RectOutline x="150" y="100" width="75" height="150" />
+        <Text x="200" y="125" text="XML Defined UI (XML and Micro-C)" />
+        <FillRect x="200" y="150" width="50" height="25" />
+        <Icon x="200" y="200" width="32" height="32" data="icons.GTK_CUBE_32_ICON_DATA" />
     </Frame>
 </Window>
