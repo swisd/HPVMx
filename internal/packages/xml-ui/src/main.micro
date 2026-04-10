@@ -1,8 +1,3 @@
-struct Point {
-    x: i64;
-    y: i64;
-}
-
 export fn main(env) {
     // the elements that we will use
     let window env.xml.XMLUI;
