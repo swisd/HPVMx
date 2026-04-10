@@ -1,8 +1,10 @@
+#pragma callsource=window.xml
+
 export fn main(env) {
     // the elements that we will use
     let window env.xml.XMLUI;
-    let rect = env.xml.XMLUI.frame.fill_rect_1;
-    let text = env.xml.XMLUI.frame.text_label_1;
+    let rect = env.xml.XMLUI.main_frame.fill_rect_1;
+    let text = env.xml.XMLUI.main_frame.text_label_1;
     let color = 0xFFFF00FF;
 
     // set the rect color

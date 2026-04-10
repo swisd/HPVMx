@@ -1,11 +1,30 @@
 <?xml version='1.0' encoding='utf-8'?>
 <Window width="default" height="default" name="XMLUI">
     <Import source="$package/src/main.micro" name="logic" />
-    <Frame width="parent" height="parent" name="frame">
-        <RectOutline x="150" y="100" width="75" height="150" />
-        <Text x="200" y="125" text="XML Defined UI (XML and Micro-C)" name="text_label_1"/>
-        <FillRect x="200" y="150" width="50" height="25" name="fill_rect_1"/>
-        <Icon x="200" y="200" width="32" height="32" data="icons.GTK_CUBE_32_ICON_DATA" />
-        <Button x="200" y="300" text="Press Me!" name="test_btn" action="logic.main"/>
+    <Frame width="parent" height="parent" name="main_frame">
+
+        <Text x="50" y="30" text="1. Basic Primitives" color="0xFFFFFF" />
+        <FillRect x="50" y="60" width="100" height="50" color="0x00FF00" name="green_box" />
+        <RectOutline x="170" y="60" width="100" height="50" color="0xFF0000" name="red_outline" />
+        <Line x1="50" y1="130" x2="270" y2="130" color="0x888888" />
+
+        <Text x="50" y="170" text="2. Interactive Elements" color="0xFFFFFF" />
+        <Button x="50" y="200" width="150" height="40" text="Main Action" name="btn_1" action="logic.main_click" />
+        <Checkbox x="50" y="260" text="Enable System Monitoring" checked="true" name="chk_monitor" />
+
+        <Text x="400" y="30" text="3. Data Visualization" color="0xFFFFFF" />
+
+        <ProgressBar x="400" y="60" width="300" height="30" value="75" max="100" color="0x008080" name="cpu_load" />
+
+        <LCD x="400" y="110" text="12:45" name="system_clock" />
+
+        <LineGraph x="400" y="200" width="400" height="150" max_val="100" color="0x00FFFF" window_size="20" name="network_traffic" />
+
+        <Text x="50" y="350" text="4. System Icons and Assets" color="0xFFFFFF" />
+        <Icon x="50" y="380" width="32" height="32" data="icons.GTK_CUBE_32_ICON_DATA" />
+        <Icon x="100" y="380" width="32" height="32" data="icons.STORAGE_DISK_ICON" />
+
+        <RectOutline x="0" y="1000" width="1920" height="80" color="0x222222" />
+        <Text x="20" y="1030" text="UEFI System Designer v1.0 | Status: Connected" color="0xAAAAAA" />
     </Frame>
 </Window>
