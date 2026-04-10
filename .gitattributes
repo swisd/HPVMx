@@ -1,2 +1,2 @@
-*.micro linguist-language=Lisp
+*.micro linguist-language=C
 *.xml linguist-detectable=true
