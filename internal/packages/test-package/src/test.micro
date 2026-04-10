@@ -14,10 +14,18 @@ struct Point {
 }
 
 export fn main() {
+
+    let arr = [1, 2, 3, 4, 5];
+
     let p: ptr = alloc_struct(Point);
 
     p.x = 10;
     p.y = 20;
+
+    let temp = arr[1];
+    let arr[0] = arr[4];
+    let arr[4] = temp;
+
 
     let z = add(10, 5);
 
