@@ -995,6 +995,13 @@ impl DashboardUI {
                     pg.draw_button(660, 640,  120, 30,  "____", false);
                     pg.draw_rect_outline(820, 680, 300, 25, 0xCCCCC0);
                     pg.draw_button(1140, 680, 100, 25, "Search", false);
+
+
+
+
+                    pg.draw_button(220, 120, 120, 30, "Refresh LT", false);
+                    pg.draw_checkbox(360, 120, false, false, false, "Advanced");
+                    pg.draw_button(820, 120, 120, 30, "Update Index", false);
                 }
                 _ => {
                     pg.draw_text(5, page_y - 15, "this page is unavailable", 0xFFFFFF)

@@ -11,32 +11,32 @@
     </Template>
 
     <Category name="Shapes">
-        <Tool category="Shapes" name="Pixel" func="draw_pixel">
+        <Tool category="Shapes" name="Pixel" func="draw_pixel" xml_name="Pixel" >
             <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
         </Tool>
-        <Tool category="Shapes" name="Line" func="draw_line">
+        <Tool category="Shapes" name="Line" func="draw_line" xml_name="Line">
             <Arg name="x2" type="usize" default="50"/>
             <Arg name="y2" type="usize" default="50"/>
             <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
         </Tool>
-        <Tool category="Shapes" name="Advanced Line" func="draw_line_adv">
+        <Tool category="Shapes" name="Advanced Line" func="draw_line_adv" xml_name="AdvLine">
             <Arg name="x2" type="usize" default="50"/>
             <Arg name="y2" type="usize" default="50"/>
             <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
             <Arg name="thickness" type="usize" default="3"/>
             <Arg name="style" type="u32" hex="true" default="0xFFFFFFFF"/>
         </Tool>
-        <Tool category="Shapes" name="Rectangle" func="fill_rect">
+        <Tool category="Shapes" name="Rectangle" func="fill_rect" xml_name="FillRect">
             <Arg name="width" type="usize" default="100"/>
             <Arg name="height" type="usize" default="50"/>
             <Arg name="color" type="u32" hex="true" default="0x444444"/>
         </Tool>
-        <Tool category="Shapes" name="Outline" func="draw_rect_outline">
+        <Tool category="Shapes" name="Outline" func="draw_rect_outline" xml_name="RectOutline">
             <Arg name="width" type="usize" default="100"/>
             <Arg name="height" type="usize" default="50"/>
             <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
         </Tool>
-        <Tool category="Shapes" name="Advanced Outline" func="draw_rect_outline_adv">
+        <Tool category="Shapes" name="Advanced Outline" func="draw_rect_outline_adv" xml_name="AdvRectOutline">
             <Arg name="width" type="usize" default="100"/>
             <Arg name="height" type="usize" default="50"/>
             <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
@@ -47,58 +47,58 @@
 
     <Category name="Widgets">
         draw_text_bg
-        <Tool category="Widgets" name="Label" func="draw_text">
+        <Tool category="Widgets" name="Label" func="draw_text" xml_name="Label" >
             <Arg name="text" type="string" default="Label"/>
             <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
         </Tool>
-        <Tool category="Widgets" name="Background Label" func="draw_text_bg">
+        <Tool category="Widgets" name="Background Label" func="draw_text_bg" xml_name="BackgroundLabel" >
             <Arg name="text" type="string" default="Label"/>
             <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
             <Arg name="bg" type="u32" hex="true" default="0x000000"/>
         </Tool>
-        <Tool category="Widgets" name="Button" func="draw_button">
+        <Tool category="Widgets" name="Button" func="draw_button" xml_name="Button" >
             <Arg name="width" type="usize" default="120"/>
             <Arg name="height" type="usize" default="30"/>
             <Arg name="text" type="string" default="Click Me"/>
             <Arg name="is_focused" type="bool" default="false"/>
         </Tool>
-        <Tool category="Widgets" name="Checkbox" func="draw_checkbox">
+        <Tool category="Widgets" name="Checkbox" func="draw_checkbox" xml_name="Checkbox">
             <Arg name="checked" type="bool" default="false"/>
             <Arg name="blocked" type="bool" default="false"/>
             <Arg name="disabled" type="bool" default="false"/>
             <Arg name="text" type="string" default="Option"/>
         </Tool>
-        <Tool category="Widgets" name="Tristate Checkbox" func="draw_tristate_checkbox">
+        <Tool category="Widgets" name="Tristate Checkbox" func="draw_tristate_checkbox" xml_name="TristateCheckbox">
             <Arg name="text" type="string" default="Tristate"/>
             <Arg name="color" type="u32" hex="true" default="0xFFFFFF"/>
             <Arg name="some" type="bool" default="false"/>
             <Arg name="checked" type="bool" default="false"/>
         </Tool>
-        <Tool category="Widgets" name="Radio Button" func="draw_radio_button">
+        <Tool category="Widgets" name="Radio Button" func="draw_radio_button" xml_name="RadioButton">
             <Arg name="checked" type="bool" default="false"/>
         </Tool>
-        <Tool category="Widgets" name="Slider" func="draw_slider">
+        <Tool category="Widgets" name="Slider" func="draw_slider" xml_name="Slider">
             <Arg name="width" type="usize" default="150"/>
             <Arg name="value" type="usize" default="50"/>
             <Arg name="max" type="usize" default="100"/>
             <Arg name="vertical" type="bool" default="false"/>
         </Tool>
-        <Tool category="Widgets" name="Dial" func="draw_dial">
+        <Tool category="Widgets" name="Dial" func="draw_dial" xml_name="Dial">
             <Arg name="radius" type="usize" default="30"/>
             <Arg name="value" type="usize" default="25"/>
             <Arg name="max" type="usize" default="100"/>
         </Tool>
-        <Tool category="Widgets" name="Spinbox" func="draw_spinbox">
+        <Tool category="Widgets" name="Spinbox" func="draw_spinbox" xml_name="SpinBox">
             <Arg name="width" type="usize" default="80"/>
             <Arg name="value" type="i32" default="0"/>
             <Arg name="label" type="string" default="Label"/>
         </Tool>
-        <Tool category="Widgets" name="Double Spinbox" func="draw_double_spinbox">
+        <Tool category="Widgets" name="Double Spinbox" func="draw_double_spinbox" xml_name="DoubleSpinBox">
             <Arg name="width" type="usize" default="100"/>
             <Arg name="value" type="f64" default="0.0"/>
             <Arg name="precision" type="usize" default="2"/>
         </Tool>
-        <Tool category="Widgets" name="Progress Bar" func="draw_progress_bar">
+        <Tool category="Widgets" name="Progress Bar" func="draw_progress_bar" xml_name="ProgressBar">
             <Arg name="width" type="usize" default="200"/>
             <Arg name="height" type="usize" default="25"/>
             <Arg name="value" type="usize" default="30"/>
@@ -108,44 +108,51 @@
     </Category>
 
     <Category name="Charts">
-        <Tool category="Charts" name="Line Graph" func="draw_line_graph">
+        <Tool category="Charts" name="Line Graph" func="draw_line_graph" xml_name="LineGraph">
             <Arg name="width" type="usize" default="300"/>
             <Arg name="height" type="usize" default="150"/>
             <Arg name="max_val" type="u64" default="100"/>
             <Arg name="color" type="u32" hex="true" default="0x00FFFF"/>
             <Arg name="len" type="usize" default="10"/>
         </Tool>
-        <Tool category="Charts" name="LCD Number" func="draw_lcd_number">
+        <Tool category="Charts" name="LCD Number" func="draw_lcd_number" xml_name="LCDNumber">
             <Arg name="value" type="string" default="0000"/>
         </Tool>
     </Category>
 
     <Category name="Views">
-        <Tool category="Views" name="List View" func="draw_list_view">
+        <Tool category="Views" name="List View" func="draw_list_view" xml_name="ListView">
             <Arg name="width" type="usize" default="200"/>
             <Arg name="height" type="usize" default="300"/>
         </Tool>
-        <Tool category="Views" name="Table View" func="draw_table_view">
+        <Tool category="Views" name="Table View" func="draw_table_view" xml_name="TableView">
             <Arg name="width" type="usize" default="400"/>
             <Arg name="height" type="usize" default="200"/>
         </Tool>
-        <Tool category="Views" name="Tree View" func="draw_tree_view">
+        <Tool category="Views" name="Tree View" func="draw_tree_view" xml_name="TreeView">
             <Arg name="width" type="usize" default="250"/>
             <Arg name="height" type="usize" default="400"/>
+            <Arg name="root"/>
+        </Tool>
+        <Tool category="Views" name="Icon Tree View" func="draw_tree_view_icon" xml_name="TreeViewIcon">
+            <Arg name="width" type="usize" default="250"/>
+            <Arg name="height" type="usize" default="400"/>
+            <Arg name="root"/>
+            <Arg name="icon" type="&amp;[u32]" />
         </Tool>
     </Category>
 
     <Category name="Shaders">
-        <Tool category="Shaders" name="Scanlines" func="apply_scanlines" />
-        <Tool category="Shaders" name="Dither" func="apply_dither" />
-        <Tool category="Shaders" name="Glitch" func="apply_glitch" />
-        <Tool category="Shaders" name="Edge Aberration" func="apply_edge_aberration">
+        <Tool category="Shaders" name="Scanlines" func="apply_scanlines" xml_name="ScanlineFX" />
+        <Tool category="Shaders" name="Dither" func="apply_dither" xml_name="DitherFX" />
+        <Tool category="Shaders" name="Glitch" func="apply_glitch" xml_name="GlitchFX"/>
+        <Tool category="Shaders" name="Edge Aberration" func="apply_edge_aberration" xml_name="EdgeAberrationFX">
             <Arg name="max_strength" type="f32" default="1.0"/>
         </Tool>
     </Category>
 
     <Category name="Media">
-        <Tool category="Media" name="Icon" func="draw_icon">
+        <Tool category="Media" name="Icon" func="draw_icon" xml_name="Icon">
             <Arg name="width" type="usize" default="16"/>
             <Arg name="height" type="usize" default="16"/>
             <Arg name="icon_id" type="string" default="ICON_DATA"/>
