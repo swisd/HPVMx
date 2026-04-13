@@ -314,8 +314,11 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
         }
 
         "micro-c" => {
-            if parts.len() >= 2 {
-                crate::micro_c::command(parts);
+            if parts.len() >= 3 {
+                if parts[1] == "compile" {
+                    let data = crate::micro_c::compile_from_file_to_asm(parts[2].parse().unwrap());
+                    message!("\n", "{}", data)
+                }
             } else {
                 message!("\n", "Usage micro-c [args]")
             }

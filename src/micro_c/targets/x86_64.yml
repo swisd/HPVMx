@@ -1,0 +1,21 @@
+registers:
+  - rax
+  - rbx
+  - rcx
+  - rdx
+
+instructions:
+  LoadConst: "mov {dst}, {value}"
+  LoadVar: "mov {dst}, [{src}]"
+  StoreVar: "mov [{dst}], {src}"
+
+  Add: "add {dst}, {a}, {b}"
+  Sub: "sub {dst}, {a}, {b}"
+  Mul: "imul {dst}, {a}, {b}"
+  Div: "idiv {dst}, {a}, {b}"
+
+  Label: "{name}:"
+  Jump: "jmp {label}"
+  JumpIfZero: "jz {cond}, {label}"
+
+  Return: "mov rax, {src}\nret"

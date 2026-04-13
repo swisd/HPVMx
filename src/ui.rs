@@ -1015,7 +1015,7 @@ impl DashboardUI {
             // Update and draw cursor
             if self.iter % 20 == 0 {
                 unsafe {
-                    self.cursor.update_from_mouse(width, height);
+                    //self.cursor.update_from_mouse(width, height);
                 }
             }
             pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);

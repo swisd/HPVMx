@@ -32,3 +32,4 @@ elf = { version = "0.8.0", default-features = false }
 libm = "0.2.16"
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
 serde-json-core = "0.5.0"
+hashbrown = "0.17.0"

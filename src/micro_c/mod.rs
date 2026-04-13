@@ -1,33 +1,23 @@
-mod emitter;
-mod parser;
-mod commands;
+use alloc::string::String;
+use crate::micro_c::compiler::compile;
 
-use alloc::vec::Vec;
-use parser::*;
-use emitter::*;
-use crate::filesystem::FileSystem;
-pub(crate) use commands::command;
+pub mod lexer;
+pub mod parser;
+pub mod ast;
+pub mod interpreter;
+pub mod ir;
+pub mod codegen_ir;
+pub mod backend;
+pub mod regalloc;
+pub mod emitter;
+pub mod compiler;
+pub mod arch;
+pub mod stackframe;
+pub mod error;
 
-pub fn load_package(path: &str) -> Vec<Node> {
-    // 1. Read file from UEFI FAT32
-    let content = FileSystem::read_file_to_string(path).expect("Failed to read package");
 
-    // 2. Run the parser
-    let mut parser = Parser::new(&content);
-    let ast = parser.parse_all(false).expect("Syntax Error in Micro-C");
-
-    // 3. Handle (require "name") - Simple dependency resolution
-    let mut expanded_ast = Vec::new();
-    for node in ast {
-        if let Node::List(ref l) = node {
-            if l.get(0) == Some(&Node::Symbol("require".into())) {
-                if let Some(Node::Symbol(dep_path)) = l.get(1) {
-                    expanded_ast.extend(load_package(dep_path));
-                    continue;
-                }
-            }
-        }
-        expanded_ast.push(node);
-    }
-    expanded_ast
+pub fn compile_from_file_to_asm(srcpath: String) -> String {
+    let source = crate::FileSystem::read_file_to_string(&*srcpath).unwrap();
+    let asm = compile(&*source, "x86_64");
+    asm
 }

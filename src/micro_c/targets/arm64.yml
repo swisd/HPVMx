@@ -1,0 +1,11 @@
+registers:
+  - x0
+  - x1
+  - x2
+  - x3
+
+instructions:
+  LoadConst: "mov {dst}, #{value}"
+  Add: "add {dst}, {a}, {b}"
+  Sub: "sub {dst}, {a}, {b}"
+  Return: "mov x0, {src}\nret"

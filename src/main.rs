@@ -31,6 +31,16 @@ mod pm;
 mod micro_c;
 mod cpucheck;
 
+pub use crate::micro_c::lexer;
+pub use crate::micro_c::parser;
+pub use crate::micro_c::ast;
+pub use crate::micro_c::error;
+pub use crate::micro_c::arch;
+pub use crate::micro_c::codegen_ir;
+pub use crate::micro_c::ir;
+pub use crate::micro_c::regalloc;
+pub use crate::micro_c::stackframe;
+
 extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;

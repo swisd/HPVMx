@@ -1,90 +1,114 @@
-use alloc::vec::Vec;
-use crate::micro_c::parser::Node;
-
-pub struct Emitter {
-    pub code: Vec<u8>,
-}
-
-impl Emitter {
-    pub fn new() -> Self { Self { code: Vec::new() } }
-
-    fn emit(&mut self, bytes: &[u8]) {
-        self.code.extend_from_slice(bytes);
-    }
-
-    // Example: MOV RAX, Immediate64
-    fn mov_rax_imm(&mut self, val: u64) {
-        self.emit(&[0x48, 0xB8]); // REX.W + B8
-        self.emit(&val.to_le_bytes());
-    }
-
-    // Example: RET
-    fn ret(&mut self) {
-        self.emit(&[0xC3]);
-    }
-}
-
-
-impl Emitter {
-    pub fn compile_node(&mut self, node: &Node) {
-        match node {
-            Node::Number(n) => self.mov_rax_imm(*n),
-            Node::List(list) => {
-                let cmd = match &list[0] {
-                    Node::Symbol(s) => s.as_str(),
-                    _ => return,
-                };
-
-                match cmd {
-                    "poke" => {
-                        // (poke addr value)
-                        self.compile_node(&list[2]); // Calculate value -> RAX
-                        self.emit(&[0x50]);          // PUSH RAX
-                        self.compile_node(&list[1]); // Calculate addr -> RAX
-                        self.emit(&[0x5B]);          // POP RBX (value)
-                        self.emit(&[0x48, 0x89, 0x18]); // MOV [RAX], RBX
-                    }
-                    "+" => {
-                        // ( + a b)
-                        self.compile_node(&list[1]); // a -> RAX
-                        self.emit(&[0x50]);          // PUSH RAX
-                        self.compile_node(&list[2]); // b -> RAX
-                        self.emit(&[0x5B]);          // POP RBX (a)
-                        self.emit(&[0x48, 0x01, 0xD8]); // ADD RAX, RBX
-                    }
-                    "if" => self.compile_if(list),
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn compile_if(&mut self, list: &Vec<Node>) {
-        // (if cond true-block false-block)
-        self.compile_node(&list[1]); // Condition result in RAX
-        self.emit(&[0x48, 0x85, 0xC0]); // TEST RAX, RAX
-
-        // Placeholder for JZ (Jump if Zero) to false-block
-        let jz_index = self.code.len();
-        self.emit(&[0x0F, 0x84, 0x00, 0x00, 0x00, 0x00]);
-
-        self.compile_node(&list[2]); // True block
-
-        // Placeholder for JMP to end
-        let jmp_index = self.code.len();
-        self.emit(&[0xE9, 0x00, 0x00, 0x00, 0x00]);
-
-        // Fix up JZ offset
-        let false_offset = (self.code.len() - (jz_index + 6)) as i32;
-        self.code[jz_index + 2..jz_index + 6].copy_from_slice(&false_offset.to_le_bytes());
-
-        if list.len() > 3 {
-            self.compile_node(&list[3]); // False block
-        }
-
-        // Fix up JMP offset
-        let end_offset = (self.code.len() - (jmp_index + 5)) as i32;
-        self.code[jmp_index + 1..jmp_index + 5].copy_from_slice(&end_offset.to_le_bytes());
-    }
-}
+// use alloc::string::{String, ToString};
+// use crate::backend::TargetSpec;
+// use crate::ir::*;
+// use crate::regalloc::RegisterAllocator;
+// 
+// pub fn emit_asm(ir: &[IRInst], target: &TargetSpec) -> String {
+//     let mut out = String::new();
+//     let mut regs = RegisterAllocator::new(target.registers.clone());
+// 
+//     for inst in ir {
+//         match inst {
+//             IRInst::LoadConst(dst, val) => {
+//                 let r = regs.alloc(dst);
+//                 let tmpl = &target.instructions["LoadConst"];
+// 
+//                 out.push_str(
+//                     &tmpl.replace("{dst}", &r)
+//                         .replace("{value}", &val.to_string())
+//                 );
+//                 out.push('\n');
+//             }
+// 
+//             IRInst::Add(dst, a, b) => {
+//                 let rd = regs.alloc(dst);
+//                 let ra = regs.alloc(a);
+//                 let rb = regs.alloc(b);
+// 
+//                 let tmpl = &target.instructions["Add"];
+// 
+//                 out.push_str(
+//                     &tmpl.replace("{dst}", &rd)
+//                         .replace("{a}", &ra)
+//                         .replace("{b}", &rb)
+//                 );
+//                 out.push('\n');
+//             }
+// 
+//             IRInst::Sub(dst, a, b) => {
+//                 let rd = regs.alloc(dst);
+//                 let ra = regs.alloc(a);
+//                 let rb = regs.alloc(b);
+// 
+//                 let tmpl = &target.instructions["Sub"];
+// 
+//                 out.push_str(
+//                     &tmpl.replace("{dst}", &rd)
+//                         .replace("{a}", &ra)
+//                         .replace("{b}", &rb)
+//                 );
+//                 out.push('\n');
+//             }
+// 
+//             IRInst::Mul(dst, a, b) => {
+//                 let rd = regs.alloc(dst);
+//                 let ra = regs.alloc(a);
+//                 let rb = regs.alloc(b);
+// 
+//                 let tmpl = &target.instructions["Mul"];
+// 
+//                 out.push_str(
+//                     &tmpl.replace("{dst}", &rd)
+//                         .replace("{a}", &ra)
+//                         .replace("{b}", &rb)
+//                 );
+//                 out.push('\n');
+//             }
+// 
+//             IRInst::Div(dst, a, b) => {
+//                 let rd = regs.alloc(dst);
+//                 let ra = regs.alloc(a);
+//                 let rb = regs.alloc(b);
+// 
+//                 let tmpl = &target.instructions["Div"];
+// 
+//                 out.push_str(
+//                     &tmpl.replace("{dst}", &rd)
+//                         .replace("{a}", &ra)
+//                         .replace("{b}", &rb)
+//                 );
+//                 out.push('\n');
+//             }
+// 
+//             IRInst::Return(src) => {
+//                 let rs = regs.alloc(src);
+//                 let tmpl = &target.instructions["Return"];
+// 
+//                 out.push_str(
+//                     &tmpl.replace("{src}", &rs)
+//                 );
+//                 out.push('\n');
+//             }
+// 
+//             IRInst::Label(name) => {
+//                 let tmpl = &target.instructions["Label"];
+//                 out.push_str(
+//                     &tmpl.replace("{name}", name)
+//                 );
+//                 out.push('\n');
+//             }
+// 
+//             IRInst::Jump(label) => {
+//                 let tmpl = &target.instructions["Jump"];
+//                 out.push_str(
+//                     &tmpl.replace("{label}", label)
+//                 );
+//                 out.push('\n');
+//             }
+// 
+//             _ => {}
+//         }
+//     }
+// 
+//     out
+// }
