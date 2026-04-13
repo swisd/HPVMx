@@ -10,7 +10,7 @@ use crate::{hpvm_warn, message};
 
 #[repr(transparent)]
 struct AbsolutePointer(AbsolutePointerProtocol);
-unsafe impl uefi::Identify for AbsolutePointer {
+unsafe impl Identify for AbsolutePointer {
     const GUID: uefi::Guid = AbsolutePointerProtocol::GUID;
 }
 impl uefi::proto::Protocol for AbsolutePointer {}
@@ -116,7 +116,7 @@ impl Cursor {
 
                     self.left_button = state.active_buttons & 0x1 != 0;
                     self.right_button = state.active_buttons & 0x2 != 0;
-                    return 1;
+                    1
                 }
                 Ok(None) => 0, // Success, just no movement.
                 Err(_) => 30,  // Actual hardware/firmware error.
@@ -166,7 +166,7 @@ impl Cursor {
 
                     self.left_button = state.button[0];
                     self.right_button = state.button[1];
-                    return 0
+                    0
                 }
                 Ok(None) => 0, // Success, just no movement.
                 Err(_) => 30,  // Actual hardware/firmware error.
@@ -268,12 +268,12 @@ impl Cursor {
             }
 
             // Check for keypress to exit
-            let key = uefi::system::with_stdin(|i| i.read_key());
+            let key = system::with_stdin(|i| i.read_key());
             if let Ok(Some(_)) = key {
                 break;
             }
 
-            uefi::boot::stall(core::time::Duration::from_millis(100)); // 100ms
+            uefi::boot::stall(Duration::from_millis(100)); // 100ms
         }
     }
 }

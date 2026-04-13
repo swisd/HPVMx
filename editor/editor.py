@@ -90,6 +90,7 @@ class LayoutZone(QGraphicsRectItem):
 
 # --- 2. MAIN EDITOR ---
 
+# noinspection PyAttributeOutsideInit
 class PixelDesignerApp(QMainWindow):
     def __init__(self, xml_path):
         super().__init__()

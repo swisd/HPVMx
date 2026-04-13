@@ -159,7 +159,7 @@ impl DashboardUI {
     pub fn new(package_manager: PackageManager) -> Self {
         Self {
             selected_tab: DashboardTab::Overview,
-            vms: alloc::vec::Vec::new(),
+            vms: Vec::new(),
             resources: SystemResources {
                 total_memory_mb: 0,
                 used_memory_mb: 0,
@@ -197,7 +197,7 @@ impl DashboardUI {
             term_selected: false,
             term_buf: "".to_string(),
             editor: None,
-            package_manager: package_manager,
+            package_manager,
             iter: 0,
         }
     }
@@ -235,7 +235,7 @@ impl DashboardUI {
 
         push_limit(&mut self.resources.cpu_history, self.resources.cpu_usage, 100);
         let mem_percent = if self.resources.total_memory_mb > 0 {
-            (self.resources.used_memory_mb * 100 / self.resources.total_memory_mb) as u32
+            (self.resources.used_memory_mb * 100 / self.resources.total_memory_mb)
         } else { 0 };
         push_limit(&mut self.resources.mem_history, mem_percent, 100);
         push_limit(&mut self.resources.disk_read_history, self.resources.disk_read_kbps, 100);
@@ -245,8 +245,9 @@ impl DashboardUI {
         push_limit(&mut self.resources.gpu_history, self.resources.gpu_usage, 100);
     }
 
+    //noinspection GrazieInspectionRunner
     pub fn draw(&mut self) {
-        if let Some(pg) = pixel_graphics::PixelGraphics::new() {
+        if let Some(pg) = PixelGraphics::new() {
             self.iter += 1;
             let mut pg = pg.with_backbuffer();
             let (width, height) = pg.resolution();
@@ -259,7 +260,7 @@ impl DashboardUI {
             pg.draw_text(width / 2 - 160, 16, "HPVMx - Hypervisor Management Console", 0xFFFFFF);
 
             // Draw clock in top right
-            if let Ok(time) = uefi::runtime::get_time() {
+            if let Ok(time) = runtime::get_time() {
                 let time_str = alloc::format!("{:02}:{:02}:{:02}", time.hour(), time.minute(), time.second());
                 pg.draw_text(width - 100, 16, &time_str, 0xFFFF00); // Yellow clock
             }
@@ -278,7 +279,7 @@ impl DashboardUI {
             // Layout constants for consistent spacing across tabs
             let header_h = 48usize;
             let nav_h = 32usize;
-            let content_top = header_h + nav_h; // 80px fro5m top
+            let content_top = header_h + nav_h; // 80px from top
             let margin = 16usize; // outer margin
             let gutter = 12usize; // space between widgets/rows
             let line_h = 15usize; // standard text line height
@@ -562,9 +563,9 @@ impl DashboardUI {
                     for i in start_idx..logs.len() {
                         let (color, tag, msg) = &logs[i];
                         let color_hex = match color {
-                            uefi::proto::console::text::Color::Red => 0xFF0000,
-                            uefi::proto::console::text::Color::Yellow => 0xFFFF00,
-                            uefi::proto::console::text::Color::LightCyan => 0x00FFFF,
+                            Color::Red => 0xFF0000,
+                            Color::Yellow => 0xFFFF00,
+                            Color::LightCyan => 0x00FFFF,
                             _ => 0xFFFFFF,
                         };
                         let log_line = if tag.is_empty() { msg.clone() } else { alloc::format!("[{}] {}", tag, msg) };
@@ -637,8 +638,8 @@ impl DashboardUI {
                         idx_types.push(if entry.is_dir { "D" } else { "F" }  );
                         let icon = if entry.is_dir { pixel_graphics::icons::FOLDER_ICON_DATA } else {
                             let dec_syn = ["json", "xml", "toml", "yaml", "yml"];
-                            let sys_syn = ["sys", "efi"];
-                            let prog_syn = ["micro", "ufe", "dmx", "bin"];
+                            let sys_syn = ["sys", "efi", "asm"];
+                            let prog_syn = ["micro", "ufe", "dmx", "bin", "rs"];
 
 
                             let ext = entry.name.split(".").last().unwrap();
@@ -973,7 +974,7 @@ impl DashboardUI {
                                 PackageType::ResourcePack => "ResourcePacks",
                                 _ => "Other",
                             },
-                            children: children, // Reference the Vec stored in category_children
+                            children, // Reference the Vec stored in category_children
                             expanded: true,
                         }
                     })
@@ -1076,7 +1077,7 @@ impl DashboardUI {
         }
         
         // Preserve expansion state if categories already exist
-        let mut expanded_map = alloc::collections::BTreeMap::new();
+        let mut expanded_map = BTreeMap::new();
         for cat in &self.categories {
             expanded_map.insert(cat.name.clone(), cat.expanded);
         }

@@ -29,7 +29,7 @@ impl PagingManager {
         mapper: &mut OffsetPageTable,
         frame_allocator: &mut impl FrameAllocator<Size4KiB>
     ) -> Result<(), &'static str> {
-        let page: x86_64::structures::paging::Page = Page::containing_address(VirtAddr::new(virt));
+        let page: Page = Page::containing_address(VirtAddr::new(virt));
         let frame = x86_64::structures::paging::PhysFrame::containing_address(PhysAddr::new(phys));
 
         unsafe {

@@ -9,7 +9,7 @@ pub struct KernelLoader;
 
 impl KernelLoader {
     /// Load a kernel file from the filesystem
-    pub fn load_kernel(path: &str) -> Result<alloc::vec::Vec<u8>, &'static str> {
+    pub fn load_kernel(path: &str) -> Result<Vec<u8>, &'static str> {
         // Get the filesystem
         let handle = uefi::boot::get_handle_for_protocol::<SimpleFileSystem>()
             .map_err(|_| "Failed to get filesystem handle")?;
@@ -23,7 +23,7 @@ impl KernelLoader {
         // Convert path to CStr16
         let path_u16: Vec<u16> = path.encode_utf16().collect();
         message!("", "n: {:#?}", String::from_utf16_lossy(&path_u16));
-        let path_cstr = data_types::CStr16::from_u16_with_nul(&path_u16)
+        let path_cstr = CStr16::from_u16_with_nul(&path_u16)
             .map_err(move |_| {
                 "Invalid kernel path"
             })?;
@@ -60,7 +60,7 @@ impl KernelLoader {
         Ok(kernel_data)
     }
 
-    pub fn load_kernel_dangerous(path: &str) -> Result<alloc::vec::Vec<u8>, &'static str> {
+    pub fn load_kernel_dangerous(path: &str) -> Result<Vec<u8>, &'static str> {
         // Get the filesystem
         let handle = uefi::boot::get_handle_for_protocol::<SimpleFileSystem>()
             .map_err(|_| "Failed to get filesystem handle")?;
@@ -153,7 +153,7 @@ impl KernelLoader {
         // If your slice *already* has the null, you can cast.
 
 
-        match data_types::CStr16::from_u16_with_nul(data) {
+        match CStr16::from_u16_with_nul(data) {
             Ok(..) => {
                 let cstr16_direct_cast = unsafe {
                     CStr16::from_ptr(data.as_ptr() as *const _)

@@ -35,7 +35,7 @@
 
         <div class="jump-box">
             <span>Slot Index:</span>
-            <input type="number" id="jump-idx" value="0" min="0" max="65535" style="width: 100px;">
+            <label for="jump-idx"></label><input type="number" id="jump-idx" value="0" min="0" max="65535" style="width: 100px;">
             <button class="accent" onclick="jumpTo()">Jump</button>
         </div>
 
@@ -60,14 +60,14 @@
         <div class="editor-card">
             <h3>Visual Preview</h3>
             <div class="hint">Type indices separated by commas (e.g. 0,1,2,65)</div>
-            <input type="text" id="preview-input" value="0,1,2,3" style="width:96%; margin-top:5px; color:#00ff95;">
+            <label for="preview-input"></label><input type="text" id="preview-input" value="0,1,2,3" style="width:96%; margin-top:5px; color:#00ff95;">
             <canvas id="preview-canvas" width="400" height="100"></canvas>
             <div class="hint" id="active-count">Active Symbols: 0</div>
         </div>
 
         <div class="editor-card">
             <h3>Rust Code Generator</h3>
-            <textarea id="output-code" spellcheck="false" placeholder="Rust code output..."></textarea>
+            <label for="output-code"></label><textarea id="output-code" spellcheck="false" placeholder="Rust code output..."></textarea>
             <div class="button-group">
                 <button class="accent" onclick="generateCode()" style="flex:1">Generate Code</button>
                 <button onclick="importCode()" style="flex:1">Import Code</button>

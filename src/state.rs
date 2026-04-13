@@ -17,7 +17,7 @@ pub trait Persistable {
 
     /// Returns the raw bytes of the struct itself (the stack/address part)
     fn get_stack_bytes(&self) -> &[u8] {
-        let size = core::mem::size_of_val(self);
+        let size = size_of_val(self);
         unsafe { core::slice::from_raw_parts(self as *const _ as *const u8, size) }
     }
 
@@ -43,7 +43,7 @@ impl KernelState {
         let mut export_buffer = Vec::new();
 
         // 1. Capture the raw struct (The "Address" part)
-        let size = core::mem::size_of::<Self>();
+        let size = size_of::<Self>();
         let ptr = (self as *const Self) as *const u8;
         let self_bytes = unsafe { core::slice::from_raw_parts(ptr, size) };
         export_buffer.extend_from_slice(self_bytes);
@@ -89,7 +89,7 @@ impl Persistable for KernelState {
 
     fn get_heap_bytes(&self) -> Vec<u8> {
         let mut data = Vec::new();
-        let size = core::mem::size_of::<LogEntry>();
+        let size = size_of::<LogEntry>();
         let ptr = &self as *const _ as *const u8;
         unsafe {
             data.extend_from_slice(core::slice::from_raw_parts(ptr, size));

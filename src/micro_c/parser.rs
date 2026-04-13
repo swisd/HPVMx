@@ -11,13 +11,14 @@ pub struct Parser {
     current: Token,
     next: Token,
     position: u64,
+    condition: u8,
 }
 
 impl Parser {
     pub fn new(mut lexer: Lexer) -> Self {
         let current = lexer.next_token();
         let next = lexer.next_token();
-        Self { lexer, current, next, position:0 }
+        Self { lexer, current, next, position:0, condition:0, }
     }
 
     fn advance(&mut self) {
@@ -30,6 +31,7 @@ impl Parser {
             self.advance();
         } else {
             error(&format!("(@{:#X}), Expected {:?}, got {:?}\n {} {}\n ^", self.position, t, self.current, self.current, self.next));
+            self.advance();
             return;
         }
     }
@@ -119,6 +121,7 @@ impl Parser {
         let name = match self.current.clone() {
             Token::Ident(s) => s,
             _ => {error("Expected identifier");
+                self.advance();
                 return Stmt::None},
         };
         self.advance();
@@ -138,6 +141,7 @@ impl Parser {
                 }
                 _ => {
                     error("Expected type");
+                    self.advance();
                     return Stmt::None
                 },
             }
@@ -175,7 +179,9 @@ impl Parser {
         let name = match self.current.clone() {
             Token::Ident(s) => s,
             _ => {
-                error("Expected struct name"); return Stmt::None
+                error("Expected struct name");
+                self.advance();
+                return Stmt::None
             },
         };
         self.advance();
@@ -187,7 +193,9 @@ impl Parser {
         while self.current != Token::RBrace {
             let field = match self.current.clone() {
                 Token::Ident(s) => s,
-                _ => {error("Expected field name"); return Stmt::None},
+                _ => {error("Expected field name");
+                    self.advance();
+                    return Stmt::None},
             };
             self.advance();
 
@@ -202,7 +210,9 @@ impl Parser {
                         _ => Type::Struct(t),
                     }
                 }
-                _ => {error("Expected type"); Type::I64},
+                _ => {error("Expected type");
+                    self.advance();
+                    Type::I64},
             };
 
             self.expect(Token::Semicolon);
@@ -227,7 +237,11 @@ impl Parser {
 
         let name = match self.current.clone() {
             Token::Ident(s) => s,
-            _ => {error("Expected function name"); return Stmt::None},
+            _ => {
+                error("Expected function name");
+                self.advance();
+                return Stmt::None
+            },
         };
         self.advance();
 
@@ -445,7 +459,10 @@ impl Parser {
 
                             let field = match self.current.clone() {
                                 Token::Ident(s) => s,
-                                _ => {error(&format!("(@{:#X}) Expected field name\n {} {}\n ^", self.position, self.current, self.next)); return Expr::Number(0)},
+                                _ => {
+                                    error(&format!("(@{:#X}) Expected field name\n {} {}\n ^", self.position, self.current, self.next));
+                                    self.advance();
+                                    return Expr::Number(0)},
                             };
                             self.advance();
 
@@ -466,7 +483,10 @@ impl Parser {
                 expr
             }
 
-            _ => {error(&format!("(@{:#X}) Unexpected token: {}\n {} {}\n ^", self.position, self.current, self.current, self.next)); Expr::Number(0)},
+            _ => {
+                error(&format!("(@{:#X}) Unexpected token: {}\n {} {}\n ^", self.position, self.current, self.current, self.next));
+                self.advance();
+                Expr::Number(0)},
         }
     }
 }

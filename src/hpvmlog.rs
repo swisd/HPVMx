@@ -61,7 +61,7 @@ impl Persistable for &'static Option<Vec<LogEntry>> {
 
     fn get_heap_bytes(&self) -> Vec<u8> {
         let mut data = Vec::new();
-        let size = core::mem::size_of::<Option<Vec<LogEntry>>>();
+        let size = size_of::<Option<Vec<LogEntry>>>();
         let ptr = &self as *const _ as *const u8;
         unsafe {
             data.extend_from_slice(core::slice::from_raw_parts(ptr, size));

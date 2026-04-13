@@ -101,7 +101,7 @@ fn parse_dhcp_offer(data: &[u8]) -> Option<([u8; 4], [u8; 4], [u8; 4])> {
 }
 
 pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
-    let mac = crate::devices::net_hw::get_mac();
+    let mac = net_hw::get_mac();
     let mut packet = DhcpPacket {
         op: 1, htype: 1, hlen: 6, hops: 0,
         xid: 0x12345678, secs: 0, flags: 0x0000u16.to_be(), //0x8000u16.to_be(),
@@ -175,7 +175,7 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
 }
 
 pub fn send_dhcp_request(offered_ip: [u8; 4], server_ip: [u8; 4]) {
-    let mac = crate::devices::net_hw::get_mac();
+    let mac = net_hw::get_mac();
     let mut packet = DhcpPacket {
         op: 1, htype: 1, hlen: 6, hops: 0,
         xid: 0x12345678, // Use the same XID as the Discover
@@ -225,7 +225,7 @@ fn poll_for_dhcp_response() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
     let mut buf = [0u8; 1514];
 
     // Drain the RX buffer specifically looking for DHCP
-    if let Ok(sz) = crate::devices::net_hw::rx(&mut buf) {
+    if let Ok(sz) = net_hw::rx(&mut buf) {
         let frame = &buf[..sz];
         if frame.len() < size_of::<EthHeader>() + 20 + 8 { return None; } // Eth + IP + UDP min
 

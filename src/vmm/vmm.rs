@@ -285,7 +285,7 @@ impl HypervisorManager {
             vcpu.set_stack_pointer(stack_gpa + stack_size as u64);
         }
 
-        vm.state = crate::vmm::vm::VmState::Running;
+        vm.state = VmState::Running;
         hpvm_info!("Boot", "VM {} is now running from {}", vm_id, media_path);
 
         Ok(())

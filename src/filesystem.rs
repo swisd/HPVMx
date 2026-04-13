@@ -31,7 +31,7 @@ impl Persistable for &mut State {
 
     fn get_heap_bytes(&self) -> Vec<u8> {
         let mut data = Vec::new();
-        let size = core::mem::size_of::<State>();
+        let size = size_of::<State>();
         let ptr = &self as *const _ as *const u8;
         unsafe {
             data.extend_from_slice(core::slice::from_raw_parts(ptr, size));
@@ -446,16 +446,16 @@ impl FileSystem {
     }
 
     /// Read a file and return its contents as a Vec<u8>
-    pub fn read_file(path: &str) -> Result<alloc::vec::Vec<u8>, &'static str> {
+    pub fn read_file(path: &str) -> Result<Vec<u8>, &'static str> {
         use uefi::proto::media::file::FileMode;
 
         // Get boot services
 
         // Find the SimpleFileSystem protocol
-        let handle = uefi::boot::get_handle_for_protocol::<uefi::proto::media::fs::SimpleFileSystem>()
+        let handle = uefi::boot::get_handle_for_protocol::<SimpleFileSystem>()
             .map_err(|_| "failed to get SimpleFileSystem")?;
 
-        let mut file_system = uefi::boot::open_protocol_exclusive::<uefi::proto::media::fs::SimpleFileSystem>(handle)
+        let mut file_system = uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle)
             .map_err(|_| "failed to open SimpleFileSystem")?;
 
         let mut root = file_system
@@ -467,20 +467,20 @@ impl FileSystem {
             .open(
                 Self::path_to_cstr16(path)?,
                 FileMode::Read,
-                uefi::proto::media::file::FileAttribute::empty(),
+                FileAttribute::empty(),
             )
             .map_err(|_| "failed to open file")?;
 
         // Get file info to determine size
         let mut info_buffer = [0u8; 256];
         let file_info = file
-            .get_info::<uefi::proto::media::file::FileInfo>(&mut info_buffer)
+            .get_info::<FileInfo>(&mut info_buffer)
             .map_err(|_| "failed to get file info")?;
 
         let file_size = file_info.file_size() as usize;
 
         // Read file contents
-        let mut buffer = alloc::vec::Vec::with_capacity(file_size);
+        let mut buffer = Vec::with_capacity(file_size);
         buffer.resize(file_size, 0u8);
 
         let mut regular_file = file.into_regular_file().ok_or("not a regular file")?;
@@ -491,9 +491,9 @@ impl FileSystem {
     }
 
     /// Read a file as a string
-    pub fn read_file_to_string(path: &str) -> Result<alloc::string::String, &'static str> {
+    pub fn read_file_to_string(path: &str) -> Result<String, &'static str> {
         let data = Self::read_file(path)?;
-        alloc::string::String::from_utf8(data)
+        String::from_utf8(data)
             .map_err(|_| "file is not valid UTF-8")
     }
 }

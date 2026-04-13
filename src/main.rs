@@ -93,21 +93,22 @@ static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
 
 static mut HYPERVISOR: Option<HypervisorManager> = None;
 
+//noinspection RsUnreachableCode
 #[allow(dead_code, unused, unused_must_use, non_camel_case_types, nonstandard_style)]
 #[entry]
 fn main() -> Status {
     uefi::helpers::init().unwrap();
     hpvm_info!("UEFI", "init uefi helpers");
-    crate::hpvmlog::init_log_buffer();
+    hpvmlog::init_log_buffer();
 
     // FIXED: Using addr_of_mut! to avoid static_mut_refs errors
     unsafe {
         let heap_ptr = addr_of_mut!(HEAP_STORAGE) as *mut u8;
-        let heap_size = core::mem::size_of_val(&&raw const HEAP_STORAGE);
+        let heap_size = size_of_val(&&raw const HEAP_STORAGE);
         ALLOCATOR.lock().init(heap_ptr as usize, heap_size);
     }
 
-    uefi::system::with_stdout(|stdout| {
+    system::with_stdout(|stdout| {
         let _ = stdout.clear();
         let _ = stdout.enable_cursor(true);
     });
@@ -118,7 +119,7 @@ fn main() -> Status {
     // 2. In uefi 0.36.1 with 'alloc' feature, use boot::memory_map()
     // This returns a MemoryMapOwned object automatically using the heap.
     //let size = uefi::boot::memory_map_size().map_size;
-    let size = uefi::boot::PAGE_SIZE;
+    let size = boot::PAGE_SIZE;
     hpvm_info!("page", "system required buffer of {} bytes", size);
 
     // 16KB is usually enough for most servers; 32KB is safe for high-end systems.
@@ -241,10 +242,10 @@ fn main() -> Status {
 
     loop {
         // drive network timers (loopback stack)
-        crate::devices::net_stack::poll_tick();
+        devices::net_stack::poll_tick();
 
         // Print Prompt
-        uefi::system::with_stdout(|s| core::fmt::Write::write_str(s, "\nHPVMx> ").unwrap());
+        system::with_stdout(|s| Write::write_str(s, "\nHPVMx> ").unwrap());
 
         // Simple line reader
         input_buffer.clear();
@@ -284,17 +285,17 @@ fn main() -> Status {
 
 fn read_line(buf: &mut String) {
     loop {
-        let mut events = [uefi::system::with_stdin(|i| i.wait_for_key_event().unwrap())];
-        uefi::boot::wait_for_event(&mut events).unwrap();
+        let mut events = [system::with_stdin(|i| i.wait_for_key_event().unwrap())];
+        boot::wait_for_event(&mut events).unwrap();
 
-        if let Some(key) = uefi::system::with_stdin(|i| i.read_key().unwrap()) {
+        if let Some(key) = system::with_stdin(|i| i.read_key().unwrap()) {
             match key {
                 Key::Special(ScanCode::DELETE) => {
                     buf.remove(buf.len() - 1);
                     // if buf.pop().is_some() {
                     //     uefi::system::with_stdout(|s| core::fmt::Write::write_str(s, "\u{0008} \u{0008}").unwrap());
                     // }
-                    uefi::system::with_stdout(|s| {
+                    system::with_stdout(|s| {
                         s.clear().unwrap(); // Clear current line
                         s.write_str("HPVMx> ").unwrap(); // Rewrite prompt
                         s.write_str(&buf[..buf.len() - 1]).unwrap(); // Rewrite buffer without last char
@@ -303,14 +304,14 @@ fn read_line(buf: &mut String) {
                 Key::Printable(c) => {
                     let ch = char::from(c);
                     if ch == '\r' || ch == '\n' {
-                        uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, ch).unwrap());
-                        uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, "\n".parse().unwrap()).unwrap());
+                        system::with_stdout(|s| Write::write_char(s, ch).unwrap());
+                        system::with_stdout(|s| Write::write_char(s, "\n".parse().unwrap()).unwrap());
                         break;
                     }
                     if ch != '`' /* != '\u{8}' */ {
                         buf.push(ch);
                         // Echo to screen
-                        uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, ch).unwrap());
+                        system::with_stdout(|s| Write::write_char(s, ch).unwrap());
                     }
                 }
                 _ => {}
@@ -321,17 +322,17 @@ fn read_line(buf: &mut String) {
 
 fn read_line_int(buf: &mut String) -> i32 {
     loop {
-        let mut events = [uefi::system::with_stdin(|i| i.wait_for_key_event().unwrap())];
-        uefi::boot::wait_for_event(&mut events).unwrap();
+        let mut events = [system::with_stdin(|i| i.wait_for_key_event().unwrap())];
+        boot::wait_for_event(&mut events).unwrap();
 
-        if let Some(key) = uefi::system::with_stdin(|i| i.read_key().unwrap()) {
+        if let Some(key) = system::with_stdin(|i| i.read_key().unwrap()) {
             match key {
                 Key::Special(ScanCode::DELETE) => {
                     buf.remove(buf.len() - 1);
                     // if buf.pop().is_some() {
                     //     uefi::system::with_stdout(|s| core::fmt::Write::write_str(s, "\u{0008} \u{0008}").unwrap());
                     // }
-                    uefi::system::with_stdout(|s| {
+                    system::with_stdout(|s| {
                         s.clear().unwrap(); // Clear current line
                         s.write_str("> ").unwrap(); // Rewrite prompt
                         s.write_str(&buf[..buf.len() - 1]).unwrap(); // Rewrite buffer without last char
@@ -340,8 +341,8 @@ fn read_line_int(buf: &mut String) -> i32 {
                 Key::Printable(c) => {
                     let ch = char::from(c);
                     if ch == '\r' || ch == '\n' {
-                        uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, ch).unwrap());
-                        uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, "\n".parse().unwrap()).unwrap());
+                        system::with_stdout(|s| Write::write_char(s, ch).unwrap());
+                        system::with_stdout(|s| Write::write_char(s, "\n".parse().unwrap()).unwrap());
                         if buf.contains("run") {
                             break 0;
                         }
@@ -352,7 +353,7 @@ fn read_line_int(buf: &mut String) -> i32 {
                     if ch != '`' /* != '\u{8}' */ {
                         buf.push(ch);
                         // Echo to screen
-                        uefi::system::with_stdout(|s| core::fmt::Write::write_char(s, ch).unwrap());
+                        system::with_stdout(|s| Write::write_char(s, ch).unwrap());
                     }
                 }
                 _ => {}
@@ -445,7 +446,7 @@ fn shutdown(mode: char) {
     match mode {
         's' => {
             hpvm_info!("HPVMx", "shutting down...");
-            let mmap = unsafe { uefi::boot::exit_boot_services(None) };
+            let mmap = unsafe { boot::exit_boot_services(None) };
 
             hpvm_info!("malloc", "Memory Map:");
             for desc in mmap.entries() {
@@ -825,7 +826,7 @@ fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
 fn init_mouse() {
     if let Ok(handle) = boot::get_handle_for_protocol::<SimplePointer>() {
         let _ = boot::connect_controller(handle, None, None, true);
-        if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<SimplePointer>(handle) {
+        if let Ok(mut mouse) = boot::open_protocol_exclusive::<SimplePointer>(handle) {
 
 
             // This is the "magic" line for VirtualBox PS/2
@@ -851,7 +852,7 @@ unsafe fn init_mouse_deep_scan() {
 
         // 1. Force UEFI to connect every device it sees on the PCI/USB bus
         // This is critical because passed-through USB devices aren't always auto-started
-        if let Ok(all_handles) = boot::find_handles::<uefi::proto::device_path::DevicePath>() {
+        if let Ok(all_handles) = boot::find_handles::<DevicePath>() {
             for handle in all_handles {
                 let _ = boot::connect_controller(handle, None, None, true);
             }
@@ -862,11 +863,11 @@ unsafe fn init_mouse_deep_scan() {
             hpvm_info!("usbhid", "Found {} SimplePointer handles", handles.len());
 
             for (i, handle) in handles.iter().enumerate() {
-                if let Ok(mut mouse) = boot::open_protocol::<SimplePointer>(uefi::boot::OpenProtocolParams {
+                if let Ok(mut mouse) = boot::open_protocol::<SimplePointer>(boot::OpenProtocolParams {
                     handle: *handle,
-                    agent: uefi::boot::image_handle(),
+                    agent: boot::image_handle(),
                     controller: None,
-                }, uefi::boot::OpenProtocolAttributes::GetProtocol) {
+                }, boot::OpenProtocolAttributes::GetProtocol) {
 
                     let r = mouse.reset(false);
                     boot::stall(Duration::from_millis(100));

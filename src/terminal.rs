@@ -1,3 +1,4 @@
+use alloc::borrow::ToOwned;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
@@ -45,7 +46,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 }
             }
         },
-        "clear" => { uefi::system::with_stdout(|s| s.clear().unwrap()); }
+        "clear" => { system::with_stdout(|s| s.clear().unwrap()); }
         "ls" => FileSystem::list_files(),
         "cd" => {
             if (command.len() == 2) {
@@ -187,13 +188,10 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
             if command.len() < 3 {
                 message!("\n", "Usage: boot [vm_id] [iso_path|efi_path]");
             } else {
-                let vm_id: u32 = match command[1].parse() {
-                    Ok(id) => id,
-                    Err(_) => {
-                        hpvm_error!("Boot", "invalid VM ID");
-                        22
-                    }
-                };
+                let vm_id: u32 = command[1].parse().unwrap_or_else(|_| {
+                    hpvm_error!("Boot", "invalid VM ID");
+                    22
+                });
                 let path = command[2];
                 boot_vm_with_media(vm_id, path);
             }
@@ -218,13 +216,10 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
             if command.len() < 2 {
                 message!("\n", "Usage: console [vm_id]");
             } else {
-                let vm_id: u32 = match command[1].parse() {
-                    Ok(id) => id,
-                    Err(_) => {
-                        hpvm_error!("Console", "invalid VM ID");
-                        22
-                    }
-                };
+                let vm_id: u32 = command[1].parse().unwrap_or_else(|_| {
+                    hpvm_error!("Console", "invalid VM ID");
+                    22
+                });
                 attach_vm_console(vm_id);
             }
         }
@@ -317,7 +312,9 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
             if parts.len() >= 3 {
                 if parts[1] == "compile" {
                     let data = crate::micro_c::compile_from_file_to_asm(parts[2].parse().unwrap());
-                    message!("\n", "{}", data)
+                    let newpath = parts[2].split(".").next().unwrap().to_owned() + ".asm";
+                    FileSystem::touch(&*newpath);
+                    FileSystem::write_to_file(&*newpath, &*data, 'w');
                 }
             } else {
                 message!("\n", "Usage micro-c [args]")
@@ -416,7 +413,7 @@ fn shutdown(mode: char) {
     match mode {
         's' => {
             hpvm_info!("HPVMx", "shutting down...");
-            let mmap = unsafe { uefi::boot::exit_boot_services(None) };
+            let mmap = unsafe { boot::exit_boot_services(None) };
 
             hpvm_info!("malloc", "Memory Map:");
             for desc in mmap.entries() {
@@ -717,7 +714,7 @@ fn show_dashboard_ui(package_manager: &PackageManager) {
             for (id, name, state) in vms {
                 let vm_info = ui::VmDisplayInfo {
                     id,
-                    name: alloc::string::String::from(name),
+                    name: String::from(name),
                     state: state.to_string(),
                     cpu_usage: 25,  // Placeholder
                     memory_usage_mb: 128,  // Placeholder
@@ -729,7 +726,7 @@ fn show_dashboard_ui(package_manager: &PackageManager) {
 
             // Get system resources
             let stats = hv.get_stats();
-            let net_stats = crate::devices::net_stack::stats();
+            let net_stats = devices::net_stack::stats();
             let mut core_usage = Vec::new();
             for i in 0..8 { core_usage.push(25 + i); }
             devices::net_stack::poll_tick();
@@ -760,7 +757,7 @@ fn show_dashboard_ui(package_manager: &PackageManager) {
     let mut last_refresh = 0;
     let refresh_rate = 15;
 
-    let mut RNG: XorShiftRng = crate::rng::XorShiftRng::new(20);
+    let mut RNG: XorShiftRng = XorShiftRng::new(20);
 
     // Basic example using the uefi crate
 
@@ -789,7 +786,7 @@ fn show_dashboard_ui(package_manager: &PackageManager) {
                         });
                     }
                     let stats = hv.get_stats();
-                    let net_stats = crate::devices::net_stack::stats();
+                    let net_stats = devices::net_stack::stats();
 
                     // Real per-core usage isn't available easily in UEFI without timers/interrupts tracking,
                     // so we simulate it based on total cpu_usage or random jitter for "realism".
@@ -829,7 +826,7 @@ fn show_dashboard_ui(package_manager: &PackageManager) {
 
         dashboard.draw();
 
-        let key = uefi::system::with_stdin(|i| {
+        let key = system::with_stdin(|i| {
             match i.read_key() {
                 Ok(Some(key)) => Some(key),
                 _ => None,
@@ -879,9 +876,9 @@ fn show_dashboard_ui(package_manager: &PackageManager) {
 
             if dashboard.exit_requested() {
                 hpvm_info!("Dashboard", "exiting dashboard");
-                uefi::system::with_stdout(|s| {
+                system::with_stdout(|s| {
                     let _ = s.clear();
-                    core::fmt::Write::write_str(s, "\nHPVMx> ").unwrap();
+                    Write::write_str(s, "\nHPVMx> ").unwrap();
                 });
                 break;
 

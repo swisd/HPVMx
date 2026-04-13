@@ -109,7 +109,7 @@ pub fn init() -> Result<(), &'static str> {
             let mac_len = (mode.hw_address_size as usize).min(32);
             let src = &mode.current_address.0[..mac_len];
             mac[..mac_len].copy_from_slice(src);
-            let mtu = mode.max_packet_size as u32;
+            let mtu = mode.max_packet_size;
             let media_present: bool = mode.media_present.into();
 
             unsafe {

@@ -454,7 +454,7 @@ pub fn defs() -> (i32, i32, i32, Vec<u8>, usize, usize, &'static [u8], char, boo
     let mut frame_cap: usize = 0;
     //let mut frame_ptr: *mut u8 = std::ptr::null_mut();
     let mut frame_slice: &[u8] = &[];
-    return (idx, ln, col, data, data_len, data_cap, data_slice, char0, error, error_code, error_message, error_message_len, error_message_slice, error_message_cap, filepath, filepath_len, filepath_slice, filepath_cap, frame, frame_len, frame_cap, frame_slice)
+    (idx, ln, col, data, data_len, data_cap, data_slice, char0, error, error_code, error_message, error_message_len, error_message_slice, error_message_cap, filepath, filepath_len, filepath_slice, filepath_cap, frame, frame_len, frame_cap, frame_slice)
 }
 
 
@@ -484,7 +484,7 @@ pub struct Rect {
     p2: Point,
 }
 
-// `Pair` owns resources: two heap allocated integers
+// `Pair` owns resources: two heap-allocated integers
 pub struct Pair(Box<i32>, Box<i32>);
 
 pub struct Vec1 {
@@ -617,7 +617,7 @@ impl Point {
     }
 
     fn new(x: f64, y: f64) -> Point {
-        Point { x: x, y: y }
+        Point { x, y }
     }
 
     fn distance(&self, other: &Point) -> f64 {
@@ -638,7 +638,7 @@ impl Rect {
         // `self` gives access to the struct fields via the dot operator
         let Point { x: x1, y: y1 } = self.p1;
         let Point { x: x2, y: y2 } = self.p2;
-        // `abs` is a `f64` method that returns the absolute value of the caller
+        // `abs` is an `f64` method that returns the absolute value of the caller
         ((x1 - x2) * (y1 - y2)).abs()
     }
 
@@ -688,37 +688,37 @@ impl Pair {
 
 impl Uniform {
     fn new(pos: Vec2, scale: Vec2, rot: f64) -> Uniform {
-        Uniform { pos: pos, scale: scale, rot: rot }
+        Uniform { pos, scale, rot }
     }
 }
 
 impl Linear {
     fn new(pos: Vec2) -> Linear {
-        Linear { pos: pos }
+        Linear { pos }
     }
 }
 
 impl Vector {
     fn new(pos: Vec2, scale: Vec2, rot: f64) -> Vector {
-        Vector { pos: pos, scale: scale, rot: rot }
+        Vector { pos, scale, rot }
     }
 }
 
 impl Matrix {
     fn new(pos: Vec2, scale: Vec2) -> Matrix {
-        Matrix { pos: pos, scale: scale }
+        Matrix { pos, scale }
     }
 }
 
 impl Scalar {
     fn new(pos: Vec2, scale: Vec2) -> Scalar {
-        Scalar { pos: pos, scale: scale }
+        Scalar { pos, scale }
     }
 }
 
 impl Vec1 {
     fn new(x: f64) -> Vec1 {
-        Vec1 { x: x }
+        Vec1 { x }
     }
     fn distance(&self, other: &Vec1) -> f64 {
         sqrt((self.x - other.x) * (self.x - other.x))
@@ -730,7 +730,7 @@ impl Vec1 {
 
 impl Vec2 {
     fn new(x: f64, y: f64) -> Vec2 {
-        Vec2 { x: x, y: y }
+        Vec2 { x, y }
     }
     fn distance(&self, other: &Vec2) -> f64 {
         sqrt((self.x - other.x) * (self.x - other.x) + (self.y - other.y) * (self.y - other.y))
@@ -743,7 +743,7 @@ impl Vec2 {
 
 impl Vec3 {
     fn new(x: f64, y: f64, z: f64) -> Vec3 {
-        Vec3 { x: x, y: y, z: z }
+        Vec3 { x, y, z }
     }
     fn distance(&self, other: &Vec3) -> f64 {
         sqrt((self.x - other.x) * (self.x - other.x) + (self.y - other.y) * (self.y - other.y) + (self.z - other.z) * (self.z - other.z))
@@ -756,7 +756,7 @@ impl Vec3 {
 
 impl Vec4 {
     fn new(x: f64, y: f64, z: f64, w: f64) -> Vec4 {
-        Vec4 { x: x, y: y, z: z, w: w }
+        Vec4 { x, y, z, w }
     }
     fn distance(&self, other: &Vec4) -> f64 {
         sqrt((self.x - other.x) * (self.x - other.x) + (self.y - other.y) * (self.y - other.y) + (self.z - other.z) * (self.z - other.z) + (self.w - other.w) * (self.w - other.w))
@@ -772,7 +772,7 @@ impl Mat2 {
         Mat2 { m: [[1.0, 0.0], [0.0, 1.0]] }
     }
     fn new(m: [[f64; 2]; 2]) -> Mat2 {
-        Mat2 { m: m }
+        Mat2 { m }
     }
     fn shift(&self, x: f64, y: f64) -> Mat2 {
         Mat2 { m: [[1.0, 0.0], [0.0, 1.0]] }
@@ -784,7 +784,7 @@ impl Mat3 {
         Mat3 { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }
     }
     fn new(m: [[f64; 3]; 3]) -> Mat3 {
-        Mat3 { m: m }
+        Mat3 { m }
     }
     fn shift(&self, x: f64, y: f64, z: f64) -> Mat3 {
         Mat3 { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }
@@ -796,7 +796,7 @@ impl Mat4 {
         Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] }
     }
     fn new(m: [[f64; 4]; 4]) -> Mat4 {
-        Mat4 { m: m }
+        Mat4 { m }
     }
     fn shift(&self, x: f64, y: f64, z: f64, w: f64) -> Mat4 {
         Mat4 { m: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]] }
@@ -805,7 +805,7 @@ impl Mat4 {
 
 impl Frame {
     fn new(frame: String, pos: Vec2, width: f64, height: f64, time: f64, data: Vec<u8>, mat: Mat4, rect: Rect, pair: Pair) -> Frame {
-        Frame { frame: frame, pos: pos, width: width, height: height, time: time, data: data, mat: mat, rect: rect, pair: pair }
+        Frame { frame, pos, width, height, time, data, mat, rect, pair }
     }
     fn append(&mut self, mut frame: Frame) {
         self.data.append(&mut frame.data);
@@ -822,7 +822,7 @@ impl Frame {
 // Errors
 impl Error {
     pub(crate) fn new(code: i32, message: String) -> Error {
-        Error { code: code, message: message }
+        Error { code, message }
     }
     pub(crate) fn print(&self) {
         message!("\n", "Error: {} :: {}", self.code, self.message);
@@ -892,7 +892,7 @@ pub type KeyboardInterrupt = Interrrupt;
 
 impl Warning {
     fn new(code: i32, message: String) -> Warning {
-        Warning { code: code, message: message }
+        Warning { code, message }
     }
     fn print(&self) {
         message!("\n", "Warning: {} :: {}", self.code, self.message);
@@ -918,7 +918,7 @@ pub type UserWarning = Warning;
 
 impl Object {
     fn new(name: String, data: String, loc: ADDR16, size: Size, type_: Enum, parent: Option<Box<Object>>, children: Vec<Box<Object>>, next: Option<Box<Object>>, prev: Option<Box<Object>>, first: Option<Box<Object>>, last: Option<Box<Object>>, flags: Enum) -> Object {
-        Object { name: name, data: data, loc: loc, size: size, type_: type_, parent: parent, children: children, next: next, prev: prev, first: first, last: last, flags: flags }
+        Object { name, data, loc, size, type_, parent, children, next, prev, first, last, flags }
     }
     fn repr(&self) {
         message!("\n", "<Object {} at {}", self.name, self.loc);
@@ -927,19 +927,19 @@ impl Object {
 
 impl Param {
     fn new(name: String, data: Object) -> Param {
-        Param { name: name, data: data }
+        Param { name, data }
     }
 }
 
 impl Scene {
     fn new(name: String, params: Vec<Param>) -> Scene {
-        Scene { name: name, params: params }
+        Scene { name, params }
     }
 }
 
 impl Polygon {
     fn new(points: Vec<(Vertex, Vertex, Vertex)>) -> Polygon {
-        Polygon { points: points }
+        Polygon { points }
     }
 
     fn num_points(&self) -> usize {
@@ -957,7 +957,7 @@ impl Polygon {
 
 impl Vertex {
     fn new(pos: Vec2, tex: Vec2, col: Vec3, norm: Vec3) -> Vertex {
-        Vertex { pos: pos, tex: tex, col: col, norm: norm }
+        Vertex { pos, tex, col, norm }
     }
     fn transform(&self, mat: &Mat4) -> () {
         let Vertex { pos, tex, col, norm } = &self;
@@ -1007,7 +1007,7 @@ pub struct Serializer {
 
 impl Serializer {
     fn new(key: USHORT, data: [BYTE; 8]) -> Serializer {
-        Serializer { key: key, data }
+        Serializer { key, data }
     }
     fn serialize(&self) -> Vec<BYTE> {
         self.data.to_vec()
@@ -1185,7 +1185,7 @@ pub mod net {
         }
 
         pub struct Device {
-            // Need to pull from     github.com/torvalds/linux/include/linux/phy.h
+            // Need to pull from github.com/torvalds/linux/include/linux/phy.h
             i: u32,
             phyindex: u32,
             phy_device_id: u32,
@@ -1206,20 +1206,20 @@ pub mod net {
 
             /// Issues a PHY software reset.
             fn soft_reset(_dev: &mut Device) -> Result<(), ()> {
-                return Err(());
+                Err(())
             }
 
             /// Sets up device-specific structures during discovery.
             fn probe(_dev: &mut Device) -> Result<(), ()> {
-                return Err(());
+                Err(())
             }
 
             fn suspend(_dev: &mut Device) -> Result<(), ()> {
-                return Err(());
+                Err(())
             }
 
             fn resume(_dev: &mut Device) -> Result<(), ()> {
-                return Err(());
+                Err(())
             }
         }
 
@@ -1328,19 +1328,19 @@ pub mod net {
 
             impl Mmd {
                 /// Physical Medium Attachment/Dependent.
-                pub const PMAPMD: Self = Mmd(1 as u8);
+                pub const PMAPMD: Self = Mmd(1u8);
                 /// WAN interface sublayer.
-                pub const WIS: Self = Mmd(2 as u8);
+                pub const WIS: Self = Mmd(2u8);
                 /// Physical coding sublayer.
-                pub const PCS: Self = Mmd(3 as u8);
+                pub const PCS: Self = Mmd(3u8);
                 /// PHY Extender sublayer.
-                pub const PHYXS: Self = Mmd(4 as u8);
+                pub const PHYXS: Self = Mmd(4u8);
                 /// DTE Extender sublayer.
-                pub const DTEXS: Self = Mmd(5 as u8);
+                pub const DTEXS: Self = Mmd(5u8);
                 /// Transmission convergence.
-                pub const TC: Self = Mmd(6 as u8);
+                pub const TC: Self = Mmd(6u8);
                 /// Auto negotiation.
-                pub const AN: Self = Mmd(7 as u8);
+                pub const AN: Self = Mmd(7u8);
                 /// Separated PMA (1).
                 pub const SEPARATED_PMA1: Self = Mmd(8);
                 /// Separated PMA (2).
@@ -1354,11 +1354,11 @@ pub mod net {
                 /// Power unit.
                 pub const POWER_UNIT: Self = Mmd(13);
                 /// Clause 22 extension.
-                pub const C22_EXT: Self = Mmd(29 as u8);
+                pub const C22_EXT: Self = Mmd(29u8);
                 /// Vendor specific 1.
-                pub const VEND1: Self = Mmd(30 as u8);
+                pub const VEND1: Self = Mmd(30u8);
                 /// Vendor specific 2.
-                pub const VEND2: Self = Mmd(31 as u8);
+                pub const VEND2: Self = Mmd(31u8);
             }
 
             /// A single MDIO clause 45 register device and address.

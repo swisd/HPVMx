@@ -3,6 +3,7 @@ use alloc::{format, vec};
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 use crate::ast::*;
+use crate::error::error;
 use crate::ir::*;
 
 pub struct IRGenerator {
@@ -170,7 +171,7 @@ impl IRGenerator {
                 out
             }
 
-            _ => unimplemented!("{:#X} {:?}", self.position, expr),
+            _ => {error(&format!("{:#X} {:?}", self.position, expr)); String::new()}
         }
     }
 }

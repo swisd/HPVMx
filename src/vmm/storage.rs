@@ -41,10 +41,10 @@ impl StorageManager {
         let disk = VirtualDisk {
             id: self.disks.len() as u32,
             vm_id,
-            name: alloc::string::String::from("disk0"),
+            name: String::from("disk0"),
             size_mb,
             disk_type: DiskType::RawImage,
-            image_path: alloc::string::String::from(image_path),
+            image_path: String::from(image_path),
         };
         self.disks.push(disk);
         Ok(self.disks.len() as u32 - 1)
