@@ -1,0 +1,6 @@
+import <FileSystem>
+
+fn compile_xml_ui(path) {
+    let data = FileSystem.read_to_string(path)
+    // more needed
+}

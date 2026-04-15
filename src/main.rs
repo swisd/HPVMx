@@ -1,4 +1,4 @@
-#![allow(unsafe_code, dead_code, non_camel_case_types, non_snake_case, unused, unused_must_use, unused_features)]
+#![allow(unsafe_code, dead_code, non_camel_case_types, non_snake_case, unused, unused_must_use, unused_features, static_mut_refs, unsafe_op_in_unsafe_fn)]
 #![feature(str_as_str)]
 #![feature(abi_x86_interrupt)]
 #![feature(core_float_math)]
@@ -30,6 +30,8 @@ mod terminal;
 mod pm;
 mod micro_c;
 mod cpucheck;
+mod env;
+mod apps;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -212,8 +214,9 @@ fn main() -> Status {
         init_mouse_deep_scan();
     }
 
-    devices::net_hw::init();
-    devices::net::status();
+    if let Ok(result) = devices::net_hw::init() {
+        devices::net::status();
+    }
 
     hpvm_info!("HPVMx", "init sequence complete.");
     let mut PACKAGE_MANAGER: PackageManager = PackageManager::new();

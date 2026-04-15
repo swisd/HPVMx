@@ -1,118 +1,170 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>UEFI Icon Designer Pro</title>
+    <title>UEFI Icon Designer Pro - Full Suite</title>
     <style>
         body { background: #1a1a1a; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; }
         .main-container { display: flex; gap: 20px; background: #252525; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        #canvas-container { position: relative; border: 1px solid #444; background: #000; cursor: crosshair; }
-        canvas { image-rendering: pixelated; display: block; }
-        .controls { display: flex; flex-direction: column; gap: 15px; width: 250px; }
-        .tool-group { background: #333; padding: 10px; border-radius: 4px; }
-        input[type="color"], input[type="number"], button { width: 100%; margin-top: 5px; box-sizing: border-box; }
-        textarea { width: 800px; height: 120px; margin-top: 20px; background: #111; color: #0f0; border: 1px solid #444; font-family: monospace; padding: 10px; }
-        label { font-size: 12px; color: #aaa; text-transform: uppercase; }
-        .hint { font-size: 11px; color: #777; margin-top: 5px; }
+
+        #canvas-container {
+            position: relative;
+            width: 400px; height: 400px;
+            border: 1px solid #444;
+            background-color: #000;
+        }
+
+        #bg-image-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: contain;
+            opacity: 0.5;
+            pointer-events: none;
+            z-index: 0;
+            display: none;
+        }
+
+        .checkered {
+            background-image: linear-gradient(45deg, #333 25%, transparent 25%), linear-gradient(-45deg, #333 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #333 75%), linear-gradient(-45deg, transparent 75%, #333 75%);
+            background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        }
+
+        canvas { image-rendering: pixelated; display: block; position: relative; z-index: 1; cursor: crosshair; background: transparent; }
+
+        .controls { display: flex; flex-direction: column; gap: 12px; width: 260px; }
+        .tool-group { background: #333; padding: 12px; border-radius: 4px; border-left: 4px solid #444; }
+        label { font-size: 10px; color: #aaa; text-transform: uppercase; font-weight: bold; display: block; margin-bottom: 4px; }
+
+        input, button, select { width: 100%; box-sizing: border-box; margin-top: 4px; }
+        .flex-row { display: flex; gap: 4px; }
+
+        .btn-convert { background: #e67e22; color: white; border: none; padding: 10px; font-weight: bold; cursor: pointer; border-radius: 4px; margin-top: 10px; }
+        .btn-convert:hover { background: #d35400; }
+
+        .shift-btn { background: #444; color: white; border: 1px solid #555; padding: 5px; cursor: pointer; }
+        .shift-btn:hover { background: #555; }
+
+        textarea { width: 800px; height: 100px; margin-top: 20px; background: #111; color: #0f0; border: 1px solid #444; font-family: monospace; padding: 10px; font-size: 11px; }
     </style>
 </head>
 <body>
+
 <h2>UEFI Icon Designer Pro</h2>
 
 <div class="main-container">
-    <div id="canvas-container">
+    <div id="canvas-container" class="checkered">
+        <img id="bg-image-layer" src="" />
         <canvas id="editor" width="400" height="400"></canvas>
     </div>
 
     <div class="controls">
         <div class="tool-group">
-            <label>Brush Color</label>
-            <input type="color" id="colorPicker" value="#00ffcc">
-            <div class="hint">Right-click to erase</div>
+            <label>1. Source Image</label>
+            <input type="file" id="imageLoader" accept="image/*">
+            <select id="fitMode" onchange="updateFit()">
+                <option value="contain">Contain (Aspect Ratio)</option>
+                <option value="fill">Stretch to Fit</option>
+            </select>
         </div>
 
-        <div class="tool-group">
-            <label>Grid Size</label>
-            <input type="number" id="gridSize" value="16" min="8" max="64">
-            <button onclick="resizeGrid()">Reset/Resize</button>
-        </div>
-
-        <div class="tool-group">
-            <label>Transform</label>
-            <button onclick="shiftPixels(0, -1)">↑ Up</button>
-            <div style="display:flex; gap:5px">
-                <button onclick="shiftPixels(-1, 0)">← L</button>
-                <button onclick="shiftPixels(1, 0)">R →</button>
+        <div class="tool-group" style="border-left-color: #3498db;">
+            <label>2. Region Mask (%)</label>
+            <div class="flex-row">
+                <input type="number" id="maskX" value="0" placeholder="X" oninput="updateStyle()">
+                <input type="number" id="maskY" value="0" placeholder="Y" oninput="updateStyle()">
             </div>
-            <button onclick="shiftPixels(0, 1)">↓ Down</button>
+            <div class="flex-row">
+                <input type="number" id="maskW" value="100" placeholder="W" oninput="updateStyle()">
+                <input type="number" id="maskH" value="100" placeholder="H" oninput="updateStyle()">
+            </div>
         </div>
 
-        <button style="background:#27ae60; color:white; border:none; padding:10px;" onclick="exportCode()">Export to Rust</button>
-        <button style="background:#2980b9; color:white; border:none; padding:10px;" onclick="importFromRust()">Import from Rust</button>
+        <div class="tool-group" style="border-left-color: #e67e22;">
+            <label>3. Generation</label>
+            <input type="number" id="gridSize" value="32" min="8" max="128">
+            <button class="btn-convert" onclick="convertToBitmap()">Generate Bitmap</button>
+        </div>
+
+        <div class="tool-group">
+            <label>4. Pixel Shift (Motion)</label>
+            <button class="shift-btn" onclick="shiftPixels(0, -1)">↑ Move Up</button>
+            <div class="flex-row">
+                <button class="shift-btn" onclick="shiftPixels(-1, 0)">← Left</button>
+                <button class="shift-btn" onclick="shiftPixels(1, 0)">Right →</button>
+            </div>
+            <button class="shift-btn" onclick="shiftPixels(0, 1)">↓ Move Down</button>
+        </div>
+
+        <div class="tool-group">
+            <label>Manual Edit</label>
+            <input type="color" id="colorPicker" value="#00ffcc">
+            <button onclick="toggleBG()">Toggle Reference</button>
+        </div>
+
+        <button style="background:#27ae60; color:white; border:none; padding:10px; font-weight:bold;" onclick="exportCode()">Export to Rust</button>
     </div>
 </div>
 
-<textarea id="ioBuffer" placeholder="Paste Rust array here to import, or click Export..."></textarea>
+<textarea id="ioBuffer" placeholder="Rust code output..."></textarea>
 
 <script>
     const canvas = document.getElementById('editor');
-    const ctx = canvas.getContext('2d');
-    const colorPicker = document.getElementById('colorPicker');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const bgImage = document.getElementById('bg-image-layer');
     const sizeInput = document.getElementById('gridSize');
     const ioBuffer = document.getElementById('ioBuffer');
 
-    let grid = []; // Flat array of hex colors
+    let grid = [];
     let isDrawing = false;
 
-    function initGrid() {
+    // --- Image Setup ---
+    document.getElementById('imageLoader').addEventListener('change', function(e) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            bgImage.src = event.target.result;
+            bgImage.style.display = 'block';
+            updateStyle();
+        };
+        reader.readAsDataURL(e.target.files[0]);
+    });
+
+    function updateFit() { bgImage.style.objectFit = document.getElementById('fitMode').value; }
+    function updateStyle() {
+        const x = parseInt(document.getElementById('maskX').value || 0);
+        const y = parseInt(document.getElementById('maskY').value || 0);
+        const w = parseInt(document.getElementById('maskW').value || 100);
+        const h = parseInt(document.getElementById('maskH').value || 100);
+        bgImage.style.clipPath = `inset(${y}% ${100-(x+w)}% ${100-(y+h)}% ${x}%)`;
+    }
+
+    // --- Conversion Logic ---
+    function convertToBitmap() {
+        if (!bgImage.src) return alert("Upload image first");
         const size = parseInt(sizeInput.value);
-        grid = new Array(size * size).fill("#00000000"); // Start transparent
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCanvas.width = size; tempCanvas.height = size;
+
+        tempCtx.imageSmoothingEnabled = false;
+        tempCtx.webkitImageSmoothingEnabled = false;
+        tempCtx.mozImageSmoothingEnabled = false;
+        tempCtx.msImageSmoothingEnabled = false;
+
+        const mX = (document.getElementById('maskX').value / 100) * bgImage.naturalWidth;
+        const mY = (document.getElementById('maskY').value / 100) * bgImage.naturalHeight;
+        const mW = (document.getElementById('maskW').value / 100) * bgImage.naturalWidth;
+        const mH = (document.getElementById('maskH').value / 100) * bgImage.naturalHeight;
+
+        tempCtx.drawImage(bgImage, mX, mY, mW, mH, 0, 0, size, size);
+        const imgData = tempCtx.getImageData(0, 0, size, size).data;
+        grid = [];
+        for (let i = 0; i < imgData.length; i += 4) {
+            grid.push(imgData[i+3] < 120 ? "#00000000" : "#" + ((1 << 24) + (imgData[i] << 16) + (imgData[i+1] << 8) + imgData[i+2]).toString(16).slice(1));
+        }
         render();
     }
 
-    function render() {
-        const size = parseInt(sizeInput.value);
-        const cellSize = canvas.width / size;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Draw Pixels
-        for(let i=0; i<grid.length; i++) {
-            const x = i % size;
-            const y = Math.floor(i / size);
-            if (grid[i] !== "#00000000") {
-                ctx.fillStyle = grid[i];
-                ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-            }
-        }
-
-        // Draw Grid Lines
-        ctx.strokeStyle = '#333';
-        ctx.lineWidth = 0.5;
-        for(let i=0; i<=size; i++) {
-            ctx.beginPath(); ctx.moveTo(i*cellSize, 0); ctx.lineTo(i*cellSize, canvas.height); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(0, i*cellSize); ctx.lineTo(canvas.width, i*cellSize); ctx.stroke();
-        }
-    }
-
-    function handleInput(e) {
-        if(!isDrawing) return;
-        const rect = canvas.getBoundingClientRect();
-        const size = parseInt(sizeInput.value);
-        const cellSize = canvas.width / size;
-        const x = Math.floor((e.clientX - rect.left) / cellSize);
-        const y = Math.floor((e.clientY - rect.top) / cellSize);
-
-        if(x >= 0 && x < size && y >= 0 && y < size) {
-            const idx = y * size + x;
-            grid[idx] = (e.buttons === 2) ? "#00000000" : colorPicker.value;
-            render();
-        }
-    }
-
-    canvas.onmousedown = (e) => { isDrawing = true; handleInput(e); };
-    window.onmouseup = () => isDrawing = false;
-    canvas.onmousemove = handleInput;
-    canvas.oncontextmenu = (e) => e.preventDefault(); // Disable context menu for right-click erase
-
+    // --- Pixel Motion Logic ---
     function shiftPixels(dx, dy) {
         const size = parseInt(sizeInput.value);
         let newGrid = new Array(size * size).fill("#00000000");
@@ -129,42 +181,51 @@
         render();
     }
 
-    function exportCode() {
+    // --- Editor Engine ---
+    function render() {
         const size = parseInt(sizeInput.value);
-        const hexArray = grid.map(c => {
-            if(c === "#00000000") return "0x00000000";
-            return "0xFF" + c.slice(1).toUpperCase(); // Adding full opacity FF
-        });
+        const cellSize = canvas.width / size;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for(let i=0; i<grid.length; i++) {
+            if (grid[i] !== "#00000000") {
+                ctx.fillStyle = grid[i];
+                ctx.fillRect((i % size) * cellSize, Math.floor(i / size) * cellSize, cellSize + 0.4, cellSize + 0.4);
+            }
+        }
+    }
+
+    function toggleBG() {
+        const isVisible = bgImage.style.display !== 'none';
+        bgImage.style.display = isVisible ? 'none' : 'block';
+        document.getElementById('canvas-container').classList.toggle('checkered', isVisible);
+    }
+
+    canvas.onmousedown = (e) => { isDrawing = true; handleDraw(e); };
+    window.onmouseup = () => isDrawing = false;
+    canvas.onmousemove = handleDraw;
+    canvas.oncontextmenu = (e) => e.preventDefault();
+
+    function handleDraw(e) {
+        if(!isDrawing) return;
+        const rect = canvas.getBoundingClientRect();
+        const size = parseInt(sizeInput.value);
+        const cellSize = canvas.width / size;
+        const x = Math.floor((e.clientX - rect.left) / cellSize);
+        const y = Math.floor((e.clientY - rect.top) / cellSize);
+        if(x >= 0 && x < size && y >= 0 && y < size) {
+            grid[y * size + x] = (e.buttons === 2) ? "#00000000" : document.getElementById('colorPicker').value;
+            render();
+        }
+    }
+
+    function exportCode() {
+        const hexArray = grid.map(c => (c === "#00000000") ? "0x00000000" : "0xFF" + c.slice(1).toUpperCase());
         ioBuffer.value = `pub static ICON_DATA: [u32; ${hexArray.length}] = [\n    ${hexArray.join(", ")}\n];`;
     }
 
-    function importFromRust() {
-        const text = ioBuffer.value;
-        // Match hex codes 0xXXXXXXXX
-        const matches = text.match(/0x[0-9A-Fa-f]{8}/g);
-        if(!matches) {
-            alert("No valid hex colors found in the buffer!");
-            return;
-        }
-
-        const newSize = Math.sqrt(matches.length);
-        if(!Number.isInteger(newSize)) {
-            alert("Array length is not a perfect square! (e.g., 256 for 16x16)");
-        }
-
-        sizeInput.value = newSize;
-        grid = matches.map(hex => {
-            if(hex === "0x00000000") return "#00000000";
-            return "#" + hex.slice(4); // Convert 0xFFRRGGBB to #RRGGBB
-        });
-        render();
-    }
-
-    function resizeGrid() {
-        if(confirm("This will clear the current canvas. Continue?")) initGrid();
-    }
-
-    initGrid();
+    // Initialize
+    grid = new Array(32 * 32).fill("#00000000");
+    render();
 </script>
 </body>
 </html>

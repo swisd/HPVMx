@@ -56,12 +56,12 @@ export fn main() {
     // 
     // ARRAY TESTING
     // 
-    let arr = [1, 2, 3, 4, 5];
+    //let arr = [1, 2, 3, 4, 5];
 
     // swap arr[0] and arr[4]
-    let temp = arr[0];
-    arr[0] = arr[4];
-    arr[4] = temp;
+    //let temp = arr[0];
+    //arr[0] = arr[4];
+    //arr[4] = temp;
 
     // 
     // STRUCT TESTING

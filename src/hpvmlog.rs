@@ -15,6 +15,7 @@ pub struct LogEntry {
 const MAX_LOGS: usize = 4096;
 pub static mut LOG_BUFFER: Option<Vec<LogEntry>> = None;
 static LOG_COUNT: AtomicUsize = AtomicUsize::new(0);
+pub static mut LOGGING_SILENCED: bool = false;
 
 pub fn init_log_buffer() {
     unsafe {
@@ -75,9 +76,11 @@ impl Persistable for &'static Option<Vec<LogEntry>> {
 #[macro_export] macro_rules! hpvm_log {
     ($color:expr, $prefix:expr, $($arg:tt)*) => {
         {
+            unsafe {
             let msg = alloc::format!($($arg)*);
             $crate::hpvmlog::push_log($color, $prefix, &msg);
-            
+
+            if !crate::hpvmlog::LOGGING_SILENCED {
             uefi::system::with_stdout(|stdout| {
                 use core::fmt::Write;
                 let _ = stdout.set_color($color, uefi::proto::console::text::Color::Black);
@@ -91,7 +94,9 @@ impl Persistable for &'static Option<Vec<LogEntry>> {
                 let _ = write!(stdout, "\n");
                 let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
             })
+                }
         }
+            }
     };
 }
 
@@ -101,6 +106,8 @@ impl Persistable for &'static Option<Vec<LogEntry>> {
             let msg = alloc::format!($($arg)*);
             $crate::hpvmlog::push_log(uefi::proto::console::text::Color::White, "", &msg);
 
+            unsafe {
+                if !crate::hpvmlog::LOGGING_SILENCED {
             uefi::system::with_stdout(|stdout| {
                 use core::fmt::Write;
                 let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
@@ -109,6 +116,8 @@ impl Persistable for &'static Option<Vec<LogEntry>> {
                 let _ = write!(stdout, "\n");
             })
         }
+                }
+            }
     }
 }
 

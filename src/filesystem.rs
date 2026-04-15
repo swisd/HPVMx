@@ -292,16 +292,15 @@ impl FileSystem {
         buffer.resize(info.file_size() as usize, 0u8);
         file.read(&mut buffer).map_err(|_| "Read error")?;
 
-        uefi::system::with_stdout(|stdout| {
-            if let Ok(text) = core::str::from_utf8(&buffer) {
-                let _ = write!(stdout, "{}", text);
-            } else {
-                for (i, byte) in buffer.iter().enumerate() {
-                    if i % 16 == 0 { let _ = write!(stdout, "\n{:08X}: ", i); }
-                    let _ = write!(stdout, "{:02X} ", byte);
-                }
-            }
-        });
+       
+       if let Ok(text) = core::str::from_utf8(&buffer) {
+           message!("\n", "{}", text);
+       } else {
+           for (i, byte) in buffer.iter().enumerate() {
+               if i % 16 == 0 { message!("\n", "\n{:08X}: ", i); }
+               message!("\n", "{:02X} ", byte);
+           }
+       }
         Ok(())
     }
 

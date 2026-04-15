@@ -1,0 +1,7 @@
+{
+  "arch": "x86_64",
+  "entryloc": "0x1000",
+  "entryargs": {
+    "env": "Environment"
+  }
+}

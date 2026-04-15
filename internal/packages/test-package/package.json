@@ -3,6 +3,6 @@
   "version": "0.0.1",
   "description": "Micro-C Testing package",
   "author": "swisd",
-  "deps": [],
+  "deps": ["micro-extension-lib"],
   "package_type": "Executable"
 }

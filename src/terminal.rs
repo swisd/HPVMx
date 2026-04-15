@@ -1,19 +1,27 @@
+
+
 use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
+use elf::dynamic;
 use libm::expm1;
 use uefi::mem::memory_map::MemoryMap;
 use uefi::{boot, runtime, system};
 use uefi_raw::Status;
 use uefi_raw::table::runtime::ResetType;
 use crate::filesystem::FileSystem;
-use crate::{hpvm_error, hpvm_info, hpvm_warn, hpvm_log, message, read_line, ui, HYPERVISOR, devices, loader, logiclang_int, read_line_int};
+use crate::{hpvm_error, hpvm_info, hpvm_warn, hpvm_log, message, read_line, ui, HYPERVISOR, devices, loader, logiclang_int, read_line_int, env, apps};
 use crate::kernel::KernelLoader;
 use crate::rng::XorShiftRng;
 use crate::ui::DashboardUI;
 use uefi::proto::console::text::{Color, Key};
+use crate::env::{Application, ApplicationContext};
 use crate::pm::PackageManager;
+use crate::apps::simple_app::SimpleApp;
+use crate::hpvmlog::LOGGING_SILENCED;
+use crate::ui::pixel_graphics::PixelGraphics;
 
 pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manager: &mut PackageManager) {
     match command.as_slice()[0] {
@@ -208,7 +216,9 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
 
         // New: Dashboard UI
         "dashboard" => {
-            show_dashboard_ui(package_manager);
+            unsafe {
+                show_dashboard_ui(package_manager);
+            }
         }
 
         // New: Console access to running VM
@@ -318,6 +328,19 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 }
             } else {
                 message!("\n", "Usage micro-c [args]")
+            }
+        }
+
+        "run-app" => {
+            if parts.len() >= 2 {
+                if parts[1] == "simple-app" {
+                    unsafe {
+                        let runnable = SimpleApp { color: [0xFFFFFF, 0x000000, 0xFFAA77] };
+                        let app = Application::new(runnable);
+                        let mut context = ApplicationContext::new(app, None);
+                        context.run()
+                    }
+                }
             }
         }
 
@@ -701,8 +724,9 @@ fn run_efi_application(efi_path: &str, args: &[&str]) {
 
 #[allow(static_mut_refs)]
 /// Display the dashboard UI
-fn show_dashboard_ui(package_manager: &PackageManager) {
+unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
     let mut dashboard = DashboardUI::new(package_manager.clone());
+    LOGGING_SILENCED = true;
     dashboard.refresh_storage();
     dashboard.refresh_devices();
 
@@ -806,8 +830,8 @@ fn show_dashboard_ui(package_manager: &PackageManager) {
                         cpu_core_usage: core_usage,
                         disk_read_kbps: RNG.rand_range(50, 250), // Mocked
                         disk_write_kbps: RNG.rand_range(50, 250), // Mocked
-                        net_rx_kbps: if RNG.rand_range(0, 500) < 400 {0} else { 150 } ,//(net_stats.rx_bytes / 1024) % 1000, // Very rough
-                        net_tx_kbps: if RNG.rand_range(0, 500) < 400 {0} else { 150 } ,//(net_stats.tx_bytes / 1024) % 1000, // Very rough
+                        net_rx_kbps: if RNG.rand_range(0, 500) < 400 { 0 } else { 150 }, //(net_stats.rx_bytes / 1024) % 1000, // Very rough
+                        net_tx_kbps: if RNG.rand_range(0, 500) < 400 { 0 } else { 150 }, //(net_stats.tx_bytes / 1024) % 1000, // Very rough
                         gpu_usage: RNG.rand_range(1, 30) as u32, // Mocked
                         cpu_history: alloc::vec![],
                         mem_history: alloc::vec![],
@@ -825,6 +849,7 @@ fn show_dashboard_ui(package_manager: &PackageManager) {
         }
 
         dashboard.draw();
+
 
         let key = system::with_stdin(|i| {
             match i.read_key() {
@@ -876,15 +901,22 @@ fn show_dashboard_ui(package_manager: &PackageManager) {
 
             if dashboard.exit_requested() {
                 hpvm_info!("Dashboard", "exiting dashboard");
-                system::with_stdout(|s| {
-                    let _ = s.clear();
-                    Write::write_str(s, "\nHPVMx> ").unwrap();
-                });
+                if let Some(mut pg) = PixelGraphics::new() {
+                    let mut pg = pg.with_backbuffer();
+                    let (width, height) = pg.resolution();
+                    //pg.exit()
+                }
                 break;
-
             }
         }
     }
+    uefi::system::with_stdout(|stdout| {
+        // Reset() is the most effective way to tell UEFI "ignore previous pixels, start over"
+        let _ = stdout.reset(false);
+        let _ = stdout.clear();
+    });
+    LOGGING_SILENCED = false;
+
     return;
 }
 

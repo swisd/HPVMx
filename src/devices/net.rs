@@ -4,7 +4,8 @@
 
 #![allow(dead_code)]
 
-use crate::{hpvm_info, Color};
+use alloc::format;
+use crate::{hpvm_info, message, Color};
 use crate::hpvm_log;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -125,9 +126,12 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
     packet.options[cursor + 1] = 7;
     packet.options[cursor + 2] = 1;
 
-    net_stack::send_raw_udp([0,0,0,0], [255,255,255,255], [0xFF; 6], 67, 68, unsafe {
+    if let Ok(result) = net_stack::send_raw_udp([0,0,0,0], [255,255,255,255], [0xFF; 6], 67, 68, unsafe {
         core::slice::from_raw_parts(&packet as *const _ as *const u8, size_of::<DhcpPacket>())
-    });
+    }) {} else {
+        hpvm_warn!("NET", "Could not send RAWUDP")
+    }
+
 
     let mut timeout = 24;
     let mut cfg: ([u8; 4], [u8; 4], [u8; 4]) = ([0; 4], [0; 4], [0; 4]);
@@ -210,7 +214,7 @@ pub fn send_dhcp_request(offered_ip: [u8; 4], server_ip: [u8; 4]) {
 
     hpvm_info!("NET", "sending rawudp {:?}", packet);
     // Broadcast the request
-    net_stack::send_raw_udp(
+    if let Ok(result) = net_stack::send_raw_udp(
         [0, 0, 0, 0],
         [255, 255, 255, 255],
         [0xFF; 6],
@@ -218,7 +222,9 @@ pub fn send_dhcp_request(offered_ip: [u8; 4], server_ip: [u8; 4]) {
         unsafe {
             core::slice::from_raw_parts(&packet as *const _ as *const u8, size_of::<DhcpPacket>())
         }
-    );
+    ) {} else {
+        hpvm_warn!("NET", "Could not send RAWUDP")
+    }
 }
 
 fn poll_for_dhcp_response() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
@@ -310,17 +316,16 @@ pub fn status() {
     let stats = net_stack::stats();
     match net_hw::get_info() {
         Some(info) => {
-            uefi::system::with_stdout(|s| {
-                use core::fmt::Write as _;
-                let _ = write!(s, "\nNIC Status:\n");
-                let _ = write!(s, "  MAC:      {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}\n",
-                               info.mac[0], info.mac[1], info.mac[2], info.mac[3], info.mac[4], info.mac[5]);
-                let _ = write!(s, "  MTU:      {}\n", info.mtu);
-                let _ = write!(s, "  Link:     {}\n", if info.media_present { "UP" } else { "DOWN" });
-                let _ = write!(s, "  Backend:  {}\n", backend);
-                let _ = write!(s, "  Traffic:  RX {} pkts ({} bytes) / TX {} pkts ({} bytes)\n",
-                               stats.rx_pkts, stats.rx_bytes, stats.tx_pkts, stats.tx_bytes);
-            });
+            let mut out = String::new();
+            out.push_str("\nNIC Status:\n");
+            out.push_str(&format!("  MAC:      {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}\n",
+                                  info.mac[0], info.mac[1], info.mac[2], info.mac[3], info.mac[4], info.mac[5]));
+            out.push_str(&format!("  MTU:      {}\n", info.mtu));
+            out.push_str(&format!("  Link:     {}\n", if info.media_present { "UP" } else { "DOWN" }));
+            out.push_str(&format!("  Backend:  {}\n", backend));
+            out.push_str(&format!("  Traffic:  RX {} pkts ({} bytes) / TX {} pkts ({} bytes)\n",
+                                  stats.rx_pkts, stats.rx_bytes, stats.tx_pkts, stats.tx_bytes));
+            message!("\n", "{}", out)
         }
         None => hpvm_error!("NET", "no NIC detected"),
     }

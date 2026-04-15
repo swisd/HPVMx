@@ -835,6 +835,18 @@ impl DashboardUI {
                     pg.draw_icon(x + 144, y + 400, 16, 16, &pixel_graphics::icons::HDD_INTERNAL_ICON_DATA);
                     pg.draw_icon(x + 168, y + 400, 16, 16, &pixel_graphics::icons::SETTINGS_ICON_DATA);
                     pg.draw_icon(x + 200, y + 400, 32, 32, &pixel_graphics::icons::GTK_CUBE_32_ICON_DATA);
+                    pg.draw_icon(x, y + 450, 32, 32, &pixel_graphics::icons::CD_DISK_32_ICON_DATA);
+                    pg.draw_icon(x + 50, y + 450, 32, 32, &pixel_graphics::icons::SCRIPT_YELLOW_32_ICON_DATA);
+                    pg.draw_icon(x + 100, y + 450, 32, 32, &pixel_graphics::icons::TAPE_WRITE_32_ICON_DATA);
+                    pg.draw_icon(x + 150, y + 450, 32, 32, &pixel_graphics::icons::CUBE_TREE_32_ICON_DATA);
+                    pg.draw_icon(x + 200, y + 450, 32, 32, &pixel_graphics::icons::GEAR_WINDOW_SETTINGS_32_ICON_DATA);
+                    pg.draw_icon(x + 250, y + 450, 32, 32, &pixel_graphics::icons::GRAPHICS_2D_32_ICON_DATA);
+                    pg.draw_icon(x, y + 500, 32, 32, &pixel_graphics::icons::BLADE_NETWORK_32_ICON_DATA);
+                    pg.draw_icon(x + 50, y + 500, 32, 32, &pixel_graphics::icons::INTEGRATED_CIRCUIT_32_ICON_DATA);
+                    pg.draw_icon(x + 100, y + 500, 32, 32, &pixel_graphics::icons::WINOBJ_SEMAPHORE_32_ICON_DATA);
+                    pg.draw_icon(x + 150, y + 500, 32, 32, &pixel_graphics::icons::REGEDIT_CUBES_32_ICON_DATA);
+                    pg.draw_icon(x + 200, y + 500, 32, 32, &pixel_graphics::icons::REGISTRY_HIVE_32_ICON_DATA);
+                    pg.draw_icon(x + 250, y + 500, 32, 32, &pixel_graphics::icons::DATABASE_CLUSTER_32_ICON_DATA);
                 }
                 DashboardTab::Editor => {
                     if let Some(ref ed) = self.editor {
@@ -1019,12 +1031,17 @@ impl DashboardUI {
                     //self.cursor.update_from_mouse(width, height);
                 }
             }
+
             pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
+
+            // apply settings to these items
+            //pg.app_context_border("");
 
             //pg.apply_scanlines();
             //pg.apply_dither();
             //pg.apply_glitch();
             //pg.apply_edge_aberration(0.5);
+
 
 
             pg.flip();
@@ -1564,6 +1581,9 @@ impl DashboardUI {
                         '4' => { self.cursor.x += 4; }
                         'x' => {
                             runtime::reset(ResetType::SHUTDOWN, Status::SUCCESS, Some(&[0]))
+                        }
+                        'q' => {
+                            self.exit_requested = true
                         }
 
 

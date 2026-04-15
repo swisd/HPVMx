@@ -1,7 +1,7 @@
 {
-  "name": "xml-ui",
+  "name": "micro-extension-lib",
   "version": "0.0.1",
-  "description": "XML UI Testing Package",
+  "description": "Micro-C Extensions",
   "author": "swisd",
   "deps": [],
   "package_type": "Library"
