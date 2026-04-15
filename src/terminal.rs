@@ -6,7 +6,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
 use elf::dynamic;
-use libm::expm1;
+use libm::{expm1, y0};
 use uefi::mem::memory_map::MemoryMap;
 use uefi::{boot, runtime, system};
 use uefi_raw::Status;
@@ -17,7 +17,7 @@ use crate::kernel::KernelLoader;
 use crate::rng::XorShiftRng;
 use crate::ui::DashboardUI;
 use uefi::proto::console::text::{Color, Key};
-use crate::env::{Application, ApplicationContext};
+use crate::env::{Application, /*ApplicationContext*/};
 use crate::pm::PackageManager;
 use crate::apps::simple_app::SimpleApp;
 use crate::hpvmlog::LOGGING_SILENCED;
@@ -331,17 +331,18 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
             }
         }
 
-        "run-app" => {
-            if parts.len() >= 2 {
-                if parts[1] == "simple-app" {
-                    unsafe {
-                        let runnable = SimpleApp { color: [0xFFFFFF, 0x000000, 0xFFAA77] };
-                        let app = Application::new(runnable);
-                        let mut context = ApplicationContext::new(app, None);
-                        context.run()
-                    }
-                }
-            }
+        "run-app" => unsafe {
+            // if parts.len() >= 2 {
+            //     let app_name = parts[1];
+            //
+            //     if let Some(mut context) = ApplicationContext::from_name(app_name) {
+            //         // If you want the app to take over the whole screen immediately:
+            //         context.run();
+            //     } else {
+            //         hpvm_error!("Shell", "Unknown application: {}", app_name);
+            //     }
+            // }
+            message!("\n", "run-app is deprecated. use the Apps tab in dashboard instead")
         }
 
 
@@ -773,6 +774,7 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                 net_rx_history: alloc::vec![],
                 net_tx_history: alloc::vec![],
                 gpu_history: alloc::vec![],
+                fps: 0,
             });
         }
     }
@@ -783,12 +785,27 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
 
     let mut RNG: XorShiftRng = XorShiftRng::new(20);
 
-    // Basic example using the uefi crate
 
+    let mut frame_count = 0;
+    let mut last_second_time = uefi::runtime::get_time().unwrap();
+    let mut current_fps = 0;
 
     loop {
         // Limit frame rate to ~60Hz (16,666 microseconds)
         boot::stall(core::time::Duration::from_micros(16_666));
+        frame_count += 1;
+
+        let now = uefi::runtime::get_time().unwrap();
+
+        // Check if 1 second has passed (simplistic check)
+        if now.second() != last_second_time.second() {
+            current_fps = frame_count;
+            frame_count = 0;
+            last_second_time = now;
+
+            // Optional: Log it or update the dashboard
+            // dashboard.set_fps(current_fps);
+        }
 
         // Periodically refresh data from hypervisor
         last_refresh += 1;
@@ -840,6 +857,7 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                         net_rx_history: alloc::vec![],
                         net_tx_history: alloc::vec![],
                         gpu_history: alloc::vec![],
+                        fps: current_fps,
                     });
                 }
             }
@@ -850,6 +868,29 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
 
         dashboard.draw();
 
+        dashboard.active_apps.retain_mut(|ctx| {
+            // Logic: Give the app CPU time
+            let mut vars = Vec::new();
+            ctx.application.logic(&mut vars);
+
+            // Draw: Give the app a reference to the screen
+            // Note: You can pass a 'Viewport' or 'Offset' here so
+            // the app knows where its "window" is located.
+            if let Some(pg) = PixelGraphics::new() {
+                let mut pg = pg.with_backbuffer();
+                let (width, height) = pg.resolution();
+                ctx.application.draw(&mut pg, &vars, 200, 200);
+                pg.app_context_border(&ctx.application.name);
+            }
+
+            // Input: Forward the key if this app is focused
+            // This reads key from stdin, which might consume it for others.
+            // But we only do it if the app is focused.
+            // For now, let's keep it simple.
+            
+            !ctx.exit_requested
+        });
+
 
         let key = system::with_stdin(|i| {
             match i.read_key() {
@@ -859,9 +900,19 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
         });
 
         if let Some(key) = key {
-            let old_tab = dashboard.get_tab();
-            dashboard.handle_input(key);
-            let new_tab = dashboard.get_tab();
+            let mut old_tab = dashboard.get_tab();
+            // Forward input to focused app if any
+            if let Some(focused_idx) = dashboard.focused_process_idx {
+                if focused_idx < dashboard.active_apps.len() {
+                    let app = &mut dashboard.active_apps[focused_idx];
+                    app.handle_input(key);
+                    if app.exit_requested {
+                        dashboard.focused_process_idx = None;
+                    }
+                }
+            } else {
+                dashboard.handle_input(key);
+            }
 
             // Handle VM Actions
             let is_enter = matches!(key, Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A);

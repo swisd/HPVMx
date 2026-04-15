@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use core::fmt::Write;
 use uefi::proto::console::text::{Key, OutputMode};
 use uefi::system;
+use crate::apps;
 use crate::hpvmlog::LOGGING_SILENCED;
 use crate::ui::pixel_graphics::PixelGraphics;
 
@@ -56,7 +57,7 @@ pub struct Application {
 
 
 pub trait Runnable {
-    fn draw(&self, graphics_entity: &mut PixelGraphics, vars: &Vec<String>); // Adjust types as needed
+    fn draw(&self, graphics_entity: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize); // Adjust types as needed
     fn logic(&mut self, vars: &mut Vec<String>);
     fn input(&mut self, key: Key);
 }
@@ -66,28 +67,34 @@ pub trait BackgroundTask {
     fn tick(&mut self) -> bool;
 }
 
-
+pub trait AppInfo {
+    fn name(&self) -> &str;
+    fn version(&self) -> &str;
+    fn author(&self) -> &str { "Unknown" }
+    fn icon(&self) -> [u32; 1024];
+}
 
 impl Application {
-    pub fn new<T>(inner: T) -> Self
-        where
-            T: Runnable + 'static
+    pub fn new/*<T>*/(inner: Box<dyn Runnable>) -> Self
+        //where
+        //    T: Runnable + 'static + ?Sized
         {
             Application {
                 name: "application".to_string(),
                 version: "0.0.1".to_string(),
                 jit_entry: None,
                 local_env: None,
-                inner: Box::new(inner),
+                inner,
             }
         }
-    pub fn draw(&self, graphics_entity: &mut PixelGraphics, vars: &Vec<String>) { self.inner.draw(graphics_entity, vars); }
+    pub fn draw(&self, graphics_entity: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) { self.inner.draw(graphics_entity, vars, x, y); }
     pub fn logic(&mut self, vars: &mut Vec<String>) { self.inner.logic(vars); }
     pub fn input(&mut self, key: Key) { self.inner.input(key); }
 }
 
 /// Local context for an app
 
+#[deprecated(since = "1.5.4", note = "use SteppedApplicationContext instead")]
 pub struct ApplicationContext {
     pub parent: Unknown<Application>,
     pub application: Application,
@@ -98,6 +105,16 @@ pub struct ApplicationContext {
     pub exit_requested: bool,
 }
 
+pub struct SteppedApplicationContext {
+    pub parent: Unknown<Application>,
+    pub application: Application,
+    pub background_tasks: Unknown<Vec<Box<dyn BackgroundTask>>>,
+    pub global: bool,
+    pub metadata: BTreeMap<String, String>,
+    pub environment: Environment,
+    pub exit_requested: bool,
+}
+#[allow(deprecated)]
 impl ApplicationContext {
     pub fn new(app: Application, background_tasks: Unknown<Vec<Box<dyn BackgroundTask>>>) -> ApplicationContext {
         ApplicationContext {
@@ -138,7 +155,7 @@ impl ApplicationContext {
                 // Draw background
                 pg.clear(0x222222);
                 pg.app_context_border(&self.application.name);
-                self.application.draw(&mut pg, &app_local_vars); // UI only has read access to local vars
+                self.application.draw(&mut pg, &app_local_vars, 200, 200); // UI only has read access to local vars
 
                 pg.flip();
             }
@@ -163,7 +180,7 @@ impl ApplicationContext {
         });
         LOGGING_SILENCED = false;
     }
-    fn handle_input(&mut self, key: Key) {
+    pub fn handle_input(&mut self, key: Key) {
         use uefi::proto::console::text::ScanCode;
         match key {
             Key::Special(ScanCode::ESCAPE) => {
@@ -173,6 +190,86 @@ impl ApplicationContext {
                 self.application.input(key);
             }
         }
+    }
+    pub fn from_name(name: &str) -> Option<ApplicationContext> {
+        let constructor = crate::apps::APP_REGISTRY.iter()
+            .find(|(app_id, _, _)| *app_id == name)?
+            .1;
+
+        let app_logic = constructor(); // This is already a Box<dyn Runnable>
+
+        let mut app = Application::new(app_logic);
+        app.name = name.to_string(); // Simple .to_string() is cleaner than .parse()
+
+        // Create the context (assuming parent is None for a fresh launch)
+        Some(ApplicationContext::new(app, None))
+    }
+}
+
+
+impl SteppedApplicationContext {
+    pub fn new(app: Application, background_tasks: Unknown<Vec<Box<dyn BackgroundTask>>>) -> SteppedApplicationContext {
+        SteppedApplicationContext {
+            parent: None,
+            application: app,
+            background_tasks,
+            global: false,
+            metadata: BTreeMap::new(),
+            environment: Environment::new(),
+            exit_requested: false,
+        }
+    }
+
+    /// Performs one 'tick' of the application.
+    /// Returns true if the app is still running, false if it wants to exit.
+    pub fn step(&mut self, key: Option<Key>) -> bool {
+        if self.exit_requested {
+            return false;
+        }
+
+        // 1. Update Environment
+        self.application.local_env = Some(self.environment.clone());
+
+        // 2. Run logic and draw
+        // Note: You may want to pass a sub-region/viewport here later
+        let mut app_local_vars = Vec::new();
+        self.application.logic(&mut app_local_vars);
+        if let Some(pg) = PixelGraphics::new() {
+            let mut pg = pg.with_backbuffer();
+            self.application.draw(&mut pg, &mut app_local_vars, 200, 200);
+        }
+
+
+        // 3. Handle forwarded input
+        if let Some(k) = key {
+            self.handle_input(k);
+        }
+
+        !self.exit_requested
+    }
+    pub fn handle_input(&mut self, key: Key) {
+        use uefi::proto::console::text::ScanCode;
+        match key {
+            Key::Special(ScanCode::ESCAPE) => {
+                self.exit_requested = true;
+            }
+            _ => {
+                self.application.input(key);
+            }
+        }
+    }
+    pub fn from_name(name: &str) -> Option<SteppedApplicationContext> {
+        let constructor = crate::apps::APP_REGISTRY.iter()
+            .find(|(app_id, _, _)| *app_id == name)?
+            .1;
+
+        let app_logic = constructor(); // This is already a Box<dyn Runnable>
+
+        let mut app = Application::new(app_logic);
+        app.name = name.to_string(); // Simple .to_string() is cleaner than .parse()
+
+        // Create the context (assuming parent is None for a fresh launch)
+        Some(SteppedApplicationContext::new(app, None))
     }
 }
 

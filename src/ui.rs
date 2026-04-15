@@ -1,7 +1,7 @@
 #![allow(dead_code, deprecated)]
 
 use alloc::collections::BTreeMap;
-use crate::hpvm_log;
+use crate::{hpvm_info, hpvm_log};
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -20,9 +20,7 @@ pub mod pixel_graphics;
 use crate::{handle_vm_command, hpvm_warn, message, terminal};
 use crate::pm::{Package, PackageManager, PackageType};
 use pixel_graphics::{PixelGraphics, TreeViewNode};
-
-
-
+use crate::env::{Application, Runnable, SteppedApplicationContext};
 
 #[derive(Clone, Debug)]
 pub struct FileEntry {
@@ -71,6 +69,9 @@ pub struct DashboardUI {
     pub editor: Option<TextEditor>,
     pub package_manager: PackageManager,
     pub iter: u64,
+    pub active_apps: Vec<SteppedApplicationContext>,
+    pub focused_process_idx: Option<usize>, // Which app gets the keyboard?
+    pub selected_app_idx: usize,
 
 }
 
@@ -88,6 +89,7 @@ pub enum DashboardTab {
     Editor,
     Settings,
     Packages,
+    Apps,
 }
 
 #[derive(PartialEq)]
@@ -153,6 +155,8 @@ pub struct SystemResources {
     pub net_rx_history: Vec<u64>,
     pub net_tx_history: Vec<u64>,
     pub gpu_history: Vec<u32>,
+
+    pub fps: usize
 }
 
 impl DashboardUI {
@@ -178,6 +182,7 @@ impl DashboardUI {
                 net_rx_history: Vec::with_capacity(100),
                 net_tx_history: Vec::with_capacity(100),
                 gpu_history: Vec::with_capacity(100),
+                fps: 0
             },
             scroll_offset: 0,
             cursor: crate::graphics::Cursor::new(),
@@ -199,6 +204,10 @@ impl DashboardUI {
             editor: None,
             package_manager,
             iter: 0,
+            active_apps: Vec::new(),
+            focused_process_idx: None,
+            selected_app_idx: 0,
+
         }
     }
 
@@ -272,7 +281,7 @@ impl DashboardUI {
 
             // Draw navigation
             pg.fill_rect(0, 48, width, 32, 0x444444); // Dark Gray
-            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages";
+            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
             pg.draw_text(10, 56, nav_text, 0xFFFFFF);
             let page_y = 100;
 
@@ -332,6 +341,44 @@ impl DashboardUI {
 
 
                     // let text_new_0 = format!("{:?}", uefi::runtime::get_variable(VariableKey::));
+                }
+                DashboardTab::Apps => {
+                    pg.draw_text(margin, content_top + margin, "Application Registry", 0x00FF00);
+                    pg.draw_text(margin, content_top + margin + 20, "Select an app to launch it in a stepped context", 0xAAAAAA);
+
+                    let start_y = content_top + margin + 60;
+                    let card_w = 100usize;
+                    let card_h = 75usize;
+                    let cols = (width - margin * 2) / (card_w + gutter);
+                    let cols = if cols == 0 { 1 } else { cols };
+                    
+                    for (idx, (name, _, icon)) in crate::apps::APP_REGISTRY.iter().enumerate() {
+                        let row = idx / cols;
+                        let col = idx % cols;
+                        let x = margin + col * (card_w + gutter);
+                        let y = start_y + row * (card_h + gutter);
+
+                        let is_selected = idx == self.selected_app_idx;
+                        let border_color = if is_selected { 0x00FF00 } else { 0x666666 };
+                        let bg_color = if is_selected { 0x334433 } else { 0x333333 };
+
+                        pg.fill_rect(x, y, card_w, card_h, bg_color);
+                        pg.draw_rect_outline(x, y, card_w, card_h, border_color);
+                        
+                        // Icon placeholder
+                        pg.draw_icon(x + card_w/2 - 20, y + 20, 32, 32, icon);
+                        pg.draw_text(x + 10, y + card_h - 20, name, 0xFFFFFF);
+                        
+                        // Grid position info
+                        let pos_info = alloc::format!("({},{})", col, row);
+                        pg.draw_text(x + 10, y + 5, &pos_info, 0x888888);
+                        
+                        if is_selected {
+                            pg.draw_text(x + card_w - 30, y + 5, "[*]", 0xFFFF00);
+                        }
+                    }
+                    
+                    pg.draw_text(margin, height - 40, "Use ARROWS to navigate | ENTER to Launch | ESC to close Apps", 0x888888);
                 }
                 DashboardTab::VirtualMachines => {
                     // Title
@@ -1024,6 +1071,7 @@ impl DashboardUI {
             // Draw footer
             pg.fill_rect(0, height - 48, width, 48, 0x000080); // Blue
             pg.draw_text(10, height - 32, " Use keys O, V, R, S, N, D, C, T, Z to switch tabs | X to shutdown", 0xFFFFFF);
+            pg.draw_text(width - 30, height - 12, &format!("{}", self.resources.fps), 0xFFFFFF);
 
             // Update and draw cursor
             if self.iter % 20 == 0 {
@@ -1032,7 +1080,7 @@ impl DashboardUI {
                 }
             }
 
-            pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
+
 
             // apply settings to these items
             //pg.app_context_border("");
@@ -1044,6 +1092,59 @@ impl DashboardUI {
 
 
 
+            //pg.flip();
+
+            // Handle active apps (Windows)
+            let mut apps_to_remove = Vec::new();
+            for (idx, app_ctx) in self.active_apps.iter_mut().enumerate() {
+                let is_focused = self.focused_process_idx == Some(idx);
+                
+                // For now, let's just step them.
+                // In a real windowing system, we'd only step if they are "active" or always.
+                // We'll pass None for key if not focused, or handle it in handle_input.
+                // Wait, if we want them to be "stepped", we should call step().
+                
+                // Let's draw a window for the app
+                let win_x = 100 + idx * 30;
+                let win_y = 100 + idx * 30;
+                let win_w = 400;
+                let win_h = 300;
+                
+                pg.fill_rect(win_x, win_y, win_w, win_h, 0x111111);
+                pg.draw_rect_outline(win_x, win_y, win_w, win_h, if is_focused { 0x00FFFF } else { 0x888888 });
+                pg.fill_rect(win_x, win_y, win_w, 20, if is_focused { 0x008080 } else { 0x444444 });
+                pg.draw_text(win_x + 5, win_y + 2, &app_ctx.application.name, 0xFFFFFF);
+                
+                // App content - the app's draw() takes x, y.
+                // Note: app_ctx.step() currently draws to a NEW PixelGraphics if it can.
+                // We need to be careful here because SteppedApplicationContext::step() 
+                // creates its own PixelGraphics internally which clears the screen/backbuffer.
+                
+                // If we want it to draw INTO our UI, we might need to modify step() 
+                // or handle drawing here.
+                
+                // For now, let's just run logic.
+                if !app_ctx.step(None) {
+                    apps_to_remove.push(idx);
+                }
+                
+                // And manually call draw if we want it in a window
+                let mut app_vars = Vec::new();
+                app_ctx.application.draw(&mut pg, &app_vars, win_x + 10, win_y + 30);
+            }
+            
+            for idx in apps_to_remove.into_iter().rev() {
+                self.active_apps.remove(idx);
+                if self.focused_process_idx == Some(idx) {
+                    self.focused_process_idx = None;
+                } else if let Some(fidx) = self.focused_process_idx {
+                    if fidx > idx {
+                        self.focused_process_idx = Some(fidx - 1);
+                    }
+                }
+            }
+
+            pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
             pg.flip();
 
         } else {
@@ -1458,6 +1559,10 @@ impl DashboardUI {
 
                     Key::Special(ScanCode::ESCAPE) => {
                         self.term_selected = false;
+                        if matches!(self.selected_tab, DashboardTab::Apps) {
+                            self.active_apps.clear();
+                            self.focused_process_idx = None;
+                        }
                     }
                     Key::Special(ScanCode::END) => {
                         self.term_selected = true;
@@ -1487,6 +1592,7 @@ impl DashboardUI {
                         't' => self.selected_tab = DashboardTab::Test,
                         'z' => self.selected_tab = DashboardTab::Settings,
                         'p' => self.selected_tab = DashboardTab::Packages,
+                        'a' => self.selected_tab = DashboardTab::Apps,
                         ' ' => {
                             if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
                                 self.selected_tab = DashboardTab::CreateVM;
@@ -1520,6 +1626,12 @@ impl DashboardUI {
                                         self.selected_file_idx = 0;
                                         self.refresh_storage();
                                     }
+                                }
+                            } else if matches!(self.selected_tab, DashboardTab::Apps) {
+                                let (name, _, _) = crate::apps::APP_REGISTRY[self.selected_app_idx];
+                                if let Some(app_ctx) = SteppedApplicationContext::from_name(name) {
+                                    self.active_apps.push(app_ctx);
+                                    self.focused_process_idx = Some(self.active_apps.len() - 1);
                                 }
                             } else if matches!(self.selected_tab, DashboardTab::Devices) {
                                 // Toggle expansion
@@ -1563,7 +1675,8 @@ impl DashboardUI {
                                 DashboardTab::CreateVM => DashboardTab::VirtualMachines,
                                 DashboardTab::Editor => DashboardTab::Storage,
                                 DashboardTab::Settings => DashboardTab::Packages,
-                                DashboardTab::Packages => DashboardTab::Overview
+                                DashboardTab::Packages => DashboardTab::Apps,
+                                DashboardTab::Apps => DashboardTab::Overview
                             };
                         }
                         '/' => {
@@ -1600,6 +1713,16 @@ impl DashboardUI {
                     if self.selected_file_idx > 0 {
                         self.selected_file_idx -= 1;
                     }
+                } else if matches!(self.selected_tab, DashboardTab::Apps) {
+                    let card_w = 200usize;
+                    let gutter = 12usize;
+                    let margin = 16usize;
+                    let (width, _) = if let Some(pg) = PixelGraphics::new() { pg.resolution() } else { (1024, 768) };
+                    let cols = (width - margin * 2) / (card_w + gutter);
+                    let cols = if cols == 0 { 1 } else { cols };
+                    if self.selected_app_idx >= cols {
+                        self.selected_app_idx -= cols;
+                    }
                 } else if matches!(self.selected_tab, DashboardTab::Devices) {
                     if self.selected_device_idx > 0 {
                         self.selected_device_idx -= 1;
@@ -1618,6 +1741,16 @@ impl DashboardUI {
                 if matches!(self.selected_tab, DashboardTab::Storage) {
                     if self.selected_file_idx < self.files.len().saturating_sub(1) {
                         self.selected_file_idx += 1;
+                    }
+                } else if matches!(self.selected_tab, DashboardTab::Apps) {
+                    let card_w = 200usize;
+                    let gutter = 12usize;
+                    let margin = 16usize;
+                    let (width, _) = if let Some(pg) = PixelGraphics::new() { pg.resolution() } else { (1024, 768) };
+                    let cols = (width - margin * 2) / (card_w + gutter);
+                    let cols = if cols == 0 { 1 } else { cols };
+                    if self.selected_app_idx + cols < crate::apps::APP_REGISTRY.len() {
+                        self.selected_app_idx += cols;
                     }
                 } else if matches!(self.selected_tab, DashboardTab::Devices) {
                     let mut total_rows = 0;
@@ -1643,11 +1776,19 @@ impl DashboardUI {
             Key::Special(ScanCode::LEFT) => {
                 if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
                     self.vm_action_idx = self.vm_action_idx.saturating_sub(1);
+                } else if matches!(self.selected_tab, DashboardTab::Apps) {
+                    if self.selected_app_idx > 0 {
+                        self.selected_app_idx -= 1;
+                    }
                 }
             }
             Key::Special(ScanCode::RIGHT) => {
                 if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
                     self.vm_action_idx = (self.vm_action_idx + 1).min(4);
+                } else if matches!(self.selected_tab, DashboardTab::Apps) {
+                    if self.selected_app_idx + 1 < crate::apps::APP_REGISTRY.len() {
+                        self.selected_app_idx += 1;
+                    }
                 }
             }
             _ => {}
@@ -1666,6 +1807,9 @@ impl DashboardUI {
                 else if x < 580 { self.selected_tab = DashboardTab::Devices; }
                 else if x < 680 { self.selected_tab = DashboardTab::Console; }
                 else if x < 780 { self.selected_tab = DashboardTab::Test; }
+                else if x < 880 { self.selected_tab = DashboardTab::Settings; }
+                else if x < 980 { self.selected_tab = DashboardTab::Packages; }
+                else if x < 1080 { self.selected_tab = DashboardTab::Apps; }
             }
         }
     }
