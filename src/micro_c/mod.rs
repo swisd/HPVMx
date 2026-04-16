@@ -1,3 +1,9 @@
+//! MicroC Compiler.
+//!
+//! A lightweight C compiler targeting multiple architectures.
+//! This module includes lexing, parsing, code generation,
+//! and architecture-specific backends.
+
 use alloc::string::String;
 use crate::micro_c::compiler::compile;
 
@@ -16,6 +22,7 @@ pub mod stackframe;
 pub mod error;
 
 
+/// Compiles a MicroC source file to assembly.
 pub fn compile_from_file_to_asm(srcpath: String) -> String {
     let source = crate::FileSystem::read_file_to_string(&*srcpath).unwrap();
     let asm = compile(&*source, "x86_64");

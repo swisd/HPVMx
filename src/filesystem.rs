@@ -1,3 +1,8 @@
+//! File system and device management.
+//!
+//! This module provides an abstraction over the UEFI file system,
+//! including path resolution, file operations, and device mapping.
+
 use crate::Color;
 use crate::hpvm_log;
 use crate::hpvm_info;
@@ -18,7 +23,9 @@ use uefi_raw::protocol::device_path::{DeviceSubType, DeviceType};
 use crate::hpvmlog::LogEntry;
 use crate::state::{KernelState, Persistable};
 
-/// Internal global state for CWD and Device Aliases
+/// Global file system state.
+///
+/// Holds the current working directory, device mappings, and drive information.
 #[derive(Clone)]
 pub struct State {
     cwd: String,
@@ -43,6 +50,7 @@ impl Persistable for &mut State {
 static mut STATE: Option<State> = None;
 
 
+/// Entry point for file system operations.
 pub struct FileSystem;
 
 impl FileSystem {
@@ -444,7 +452,7 @@ impl FileSystem {
         Ok(current_path.clone())
     }
 
-    /// Read a file and return its contents as a Vec<u8>
+    /// Read a file and return its contents as a `Vec<u8>`
     pub fn read_file(path: &str) -> Result<Vec<u8>, &'static str> {
         use uefi::proto::media::file::FileMode;
 

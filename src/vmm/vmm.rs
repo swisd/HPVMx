@@ -15,7 +15,7 @@ use uefi::proto::console::text::Color;
 
 static VM_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// HPVMx Virtual Machine Monitor
+/// Manages the lifecycle and execution of all virtual machines.
 pub struct HypervisorManager {
     /// Map of VM ID to Virtual Machine instance
     vms: BTreeMap<u32, VirtualMachine>,
@@ -62,7 +62,7 @@ impl HypervisorManager {
         Ok(())
     }
 
-    /// Create a new virtual machine
+    /// Creates a new virtual machine.
     pub fn create_vm(&mut self, name: &str, memory_mb: u32, vcpu_count: u32) -> Result<u32, &'static str> {
         if !self.is_initialized {
             return Err("Hypervisor not initialized");
@@ -292,12 +292,16 @@ impl HypervisorManager {
     }
 }
 
-/// Hypervisor statistics
+/// Global statistics for the hypervisor.
 #[derive(Debug, Clone)]
 pub struct HypervisorStats {
+    /// Whether the hypervisor is initialized.
     pub initialized: bool,
+    /// Number of virtual machines currently defined.
     pub total_vms: u32,
+    /// Number of virtual machines currently running.
     pub running_vms: u32,
+    /// Total memory allocated to all VMs in MB.
     pub total_memory_mb: u32,
 }
 

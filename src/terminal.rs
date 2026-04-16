@@ -792,7 +792,7 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
 
     loop {
         // Limit frame rate to ~60Hz (16,666 microseconds)
-        boot::stall(core::time::Duration::from_micros(16_666));
+        boot::stall(core::time::Duration::from_micros(22_222));
         frame_count += 1;
 
         let now = uefi::runtime::get_time().unwrap();

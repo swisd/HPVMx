@@ -10,8 +10,12 @@ pub struct ClockApp {}
 
 impl AppInfo for ClockApp {
     fn name(&self) -> &str { "Clock" }
-    fn version(&self) -> &str { "1.0.0" }
+    fn version(&self) -> &str { "0.2.1" }
     fn icon(&self) -> [u32; 1024] { icons::CLOCK_RED_32_ICON_DATA }
+
+    fn dimensions(&self) -> (usize, usize) {
+        (200, 200)
+    }
 }
 
 impl Runnable for ClockApp {
@@ -40,7 +44,7 @@ impl Runnable for ClockApp {
             let end_x = center_x + tick_end_len * libm::sin(angle);
             let end_y = center_y - tick_end_len * libm::cos(angle);
 
-            graphics.draw_line(start_x as usize, start_y as usize, end_x as usize, end_y as usize, 0x555555);
+            graphics.draw_line_adv(start_x as usize, start_y as usize, end_x as usize, end_y as usize, 0x555555, 3, 0xFFFFFFFF);
         }
 
         // 4. Helper to draw hands

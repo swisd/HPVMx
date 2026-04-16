@@ -2,7 +2,10 @@
 
 
 
-// Types
+//! Core types and traits for the HPVMx system.
+//!
+//! This module defines fundamental structures like points, rectangles,
+//! vectors, and matrices, as well as hardware-related traits like `Peripheral`.
 
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
@@ -250,6 +253,7 @@ pub static LOCALHOST_PORT: PORT = 80; // default is 80
 
 // PC
 
+/// Trait for hardware peripherals that can perform I/O operations.
 pub trait Peripheral
 {
     fn doIO(&mut self, addr: ADDR64, val: u16) -> u16;
@@ -474,11 +478,13 @@ pub type Vect = Vec<u8>;
 
 // structures
 
+/// A 2D point with double-precision coordinates.
 pub struct Point {
     x: f64,
     y: f64,
 }
 
+/// A rectangle defined by its position and size.
 pub struct Rect {
     p1: Point,
     p2: Point,
@@ -1194,7 +1200,7 @@ pub mod net {
 
         pub trait Driver {
             /// Defines certain other features this PHY supports.
-            /// It is a combination of the flags in the [`flags`] module.
+            /// It is a combination of the flags in the \[`flags`\] module.
             const FLAGS: u32 = 0;
 
             /// The friendly name of this PHY type.

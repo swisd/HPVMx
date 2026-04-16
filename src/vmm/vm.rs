@@ -7,15 +7,22 @@ use crate::vmm::vmbus::VmBus;
 use crate::vmm::mapper::ResourceMapper;
 
 /// Virtual Machine state
+/// Possible execution states for a virtual machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum VmState {
+    /// Newly created, not yet started.
     Created,
+    /// Actively executing.
     Running,
+    /// Temporarily suspended.
     Paused,
+    /// Gracefully or forcefully shut down.
     Stopped,
+    /// Encountered a critical error.
     Failed,
-    Decommissioned, // Added for Autolytic Protocol
+    /// Securely wiped and removed from the system.
+    Decommissioned,
 }
 
 impl core::fmt::Display for VmState {
@@ -31,17 +38,26 @@ impl core::fmt::Display for VmState {
     }
 }
 
-/// Virtual Machine instance
+/// Represents an instance of a virtual machine.
 pub struct VirtualMachine {
+    /// Unique identifier for the VM.
     pub id: u32,
+    /// User-friendly name.
     pub name: String,
+    /// Current execution state.
     pub state: VmState,
+    /// Memory size in megabytes.
     pub memory_mb: u32,
+    /// Number of virtual CPUs.
     pub vcpu_count: u32,
+    /// List of virtual CPUs associated with this VM.
     pub vcpus: Vec<VirtualCpu>,
+    /// Base physical address of guest memory, if allocated.
     pub guest_memory_base: Option<usize>,
-    pub vmbus: VmBus,            // New: Communication bus
-    pub mapper: ResourceMapper, // New: Memory/Disk mapping
+    /// Communication bus for guest-host interaction.
+    pub vmbus: VmBus,
+    /// Mapper for virtualized resources (Memory, Disk).
+    pub mapper: ResourceMapper,
 }
 
 #[allow(dead_code)]

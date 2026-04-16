@@ -1,3 +1,8 @@
+//! Environment and application life-cycle management.
+//!
+//! This module provides the infrastructure for running applications,
+//! managing their environments, and handling background tasks.
+
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use uefi::fs::Path;
@@ -13,6 +18,10 @@ use crate::ui::pixel_graphics::PixelGraphics;
 pub type EnvironmentVariable = (String, String);
 
 /// Local environment, app-specific
+/// Local environment for an application.
+///
+/// Contains path variables and other settings that are specific to a single
+/// application instance.
 #[derive(Clone)]
 pub struct Environment {
     pub cd: EnvironmentVariable,
@@ -36,6 +45,9 @@ impl Environment {
 }
 
 /// Global environment, not app-specific
+/// Global system environment.
+///
+/// Contains system-wide variables like the number of processors and OS version.
 pub struct GlobalEnvironment {
     pub cd: EnvironmentVariable,
     pub xd: EnvironmentVariable,
@@ -47,37 +59,63 @@ pub struct GlobalEnvironment {
 }
 
 
+/// Represents a runnable application.
+///
+/// This structure holds the application's metadata and its core logic
+/// represented by the `Runnable` trait.
 pub struct Application {
+    /// The name of the application.
     pub name: String,
+    /// The version string.
     pub version: String,
+    /// Entry point for JIT-compiled code, if applicable.
     pub jit_entry: Unknown<(String, u64)>,
+    /// The local environment variables for this application.
     pub local_env: Unknown<Environment>,
+    /// The actual application logic.
     pub inner: Box<dyn Runnable>,
+    /// The preferred window dimensions (width, height).
+    pub dimensions: (usize, usize),
 }
 
 
+/// Core trait for application logic and rendering.
+///
+/// Any application that wants to be managed by the system must implement this trait.
 pub trait Runnable {
+    /// Renders the application to the provided `PixelGraphics` context.
     fn draw(&self, graphics_entity: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize); // Adjust types as needed
+    /// Updates the application's internal state.
     fn logic(&mut self, vars: &mut Vec<String>);
+    /// Handles a single keyboard input event.
     fn input(&mut self, key: Key);
 }
 
+/// Represents a task that runs in the background.
 pub trait BackgroundTask {
-    // Returns true if finished, false if it needs more time
+    /// Performs a single tick of work.
+    /// 
+    /// Returns `true` if the task is finished and can be removed, 
+    /// or `false` if it needs more processing time.
     fn tick(&mut self) -> bool;
 }
 
+/// Metadata and capability information about an application.
 pub trait AppInfo {
+    /// Returns the display name of the application.
     fn name(&self) -> &str;
+    /// Returns the version string.
     fn version(&self) -> &str;
+    /// Returns the author's name. Defaults to "Unknown".
     fn author(&self) -> &str { "Unknown" }
+    /// Returns the application's 32x32 icon data (1024 pixels).
     fn icon(&self) -> [u32; 1024];
+    /// Returns the preferred window dimensions (width, height).
+    fn dimensions(&self) -> (usize, usize);
 }
 
 impl Application {
-    pub fn new/*<T>*/(inner: Box<dyn Runnable>) -> Self
-        //where
-        //    T: Runnable + 'static + ?Sized
+    pub fn new(inner: Box<dyn Runnable>) -> Self
         {
             Application {
                 name: "application".to_string(),
@@ -85,8 +123,10 @@ impl Application {
                 jit_entry: None,
                 local_env: None,
                 inner,
+                dimensions: (400, 300),
             }
         }
+    pub fn dimensions(&self) -> [usize; 2] { [self.dimensions.0, self.dimensions.1] }
     pub fn draw(&self, graphics_entity: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) { self.inner.draw(graphics_entity, vars, x, y); }
     pub fn logic(&mut self, vars: &mut Vec<String>) { self.inner.logic(vars); }
     pub fn input(&mut self, key: Key) { self.inner.input(key); }
@@ -94,6 +134,7 @@ impl Application {
 
 /// Local context for an app
 
+/// Context for running an application in a blocking loop.
 #[deprecated(since = "1.5.4", note = "use SteppedApplicationContext instead")]
 pub struct ApplicationContext {
     pub parent: Unknown<Application>,
@@ -105,6 +146,10 @@ pub struct ApplicationContext {
     pub exit_requested: bool,
 }
 
+/// Execution context for an application that can be stepped manually.
+///
+/// This is used by the windowing system to update multiple applications
+/// concurrently in the same main loop.
 pub struct SteppedApplicationContext {
     pub parent: Unknown<Application>,
     pub application: Application,
@@ -192,16 +237,16 @@ impl ApplicationContext {
         }
     }
     pub fn from_name(name: &str) -> Option<ApplicationContext> {
-        let constructor = crate::apps::APP_REGISTRY.iter()
-            .find(|(app_id, _, _)| *app_id == name)?
-            .1;
+        let registry_entry = crate::apps::APP_REGISTRY.iter()
+            .find(|(app_id, _, _, _)| *app_id == name)?;
 
-        let app_logic = constructor(); // This is already a Box<dyn Runnable>
+        let constructor = registry_entry.1;
+        let (app_logic, dims) = constructor();
 
         let mut app = Application::new(app_logic);
-        app.name = name.to_string(); // Simple .to_string() is cleaner than .parse()
+        app.name = name.to_string();
+        app.dimensions = dims;
 
-        // Create the context (assuming parent is None for a fresh launch)
         Some(ApplicationContext::new(app, None))
     }
 }
@@ -259,16 +304,16 @@ impl SteppedApplicationContext {
         }
     }
     pub fn from_name(name: &str) -> Option<SteppedApplicationContext> {
-        let constructor = crate::apps::APP_REGISTRY.iter()
-            .find(|(app_id, _, _)| *app_id == name)?
-            .1;
+        let registry_entry = crate::apps::APP_REGISTRY.iter()
+            .find(|(app_id, _, _, _)| *app_id == name)?;
 
-        let app_logic = constructor(); // This is already a Box<dyn Runnable>
+        let constructor = registry_entry.1;
+        let (app_logic, dims) = constructor();
 
         let mut app = Application::new(app_logic);
-        app.name = name.to_string(); // Simple .to_string() is cleaner than .parse()
+        app.name = name.to_string();
+        app.dimensions = dims;
 
-        // Create the context (assuming parent is None for a fresh launch)
         Some(SteppedApplicationContext::new(app, None))
     }
 }

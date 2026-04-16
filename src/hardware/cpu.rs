@@ -8,13 +8,19 @@ use raw_cpuid::CpuId;
 #[cfg(target_arch = "x86_64")]
 pub mod vmx;
 
+/// Information about the host CPU's capabilities.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct CpuInfo {
+    /// The CPU brand string.
     pub brand: String,
+    /// The number of physical cores.
     pub cores: u32,
+    /// The number of logical threads.
     pub threads: u32,
+    /// Whether the CPU supports 64-bit operations.
     pub supports_64bit: bool,
+    /// Whether the CPU supports Intel VMX (Virtual Machine Extensions).
     pub supports_vmx: bool,
 }
 

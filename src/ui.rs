@@ -1,5 +1,10 @@
 #![allow(dead_code, deprecated)]
 
+//! User Interface and dashboard management.
+//!
+//! This module contains the core UI logic, including the `DashboardUI`
+//! which manages the main display, active applications, and system status.
+
 use alloc::collections::BTreeMap;
 use crate::{hpvm_info, hpvm_log};
 use alloc::fmt::format;
@@ -43,6 +48,10 @@ pub struct DeviceCategory {
     pub icon: String,
 }
 
+/// Main UI manager for the HPVMx system.
+///
+/// Handles the dashboard, windowing system for applications,
+/// and user input routing.
 pub struct DashboardUI {
     selected_tab: DashboardTab,
     pub vms: Vec<VmDisplayInfo>,
@@ -76,6 +85,7 @@ pub struct DashboardUI {
 }
 
 #[derive(Clone, Copy, Debug)]
+/// Available tabs in the dashboard.
 pub enum DashboardTab {
     Overview,
     VirtualMachines,
@@ -352,7 +362,7 @@ impl DashboardUI {
                     let cols = (width - margin * 2) / (card_w + gutter);
                     let cols = if cols == 0 { 1 } else { cols };
                     
-                    for (idx, (name, _, icon)) in crate::apps::APP_REGISTRY.iter().enumerate() {
+                    for (idx, (name, _, icon, version)) in crate::apps::APP_REGISTRY.iter().enumerate() {
                         let row = idx / cols;
                         let col = idx % cols;
                         let x = margin + col * (card_w + gutter);
@@ -370,7 +380,7 @@ impl DashboardUI {
                         pg.draw_text(x + 10, y + card_h - 20, name, 0xFFFFFF);
                         
                         // Grid position info
-                        let pos_info = alloc::format!("({},{})", col, row);
+                        let pos_info = alloc::format!("v{}", version);
                         pg.draw_text(x + 10, y + 5, &pos_info, 0x888888);
                         
                         if is_selected {
@@ -1107,8 +1117,8 @@ impl DashboardUI {
                 // Let's draw a window for the app
                 let win_x = 100 + idx * 30;
                 let win_y = 100 + idx * 30;
-                let win_w = 400;
-                let win_h = 300;
+                let win_w = app_ctx.application.dimensions()[0] + 2;
+                let win_h = app_ctx.application.dimensions()[1] + 20;
                 
                 pg.fill_rect(win_x, win_y, win_w, win_h, 0x111111);
                 pg.draw_rect_outline(win_x, win_y, win_w, win_h, if is_focused { 0x00FFFF } else { 0x888888 });
@@ -1130,7 +1140,7 @@ impl DashboardUI {
                 
                 // And manually call draw if we want it in a window
                 let mut app_vars = Vec::new();
-                app_ctx.application.draw(&mut pg, &app_vars, win_x + 10, win_y + 30);
+                app_ctx.application.draw(&mut pg, &app_vars, win_x + 2, win_y + 20);
             }
             
             for idx in apps_to_remove.into_iter().rev() {
@@ -1628,7 +1638,7 @@ impl DashboardUI {
                                     }
                                 }
                             } else if matches!(self.selected_tab, DashboardTab::Apps) {
-                                let (name, _, _) = crate::apps::APP_REGISTRY[self.selected_app_idx];
+                                let (name, _, _, _) = crate::apps::APP_REGISTRY[self.selected_app_idx];
                                 if let Some(app_ctx) = SteppedApplicationContext::from_name(name) {
                                     self.active_apps.push(app_ctx);
                                     self.focused_process_idx = Some(self.active_apps.len() - 1);

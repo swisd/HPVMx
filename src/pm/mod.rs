@@ -1,3 +1,8 @@
+//! Package Management system.
+//!
+//! This module handles package installation, dependency management,
+//! and command execution for system packages.
+
 mod manager;
 mod commands;
 

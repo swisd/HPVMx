@@ -15,6 +15,10 @@ impl AppInfo for CubeApp {
     fn icon(&self) -> [u32; 1024] {
         icons::CUBE_WINDOW_RED_32_ICON_DATA
     }
+
+    fn dimensions(&self) -> (usize, usize) {
+        (200, 200)
+    }
 }
 
 impl Runnable for CubeApp {

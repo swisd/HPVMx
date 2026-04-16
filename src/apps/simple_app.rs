@@ -19,6 +19,10 @@ impl AppInfo for SimpleApp {
     fn icon(&self) -> [u32; 1024] {
         icons::TRAFFIC_LIGHT_32_ICON_DATA
     }
+
+    fn dimensions(&self) -> (usize, usize) {
+        (300, 200)
+    }
 }
 
 impl Runnable for SimpleApp {
