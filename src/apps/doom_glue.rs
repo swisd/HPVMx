@@ -431,15 +431,16 @@ pub unsafe extern "C" fn DG_SleepMs(_ms: u32) {
     // Simple busy wait or timer sleep if available
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn I_Error(format: *const c_char, ...) -> ! {
-    if !format.is_null() {
-        if let Ok(st) = CStr::from_ptr(format).to_str() {
-            message!("\n", "DOOM ERROR: {}", st);
-        }
-    }
-    loop {}
-}
+// I_Error is already defined in i_system.c
+// #[unsafe(no_mangle)]
+// pub unsafe extern "C" fn I_Error(format: *const c_char, ...) -> ! {
+//     if !format.is_null() {
+//         if let Ok(st) = CStr::from_ptr(format).to_str() {
+//             message!("\n", "DOOM ERROR: {}", st);
+//         }
+//     }
+//     loop {}
+// }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn DG_GetTicksMs() -> u32 {
