@@ -1,4 +1,5 @@
 # This script uses native Windows DiskPart to create a bootable VHD for VirtualBox
+$env:CC = "clang"
 
 echo "Running Build Script..."
 ./build.bat

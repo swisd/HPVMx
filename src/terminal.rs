@@ -5,6 +5,7 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
+use core::time::Duration;
 use elf::dynamic;
 use libm::{expm1, y0};
 use uefi::mem::memory_map::MemoryMap;
@@ -12,7 +13,7 @@ use uefi::{boot, runtime, system};
 use uefi_raw::Status;
 use uefi_raw::table::runtime::ResetType;
 use crate::filesystem::FileSystem;
-use crate::{hpvm_error, hpvm_info, hpvm_warn, hpvm_log, message, read_line, ui, HYPERVISOR, devices, loader, logiclang_int, read_line_int, env, apps};
+use crate::{hpvm_error, hpvm_info, hpvm_warn, hpvm_log, message, read_line, ui, HYPERVISOR, devices, loader, logiclang_int, read_line_int, env, apps, TSC_PER_US};
 use crate::kernel::KernelLoader;
 use crate::rng::XorShiftRng;
 use crate::ui::DashboardUI;
@@ -775,6 +776,7 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                 net_tx_history: alloc::vec![],
                 gpu_history: alloc::vec![],
                 fps: 0,
+                frame_ms: 0,
             });
         }
     }
@@ -789,10 +791,12 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
     let mut frame_count = 0;
     let mut last_second_time = uefi::runtime::get_time().unwrap();
     let mut current_fps = 0;
+    let mut current_frame_ms = 0;
 
     loop {
-        // Limit frame rate to ~60Hz (16,666 microseconds)
-        boot::stall(core::time::Duration::from_micros(22_222));
+
+        let frame_start_tsc = unsafe { core::arch::x86_64::_rdtsc() };
+
         frame_count += 1;
 
         let now = uefi::runtime::get_time().unwrap();
@@ -858,6 +862,7 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                         net_tx_history: alloc::vec![],
                         gpu_history: alloc::vec![],
                         fps: current_fps,
+                        frame_ms: current_frame_ms,
                     });
                 }
             }
@@ -960,7 +965,27 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                 break;
             }
         }
+
+        let frame_end_tsc = unsafe { core::arch::x86_64::_rdtsc() };
+
+        let cycles = frame_end_tsc.saturating_sub(frame_start_tsc);
+
+        // Limit frame rate to ~60Hz (16,666 microseconds)
+        // 22_222 for 45 fps
+        // currently at 32
+        let us_elapsed = unsafe {
+            if TSC_PER_US > 0 { cycles / TSC_PER_US } else { 0 }
+        };
+
+        current_frame_ms = (us_elapsed / 1000) as usize;
+
+        if us_elapsed < 22_222 {
+            let remaining = 22_222 - us_elapsed;
+            boot::stall(Duration::from_micros(remaining));
+        }
     }
+
+
     uefi::system::with_stdout(|stdout| {
         // Reset() is the most effective way to tell UEFI "ignore previous pixels, start over"
         let _ = stdout.reset(false);

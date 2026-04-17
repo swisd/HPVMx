@@ -3,6 +3,7 @@
 #![feature(abi_x86_interrupt)]
 #![feature(core_float_math)]
 #![feature(generic_atomic)]
+#![feature(c_variadic)]
 #![no_std]
 #![no_main]
 
@@ -221,6 +222,10 @@ fn main() -> Status {
     hpvm_info!("HPVMx", "init sequence complete.");
     let mut PACKAGE_MANAGER: PackageManager = PackageManager::new();
     PACKAGE_MANAGER.load_registry();
+
+    hpvm_info!("CPU", "calibrating tsc");
+    calibrate_tsc();
+    hpvm_info!("CPU", "tsc cyc/μs {}", TSC_PER_US);
 
     hpvm_info!("HPVMx", "ready");
     hpvm_warn!("HPVMx", "within spinloop");
@@ -888,4 +893,21 @@ unsafe fn init_mouse_deep_scan() {
     }
 }
 
+static mut TSC_PER_US: u64 = 0;
 
+pub fn calibrate_tsc() {
+    let start_tsc = unsafe { core::arch::x86_64::_rdtsc() };
+
+    // Stall for 10,000 microseconds (10ms)
+    // We use 10ms because a 1us stall is too short to account for
+    // the overhead of the function call itself.
+    boot::stall(Duration::from_micros(10_000));
+
+    let end_tsc = unsafe { core::arch::x86_64::_rdtsc() };
+    let total_ticks = end_tsc.saturating_sub(start_tsc);
+
+    unsafe {
+        // Ticks per microsecond
+        TSC_PER_US = total_ticks / 10_000;
+    }
+}

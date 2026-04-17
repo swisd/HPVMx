@@ -166,7 +166,8 @@ pub struct SystemResources {
     pub net_tx_history: Vec<u64>,
     pub gpu_history: Vec<u32>,
 
-    pub fps: usize
+    pub fps: usize,
+    pub frame_ms: usize,
 }
 
 impl DashboardUI {
@@ -192,7 +193,8 @@ impl DashboardUI {
                 net_rx_history: Vec::with_capacity(100),
                 net_tx_history: Vec::with_capacity(100),
                 gpu_history: Vec::with_capacity(100),
-                fps: 0
+                fps: 0,
+                frame_ms: 0,
             },
             scroll_offset: 0,
             cursor: crate::graphics::Cursor::new(),
@@ -1081,7 +1083,8 @@ impl DashboardUI {
             // Draw footer
             pg.fill_rect(0, height - 48, width, 48, 0x000080); // Blue
             pg.draw_text(10, height - 32, " Use keys O, V, R, S, N, D, C, T, Z to switch tabs | X to shutdown", 0xFFFFFF);
-            pg.draw_text(width - 30, height - 12, &format!("{}", self.resources.fps), 0xFFFFFF);
+            pg.draw_text(width - 60, height - 12, &format!("{} fps", self.resources.fps), 0xFFFFFF);
+            pg.draw_text(width - 120, height - 12, &format!("{} ms", self.resources.frame_ms), 0xFFFFFF);
 
             // Update and draw cursor
             if self.iter % 20 == 0 {
