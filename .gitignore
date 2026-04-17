@@ -2,3 +2,4 @@
 *.vhd
 boot.vhd
 /src/apps/doom_c/*
+/src/apps/doom_c/

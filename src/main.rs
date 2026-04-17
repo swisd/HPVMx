@@ -190,6 +190,11 @@ fn main() -> Status {
 
     hpvm_info!("fs", "building devicelist");
 
+    // Identify boot disk
+    let loaded_image = uefi::boot::open_protocol_exclusive::<uefi::proto::loaded_image::LoadedImage>(uefi::boot::image_handle()).unwrap();
+    let boot_device = loaded_image.device();
+    FileSystem::set_root_handle(boot_device);
+
     while !(FileSystem::is_handle()) {
         // wait
         hpvm_warn!("fs", "waiting for file handle")
@@ -911,16 +916,20 @@ static mut TSC_PER_US: u64 = 0;
 pub fn calibrate_tsc() {
     let start_tsc = unsafe { core::arch::x86_64::_rdtsc() };
 
-    // Stall for 10,000 microseconds (10ms)
-    // We use 10ms because a 1us stall is too short to account for
+    // Stall for 50,000 microseconds (50ms)
+    // We use 25ms because a 1us stall is too short to account for
     // the overhead of the function call itself.
-    boot::stall(Duration::from_micros(10_000));
+    boot::stall(Duration::from_micros(50_000));
+    // somehow one-core operation messes up the time measurement
 
     let end_tsc = unsafe { core::arch::x86_64::_rdtsc() };
     let total_ticks = end_tsc.saturating_sub(start_tsc);
 
     unsafe {
-        // Ticks per microsecond
-        TSC_PER_US = total_ticks / 10_000;
+        // Ticks per microsecond10
+        TSC_PER_US = total_ticks / 50_000;
+        if TSC_PER_US < 200 {
+            TSC_PER_US += 240;
+        }
     }
 }

@@ -1084,9 +1084,12 @@ impl DashboardUI {
             // Draw footer
             pg.fill_rect(0, height - 48, width, 48, 0x000080); // Blue
             pg.draw_text(10, height - 32, " Use keys O, V, R, S, N, D, C, T, Z to switch tabs | X to shutdown", 0xFFFFFF);
-            pg.draw_text(width - 60, height - 12, &format!("{} fps", self.resources.fps), 0xFFFFFF);
-            pg.draw_text(width - 120, height - 12, &format!("{} ms", self.resources.frame_ms), 0xFFFFFF);
-            pg.draw_text(width - 200, height - 12, &format!("{} MHz", TSC_PER_US), 0xFFFFFF);
+            pg.draw_text(width - 60, height - 13, &format!("{} fps", self.resources.fps), 0xFFFFFF);
+            pg.draw_text(width - 120, height - 13, &format!("{} ms", self.resources.frame_ms), 0xFFFFFF);
+            pg.draw_text(width - 200, height - 13, &format!("{} MHz", TSC_PER_US), 0xFFFFFF);
+            pg.draw_text(width - 250, height - 13, &format!("{}%", self.resources.cpu_usage), 0xFFFFFF);
+            pg.draw_text(width - 330, height - 13, &format!("{} MB", self.resources.used_memory_mb), 0xFFFFFF);
+            pg.draw_rect_outline(width - 340, height - 15, 338, 14, 0xCCCCCC);
 
             // Update and draw cursor
             if self.iter % 20 == 0 {
