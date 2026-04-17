@@ -2,6 +2,9 @@
 
 A bare-metal (+BIOS&EFI) hardware provisioning and virtualization manager written in rust.
 
+
+It *might* run DOOM. (the code is there it just doesn't run at all)
+
 ![image](/src/hpvmx_image.png)
 
 ![](/doc/img/term01.png)

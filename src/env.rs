@@ -268,6 +268,7 @@ impl SteppedApplicationContext {
     /// Performs one 'tick' of the application.
     /// Returns true if the app is still running, false if it wants to exit.
     pub fn step(&mut self, key: Option<Key>) -> bool {
+        let start_busy = unsafe { core::arch::x86_64::_rdtsc() };
         if self.exit_requested {
             return false;
         }
@@ -288,6 +289,11 @@ impl SteppedApplicationContext {
         // 3. Handle forwarded input
         if let Some(k) = key {
             self.handle_input(k);
+        }
+
+        let end_busy = unsafe { core::arch::x86_64::_rdtsc() };
+        unsafe {
+            crate::hpvmlog::BUSY_TSC = crate::hpvmlog::BUSY_TSC.saturating_add(end_busy.saturating_sub(start_busy));
         }
 
         !self.exit_requested

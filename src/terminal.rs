@@ -738,12 +738,18 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
             let vms = hv.list_vms();
 
             for (id, name, state) in vms {
+                let memory_usage_mb = if let Some(hv) = unsafe { &HYPERVISOR } {
+                    hv.vms.get(&id).map(|v| v.memory_mb).unwrap_or(128)
+                } else {
+                    128
+                };
+
                 let vm_info = ui::VmDisplayInfo {
                     id,
                     name: String::from(name),
                     state: state.to_string(),
                     cpu_usage: 25,  // Placeholder
-                    memory_usage_mb: 128,  // Placeholder
+                    memory_usage_mb,
                     disk_usage_mb: 10240,  // Placeholder
                     uptime_seconds: 3600,  // Placeholder
                 };
@@ -758,8 +764,8 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
             devices::net_stack::poll_tick();
 
             dashboard.set_resources(ui::SystemResources {
-                total_memory_mb: stats.total_memory_mb,
-                used_memory_mb: stats.total_memory_mb / 2,  // Approximate
+                total_memory_mb: stats.total_physical_memory_mb,
+                used_memory_mb: stats.used_physical_memory_mb,
                 cpu_count: 3,  // Placeholder
                 cpu_usage: 35,  // Placeholder
                 cpu_core_usage: core_usage,
@@ -792,9 +798,10 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
     let mut last_second_time = uefi::runtime::get_time().unwrap();
     let mut current_fps = 0;
     let mut current_frame_ms = 0;
+    let mut current_cpu_usage = 0;
 
     loop {
-
+        unsafe { crate::hpvmlog::BUSY_TSC = 0; }
         let frame_start_tsc = unsafe { core::arch::x86_64::_rdtsc() };
 
         frame_count += 1;
@@ -819,13 +826,18 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                 if let Some(ref hv) = HYPERVISOR {
                     dashboard.vms.clear();
                     let vms = hv.list_vms();
+                    // We need memory usage for VMs too
+                    let hv_vms = &hv.vms;
+
                     for (id, name, state) in vms {
+                        let memory_usage_mb = hv_vms.get(&id).map(|v| v.memory_mb).unwrap_or(0);
+
                         dashboard.add_vm(ui::VmDisplayInfo {
                             id,
                             name: name.to_string(),
                             state: state.to_string(),
                             cpu_usage: RNG.rand_range(20, 50) as u32,
-                            memory_usage_mb: RNG.rand_range(300, 600) as u32,
+                            memory_usage_mb,
                             disk_usage_mb: 10240,
                             uptime_seconds: 3600,
                         });
@@ -837,17 +849,16 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                     // so we simulate it based on total cpu_usage or random jitter for "realism".
                     let mut core_usage = Vec::new();
                     for i in 0..8 {
-                        let jitter = (i * 7 + last_refresh) % 15;
-                        core_usage.push((RNG.rand_range(5, 20) + jitter) as u32);
+                        core_usage.push((RNG.rand_range(0, 2) + current_cpu_usage as u64) as u32);
                     }
 
 
                     // these values need to actually be measured (implement soon)
                     dashboard.set_resources(ui::SystemResources {
-                        total_memory_mb: 1024,
-                        used_memory_mb: (128 + RNG.rand_range(0, 64)) as u32,
+                        total_memory_mb: stats.total_physical_memory_mb,
+                        used_memory_mb: stats.used_physical_memory_mb,
                         cpu_count: 3,
-                        cpu_usage: RNG.rand_range(10, 35) as u32,
+                        cpu_usage: current_cpu_usage as u32,
                         cpu_core_usage: core_usage,
                         disk_read_kbps: RNG.rand_range(50, 250), // Mocked
                         disk_write_kbps: RNG.rand_range(50, 250), // Mocked
@@ -969,6 +980,13 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
         let frame_end_tsc = unsafe { core::arch::x86_64::_rdtsc() };
 
         let cycles = frame_end_tsc.saturating_sub(frame_start_tsc);
+        
+        // Calculate CPU usage for this frame
+        if cycles > 0 {
+            let busy = unsafe { crate::hpvmlog::BUSY_TSC };
+            current_cpu_usage = ((busy * 100) / cycles) as usize;
+            if current_cpu_usage > 100 { current_cpu_usage = 100; }
+        }
 
         // Limit frame rate to ~60Hz (16,666 microseconds)
         // 22_222 for 45 fps

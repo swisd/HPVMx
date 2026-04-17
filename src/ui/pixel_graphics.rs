@@ -115,10 +115,15 @@ impl PixelGraphics {
     }
 
     pub fn flip(&mut self) {
+        let start_busy = unsafe { core::arch::x86_64::_rdtsc() };
         if let Some(ref buffer) = self.backbuffer {
             unsafe {
-                ptr::copy_nonoverlapping(buffer.as_ptr(), self.framebuffer, self.stride * self.height);
+                core::ptr::copy_nonoverlapping(buffer.as_ptr(), self.framebuffer, self.stride * self.height);
             }
+        }
+        let end_busy = unsafe { core::arch::x86_64::_rdtsc() };
+        unsafe {
+            crate::hpvmlog::BUSY_TSC = crate::hpvmlog::BUSY_TSC.saturating_add(end_busy.saturating_sub(start_busy));
         }
     }
 
@@ -362,6 +367,63 @@ impl PixelGraphics {
         self.draw_line_adv(x, y + height, x + width, y + height, color, thickness, style);
         self.draw_line_adv(x, y, x, y + height, color, thickness, style);
         self.draw_line_adv(x + width, y, x + width, y + height, color, thickness, style);
+    }
+
+    pub fn polygon_outline(&mut self, points: &[(usize, usize)], color: u32) {
+        if points.len() < 2 { return; }
+        for i in 0..points.len() {
+            let p1 = points[i];
+            let p2 = points[(i + 1) % points.len()];
+            self.draw_line(p1.0, p1.1, p2.0, p2.1, color);
+        }
+    }
+
+    pub fn polygon_fill(&mut self, points: &[(usize, usize)], color: u32) {
+        if points.len() < 3 { return; }
+
+        let mut min_y = points[0].1;
+        let mut max_y = points[0].1;
+        for p in points {
+            if p.1 < min_y { min_y = p.1; }
+            if p.1 > max_y { max_y = p.1; }
+        }
+
+        if min_y >= self.height { return; }
+        let max_y = core::cmp::min(max_y, self.height - 1);
+
+        for y in min_y..=max_y {
+            let mut nodes = alloc::vec::Vec::new();
+            let mut j = points.len() - 1;
+            for i in 0..points.len() {
+                let (x_i, y_i) = points[i];
+                let (x_j, y_j) = points[j];
+
+                if (y_i < y && y_j >= y) || (y_j < y && y_i >= y) {
+                    let intersect_x = x_i as f64 + (y as f64 - y_i as f64) / (y_j as f64 - y_i as f64) * (x_j as f64 - x_i as f64);
+                    nodes.push(intersect_x as i32);
+                }
+                j = i;
+            }
+
+            nodes.sort();
+
+            for i in (0..nodes.len()).step_by(2) {
+                if i + 1 < nodes.len() {
+                    let mut x_start = nodes[i];
+                    let mut x_end = nodes[i+1];
+
+                    if x_start >= self.width as i32 { continue; }
+                    if x_end < 0 { continue; }
+
+                    x_start = core::cmp::max(x_start, 0);
+                    x_end = core::cmp::min(x_end, (self.width - 1) as i32);
+
+                    for x in x_start..=x_end {
+                        self.draw_pixel(x as usize, y, color);
+                    }
+                }
+            }
+        }
     }
 
     pub fn draw_progress_bar(&mut self, x: usize, y: usize, width: usize, height: usize, value: usize, max: usize, color: u32) {

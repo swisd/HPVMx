@@ -24,7 +24,7 @@ pub unsafe extern "C" fn malloc(size: usize) -> *mut c_void {
     if ptr.is_null() { return core::ptr::null_mut(); }
     *(ptr as *mut usize) = size;
     let result = ptr.add(16) as *mut c_void;
-    // message!("\n", "malloc({}) -> {:?}", size, result);
+    message!("\n", "malloc({}) -> {:?}", size, result);
     result
 }
 
@@ -295,7 +295,7 @@ pub unsafe extern "C" fn fopen(filename: *const c_char, _mode: *const c_char) ->
     } else {
         filename_str
     };
-
+    FileSystem::cd("/");
     if let Ok(data) = FileSystem::read_file(path) {
         message!("\n", "DOOM: Loaded {} ({} bytes)", path, data.len());
         let file = Box::new(FILE { data, pos: 0 });

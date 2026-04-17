@@ -12,13 +12,14 @@ use crate::vmm::partitioner::HardwarePartitioner;
 use crate::vmm::security::{DeepLevelSecurity, AutolyticProtocol};
 use crate::{hpvm_info, hpvm_error, hpvm_log};
 use uefi::proto::console::text::Color;
+use uefi::mem::memory_map::MemoryMap;
 
 static VM_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// Manages the lifecycle and execution of all virtual machines.
 pub struct HypervisorManager {
     /// Map of VM ID to Virtual Machine instance
-    vms: BTreeMap<u32, VirtualMachine>,
+    pub(crate) vms: BTreeMap<u32, VirtualMachine>,
     /// Hypervisor capabilities
     pub is_initialized: bool,
     pub vm_count: u32,
@@ -212,24 +213,44 @@ impl HypervisorManager {
             .filter(|(_, vm)| matches!(vm.state, VmState::Running))
             .count() as u32;
 
-        let total_memory = self.vms.iter().map(|(_, vm)| vm.memory_mb).sum();
+        let total_vm_memory = self.vms.iter().map(|(_, vm)| vm.memory_mb).sum();
+
+        let mut total_phys_memory_mb = crate::get_total_physical_memory_mb();
+        let mut free_phys_memory_mb = 0;
+
+        match uefi::boot::memory_map(uefi::boot::MemoryType::LOADER_DATA) {
+            Ok(map) => {
+                for entry in map.entries() {
+                    let size_mb = (entry.page_count * 4096) / (1024 * 1024);
+                    // If TOTAL_PHYSICAL_MEMORY_MB wasn't captured correctly at boot, accumulate it here as fallback
+                    if total_phys_memory_mb == 0 {
+                        total_phys_memory_mb += size_mb as u32;
+                    }
+                    if entry.ty == uefi::boot::MemoryType::CONVENTIONAL {
+                        free_phys_memory_mb += size_mb as u32;
+                    }
+                }
+            }
+            Err(_) => {
+                if total_phys_memory_mb == 0 {
+                    total_phys_memory_mb = 1024; // Fallback
+                }
+                free_phys_memory_mb = 512;
+            }
+        }
 
         HypervisorStats {
             initialized: self.is_initialized,
             total_vms: self.vm_count,
             running_vms,
-            total_memory_mb: total_memory,
+            total_memory_mb: total_vm_memory,
+            total_physical_memory_mb: total_phys_memory_mb,
+            used_physical_memory_mb: total_phys_memory_mb.saturating_sub(free_phys_memory_mb),
         }
     }
 
     pub fn get_stats_advanced(&self) -> (HypervisorStats, String) {
-        let running_vms = self
-            .vms
-            .iter()
-            .filter(|(_, vm)| matches!(vm.state, VmState::Running))
-            .count() as u32;
-
-        let total_memory = self.vms.iter().map(|(_, vm)| vm.memory_mb).sum();
+        let stats = self.get_stats();
 
         let vms = self.vms.iter();
 
@@ -243,12 +264,7 @@ impl HypervisorManager {
                                        vm.0, vm.1.id, vm.1.name, vm.1.state, vm.1.memory_mb, vm.1.vcpu_count));
         }
 
-        (HypervisorStats {
-            initialized: self.is_initialized,
-            total_vms: self.vm_count,
-            running_vms,
-            total_memory_mb: total_memory,
-        }, list_str)
+        (stats, list_str)
     }
 
     pub fn boot_vm_with_media(&mut self, vm_id: u32, media_path: &str) -> Result<(), &'static str> {
@@ -303,5 +319,9 @@ pub struct HypervisorStats {
     pub running_vms: u32,
     /// Total memory allocated to all VMs in MB.
     pub total_memory_mb: u32,
+    /// Total system memory in MB.
+    pub total_physical_memory_mb: u32,
+    /// Memory used by system in MB.
+    pub used_physical_memory_mb: u32,
 }
 

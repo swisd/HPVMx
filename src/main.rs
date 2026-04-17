@@ -6,7 +6,7 @@
 #![feature(c_variadic)]
 #![no_std]
 #![no_main]
-
+extern crate alloc;
 
 mod ui;
 mod kernel;
@@ -44,7 +44,13 @@ pub use crate::micro_c::ir;
 pub use crate::micro_c::regalloc;
 pub use crate::micro_c::stackframe;
 
-extern crate alloc;
+
+pub fn get_total_physical_memory_mb() -> u32 {
+    unsafe { TOTAL_PHYSICAL_MEMORY_MB }
+}
+
+
+//extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
@@ -95,6 +101,7 @@ static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
 
 
 static mut HYPERVISOR: Option<HypervisorManager> = None;
+static mut TOTAL_PHYSICAL_MEMORY_MB: u32 = 0;
 
 //noinspection RsUnreachableCode
 #[allow(dead_code, unused, unused_must_use, non_camel_case_types, nonstandard_style)]
@@ -146,8 +153,12 @@ fn main() -> Status {
         Ok(map) => {
             hpvm_info!("malloc", "retrieved memory map with {} entries.  OMT (bsc/bsd)", map.entries().count());
 
+            let mut total_mb = 0;
             // Iterate and filter for free RAM
             for entry in map.entries() {
+                let size_mb = (entry.page_count * 4096) / (1024 * 1024);
+                total_mb += size_mb;
+
                 match entry.ty {
                     MemoryType::BOOT_SERVICES_CODE => {}
                     MemoryType::BOOT_SERVICES_DATA => {}
@@ -160,6 +171,8 @@ fn main() -> Status {
                      )
                 }
             }
+            unsafe { TOTAL_PHYSICAL_MEMORY_MB = total_mb as u32; }
+            hpvm_info!("malloc", "Total physical memory: {} MB", total_mb);
         }
         Err(e) => {
             error!("Failed to retrieve memory map: {:?}", e.status());
@@ -225,7 +238,7 @@ fn main() -> Status {
 
     hpvm_info!("CPU", "calibrating tsc");
     calibrate_tsc();
-    hpvm_info!("CPU", "tsc cyc/μs {}", TSC_PER_US);
+    hpvm_info!("CPU", "tsc cyc/us {}", TSC_PER_US);
 
     hpvm_info!("HPVMx", "ready");
     hpvm_warn!("HPVMx", "within spinloop");

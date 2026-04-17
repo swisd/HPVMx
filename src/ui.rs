@@ -6,7 +6,7 @@
 //! which manages the main display, active applications, and system status.
 
 use alloc::collections::BTreeMap;
-use crate::{hpvm_info, hpvm_log};
+use crate::{hpvm_info, hpvm_log, TSC_PER_US};
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -20,6 +20,7 @@ use uefi_raw::table::runtime::ResetType;
 
 mod graphics;
 pub mod pixel_graphics;
+pub mod graphics3d;
 
 
 use crate::{handle_vm_command, hpvm_warn, message, terminal};
@@ -267,7 +268,7 @@ impl DashboardUI {
     }
 
     //noinspection GrazieInspectionRunner
-    pub fn draw(&mut self) {
+    pub unsafe fn draw(&mut self) {
         if let Some(pg) = PixelGraphics::new() {
             self.iter += 1;
             let mut pg = pg.with_backbuffer();
@@ -1085,6 +1086,7 @@ impl DashboardUI {
             pg.draw_text(10, height - 32, " Use keys O, V, R, S, N, D, C, T, Z to switch tabs | X to shutdown", 0xFFFFFF);
             pg.draw_text(width - 60, height - 12, &format!("{} fps", self.resources.fps), 0xFFFFFF);
             pg.draw_text(width - 120, height - 12, &format!("{} ms", self.resources.frame_ms), 0xFFFFFF);
+            pg.draw_text(width - 200, height - 12, &format!("{} MHz", TSC_PER_US), 0xFFFFFF);
 
             // Update and draw cursor
             if self.iter % 20 == 0 {
