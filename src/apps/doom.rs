@@ -48,7 +48,7 @@ impl AppInfo for DoomApp {
     }
 
     fn icon(&self) -> [u32; 1024] {
-        icons::GRAPHICS_2D_32_ICON_DATA
+        icons::DOOM_32_ICON_DATA
     }
 
     fn dimensions(&self) -> (usize, usize) {
