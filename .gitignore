@@ -1,3 +1,4 @@
 /target
 *.vhd
 boot.vhd
+/src/apps/doom_c/*
