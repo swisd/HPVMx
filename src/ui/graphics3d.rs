@@ -1,21 +1,21 @@
 use crate::ui::pixel_graphics::PixelGraphics;
-use libm::{cos, sin};
+use libm::{cos, sin, tan};
 use alloc::vec::Vec;
 
 pub struct Vector3 {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
 }
 
 impl Vector3 {
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
+    pub fn new(x: f64, y: f64, z: f64) -> Self {
         Self { x, y, z }
     }
 }
 
 pub struct Matrix4 {
-    pub m: [[f32; 4]; 4],
+    pub m: [[f64; 4]; 4],
 }
 
 impl Matrix4 {
@@ -27,10 +27,10 @@ impl Matrix4 {
         Self { m }
     }
 
-    pub fn rotation_x(angle: f32) -> Self {
+    pub fn rotation_x(angle: f64) -> Self {
         let mut res = Self::identity();
-        let c = cos(angle as f64) as f32;
-        let s = sin(angle as f64) as f32;
+        let c = cos(angle as f64) as f64;
+        let s = sin(angle as f64) as f64;
         res.m[1][1] = c;
         res.m[1][2] = -s;
         res.m[2][1] = s;
@@ -38,10 +38,10 @@ impl Matrix4 {
         res
     }
 
-    pub fn rotation_y(angle: f32) -> Self {
+    pub fn rotation_y(angle: f64) -> Self {
         let mut res = Self::identity();
-        let c = cos(angle as f64) as f32;
-        let s = sin(angle as f64) as f32;
+        let c = cos(angle as f64) as f64;
+        let s = sin(angle as f64) as f64;
         res.m[0][0] = c;
         res.m[0][2] = s;
         res.m[2][0] = -s;
@@ -49,10 +49,10 @@ impl Matrix4 {
         res
     }
 
-    pub fn rotation_z(angle: f32) -> Self {
+    pub fn rotation_z(angle: f64) -> Self {
         let mut res = Self::identity();
-        let c = cos(angle as f64) as f32;
-        let s = sin(angle as f64) as f32;
+        let c = cos(angle as f64) as f64;
+        let s = sin(angle as f64) as f64;
         res.m[0][0] = c;
         res.m[0][1] = -s;
         res.m[1][0] = s;
@@ -60,7 +60,7 @@ impl Matrix4 {
         res
     }
 
-    pub fn translation(x: f32, y: f32, z: f32) -> Self {
+    pub fn translation(x: f64, y: f64, z: f64) -> Self {
         let mut res = Self::identity();
         res.m[0][3] = x;
         res.m[1][3] = y;
@@ -84,11 +84,11 @@ impl Matrix4 {
 
 pub struct Graphics3D<'a> {
     pub pg: &'a mut PixelGraphics,
-    pub width: f32,
-    pub height: f32,
-    pub fov: f32,
-    pub z_near: f32,
-    pub z_far: f32,
+    pub width: f64,
+    pub height: f64,
+    pub fov: f64,
+    pub z_near: f64,
+    pub z_far: f64,
 }
 
 impl<'a> Graphics3D<'a> {
@@ -96,8 +96,8 @@ impl<'a> Graphics3D<'a> {
         let (w, h) = pg.resolution();
         Self {
             pg,
-            width: w as f32,
-            height: h as f32,
+            width: w as f64,
+            height: h as f64,
             fov: 90.0,
             z_near: 0.1,
             z_far: 1000.0,
@@ -106,11 +106,11 @@ impl<'a> Graphics3D<'a> {
 
     pub fn project(&self, v: &Vector3) -> (usize, usize) {
         let aspect_ratio = self.height / self.width;
-        let fov_rad = 1.0 / (self.fov * 0.5 / 180.0 * 3.14159).tan();
+        let fov_rad = 1.0 / tan((self.fov * 0.5 / 180.0 * 3.14159) as f64);
         
-        let mut x = v.x * aspect_ratio * fov_rad;
-        let mut y = v.y * fov_rad;
-        let z = v.z; // Simplified projection
+        let mut x: f64 = (v.x * aspect_ratio * fov_rad) as f64;
+        let mut y: f64 = (v.y * fov_rad) as f64;
+        let z: f64 = v.z as f64; // Simplified projection
 
         // Perspective divide
         if z != 0.0 {
