@@ -29,8 +29,7 @@ impl Runnable for CubeApp {
         self.angle_x += self.speed_x;
         self.angle_y += self.speed_y;
 
-        // Friction: gradually return to slow rotation if keys aren't held
-        // (Optional: remove this if you want toggle-style speed)
+
         if self.speed_x.abs() > 0.02 { self.speed_x *= 0.95; }
         if self.speed_y.abs() > 0.02 { self.speed_y *= 0.95; }
     }
@@ -48,18 +47,21 @@ impl Runnable for CubeApp {
     }
 
     fn draw(&self, graphics: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
-        // 1. Static vertex data
+
         let points = [
-            [-1.0, -1.0,  1.0], [ 1.0, -1.0,  1.0], [ 1.0,  1.0,  1.0], [-1.0,  1.0,  1.0],
-            [-1.0, -1.0, -1.0], [ 1.0, -1.0, -1.0], [ 1.0,  1.0, -1.0], [-1.0,  1.0, -1.0],
+            [-1.0, -1.0,  1.0], [ 1.0, -1.0,  1.0], [ 1.0,  1.0,  1.0], [-1.0,  1.0,  1.0], // Front
+            [-1.0, -1.0, -1.0], [ 1.0, -1.0, -1.0], [ 1.0,  1.0, -1.0], [-1.0,  1.0, -1.0], // Back
         ];
 
-        let edges = [
-            (0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6),
-            (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7),
+        let faces = [
+            ([0, 1, 2, 3], 0xFF0000), // Front  - Red
+            ([1, 5, 6, 2], 0x00FF00), // Right  - Green
+            ([5, 4, 7, 6], 0x0000FF), // Back   - Blue
+            ([4, 0, 3, 7], 0xFFFF00), // Left   - Yellow
+            ([3, 2, 6, 7], 0xFF00FF), // Top    - Magenta
+            ([4, 5, 1, 0], 0x00FFFF), // Bottom - Cyan
         ];
 
-        // 2. Pre-calculate Trig once per frame (Huge Optimization)
         let s_x = sin(self.angle_x);
         let c_x = cos(self.angle_x);
         let s_y = sin(self.angle_y);
@@ -67,36 +69,51 @@ impl Runnable for CubeApp {
 
         graphics.fill_rect(x, y, 200, 200, 0x000000);
 
-        let mut projected: [(isize, isize); 8] = [(0, 0); 8];
+        let mut projected: [(usize, usize); 8] = [(0, 0); 8];
         let center_x = (x + 100) as f64;
         let center_y = (y + 100) as f64;
 
+        // Transform and Project vertices
         for (i, p) in points.iter().enumerate() {
             let px = p[0];
             let py = p[1];
             let pz = p[2];
 
-            // Rotation X
             let xy = py * c_x - pz * s_x;
             let xz = py * s_x + pz * c_x;
-
-            // Rotation Y
             let yx = px * c_y + xz * s_y;
             let yz = -px * s_y + xz * c_y;
 
-            // Projection (Fixed Z-depth for speed)
             let factor = 150.0 / (yz + 4.0);
             projected[i] = (
-                (yx * factor + center_x) as isize,
-                (xy * factor + center_y) as isize,
+                (yx * factor + center_x) as usize,
+                (xy * factor + center_y) as usize,
             );
         }
 
-        // 3. Draw lines
-        for &(i1, i2) in &edges {
-            let (p1x, p1y) = projected[i1];
-            let (p2x, p2y) = projected[i2];
-            graphics.draw_line(p1x as usize, p1y as usize, p2x as usize, p2y as usize, ((p1x as u32) << 16) | ((p1y as u32) << 8) | (100u32));
+        for (indices, color) in faces.iter() {
+            let p1 = projected[indices[0]];
+            let p2 = projected[indices[1]];
+            let p3 = projected[indices[2]];
+            let p4 = projected[indices[3]];
+
+
+            let v1x = p2.0 as isize - p1.0 as isize;
+            let v1y = p2.1 as isize - p1.1 as isize;
+            let v2x = p3.0 as isize - p1.0 as isize;
+            let v2y = p3.1 as isize - p1.1 as isize;
+
+            if (v1x * v2y - v1y * v2x) < 0 {
+                let face_points = [p1, p2, p3, p4];
+                graphics.polygon_fill(&face_points, *color);
+
+
+                for i in 0..4 {
+                    let start = face_points[i];
+                    let end = face_points[(i + 1) % 4];
+                    graphics.draw_line(start.0, start.1, end.0, end.1, 0x000000);
+                }
+            }
         }
     }
 }

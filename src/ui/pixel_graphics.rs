@@ -250,6 +250,25 @@ impl PixelGraphics {
         }
     }
 
+    pub fn draw_char_adv(&mut self, x: usize, y: usize, c: char, color: u32, scale: usize) {
+        let font_data = get_font_data(c);
+        for row in 0..16 {
+            for col in 0..8 {
+                if (font_data[row] & (1 << (7 - col))) != 0 {
+                    for sy in 0..scale {
+                        for sx in 0..scale {
+                            self.draw_pixel(
+                                x + (col * scale) + sx,
+                                y + (row * scale) + sy,
+                                color,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn draw_symbol(&mut self, x: usize, y: usize, symbol: u16, color: u32) {
         let symbol_data = get_sym_data(symbol);
         for row in 0..16 {
@@ -290,6 +309,14 @@ impl PixelGraphics {
         for c in text.chars() {
             self.draw_char(curr_x, y, c, color);
             curr_x += 8;
+        }
+    }
+
+    pub fn draw_text_adv(&mut self, x: usize, y: usize, text: &str, color: u32, scale: usize) {
+        let mut curr_x = x;
+        for c in text.chars() {
+            self.draw_char_adv(curr_x, y, c, color, scale);
+            curr_x += 8 * scale;
         }
     }
 

@@ -16,8 +16,10 @@ use crate::apps::keystepper::CH64App;
 use crate::apps::manual::InstructionManualApp;
 use crate::apps::snake::SnakeApp;
 use crate::apps::doom::DoomApp;
+use crate::apps::mc_app::MinecraftApp;
 use crate::apps::resource_tester::SysTestApp;
 use crate::env::Runnable;
+use crate::filesystem::FileSystem;
 use crate::ui::pixel_graphics::icons;
 use crate::ui::pixel_graphics::icons::ICON32;
 
@@ -32,6 +34,7 @@ mod snake;
 mod doom;
 pub mod doom_glue;
 mod resource_tester;
+mod mc_app;
 
 /// A type alias for a function that creates a boxed app and returns its preferred window dimensions.
 type AppConstructor = fn() -> (Box<dyn Runnable>, (usize, usize));
@@ -49,7 +52,8 @@ pub(crate) static APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
         (Box::new(app), dims)
     }, icons::CLOCK_RED_32_ICON_DATA, "0.2.1"),
     ("Manual", || {
-        let app = InstructionManualApp{};
+        let book = FileSystem::read_file_to_string("/docs/man/manual.md").unwrap();
+        let app = InstructionManualApp::new(&*book, 1200usize);
         let dims = crate::env::AppInfo::dimensions(&app);
         (Box::new(app), dims)
     }, icons::MANUAL_BOOK_32_ICON_DATA, "0.1.1"),
@@ -79,6 +83,11 @@ pub(crate) static APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
         let dims = crate::env::AppInfo::dimensions(&app);
         (Box::new(app), dims)
     }, icons::INTEGRATED_CIRCUIT_32_ICON_DATA, "0.1.0"),
+    ("MineCrap", || {
+        let app = MinecraftApp::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::FLOPPY_SAVE_32_ICON_DATA, "0.1.0"),
     ("Add..", || {
         let app = AppInstallerApp{};
         let dims = crate::env::AppInfo::dimensions(&app);

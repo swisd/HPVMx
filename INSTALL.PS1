@@ -1,8 +1,14 @@
-# This script uses native Windows DiskPart to create a bootable VHD for VirtualBox
+# This script uses native Windows DiskPart to create a bootable VHD
 $env:CC = "clang"
 
 echo "Running Build Script..."
 ./build.bat
+
+
+echo "Updating docs"
+cargo +nightly rustdoc -p HPVMx -- -Z unstable-options --output-format json --document-private-items
+rustdoc-md --path /target/doc/HPVMx.json --output hpvmx.md
+
 echo "Installing..."
 
 $VHD_PATH = "C:\programming\RS\HPVMx\boot.vhd"
@@ -18,6 +24,8 @@ Mount-DiskImage -ImagePath $VHD_PATH
 echo "Copying Binary EFI"
 New-Item -Path "$($MOUNT_LETTER):\EFI\BOOT" -ItemType Directory -Force
 Copy-Item $EFI_PATH "$($MOUNT_LETTER):\EFI\BOOT\BOOTX64.EFI"
+New-Item -Path "$($MOUNT_LETTER):\docs\man" -ItemType Directory -Force
+Copy-Item "hpvmx.md" "$($MOUNT_LETTER):\docs\man\manual.md"
 
 # 3. Detach
 echo "Detaching VHD $MOUNT_LETTER"

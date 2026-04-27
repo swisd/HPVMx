@@ -226,7 +226,7 @@ impl DashboardUI {
             focused_process_idx: None,
             selected_app_idx: 0,
 
-            app_window_position: (200, 200),
+            app_window_position: (100, 100),
             ctrl_mode: false,
             alt_mode: false,
             fn_mode: false,
