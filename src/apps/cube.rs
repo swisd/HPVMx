@@ -96,7 +96,7 @@ impl Runnable for CubeApp {
         for &(i1, i2) in &edges {
             let (p1x, p1y) = projected[i1];
             let (p2x, p2y) = projected[i2];
-            graphics.draw_line(p1x as usize, p1y as usize, p2x as usize, p2y as usize, 0x00FF00);
+            graphics.draw_line(p1x as usize, p1y as usize, p2x as usize, p2y as usize, ((p1x as u32) << 16) | ((p1y as u32) << 8) | (100u32));
         }
     }
 }

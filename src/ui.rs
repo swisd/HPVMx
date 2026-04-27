@@ -27,6 +27,7 @@ use crate::{handle_vm_command, hpvm_warn, message, terminal};
 use crate::pm::{Package, PackageManager, PackageType};
 use pixel_graphics::{PixelGraphics, TreeViewNode};
 use crate::env::{Application, Runnable, SteppedApplicationContext};
+use crate::input::ScanCodeV2;
 
 #[derive(Clone, Debug)]
 pub struct FileEntry {
@@ -82,6 +83,10 @@ pub struct DashboardUI {
     pub active_apps: Vec<SteppedApplicationContext>,
     pub focused_process_idx: Option<usize>, // Which app gets the keyboard?
     pub selected_app_idx: usize,
+    pub app_window_position: (usize, usize),
+    pub ctrl_mode: bool,
+    pub alt_mode: bool,
+    pub fn_mode: bool,
 
 }
 
@@ -221,6 +226,10 @@ impl DashboardUI {
             focused_process_idx: None,
             selected_app_idx: 0,
 
+            app_window_position: (200, 200),
+            ctrl_mode: false,
+            alt_mode: false,
+            fn_mode: false,
         }
     }
 
@@ -286,6 +295,10 @@ impl DashboardUI {
                 let time_str = alloc::format!("{:02}:{:02}:{:02}", time.hour(), time.minute(), time.second());
                 pg.draw_text(width - 100, 16, &time_str, 0xFFFF00); // Yellow clock
             }
+
+            pg.draw_text(width - 100, 2, if self.ctrl_mode {"ctrl"} else {""}, 0xFFFFFF);
+            pg.draw_text((width - 100) + 33, 2, if self.alt_mode {"alt"} else {""}, 0xFFFFFF);
+            pg.draw_text((width - 100) + 60, 2, if self.fn_mode {"fn"} else {""}, 0xFFFFFF);
 
             pg.draw_text(40, 1, "   __ _____ _   ____  ___", 0xFFFFFF);
             pg.draw_text(40, 11, "  / // / _ \\ | / /  |/  /_ __", 0xFFFFFF);
@@ -504,22 +517,22 @@ impl DashboardUI {
                     // Memory usage bar and graph
                     let bar_y = panel_y + 16 + line_h * 3 + gutter;
                     pg.draw_text(panel_x + 10, bar_y, "Memory History (10s):", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00, 30);
+                    pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00, 60);
 
                     // I/O Stats and Graphs
                     let io_y = bar_y + 80 + gutter * 2;
                     pg.draw_text(panel_x + 10, io_y, "Net Traffic (RX:Cyan TX:Yellow)", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF, 30);
-                    pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00, 30);
+                    pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF, 60);
+                    pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00, 60);
                     
                     let disk_y = io_y + 80;
                     pg.draw_text(panel_x + 10, disk_y, "Disk I/O (Read:White Write:Red)", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF, 30);
-                    pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000, 30);
+                    pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF, 60);
+                    pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000, 60);
 
                     let gpu_y = disk_y + 80;
                     pg.draw_text(panel_x+ 10, gpu_y, "GPU Usage:", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, gpu_y+20, 165, 50, &self.resources.gpu_history, 100, 0xFF7700, 30);
+                    pg.draw_line_graph(panel_x + 10, gpu_y+20, 165, 50, &self.resources.gpu_history, 100, 0xFF7700, 60);
 
 
 
@@ -531,7 +544,7 @@ impl DashboardUI {
                     let right_h = core::cmp::min(height - right_y - 100, 260);
                     pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
                     pg.draw_text_bg(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF, 0x222222);
-                    pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00, 30);
+                    pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00, 60);
                     
                     pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
                     for i in 0..self.resources.cpu_count {
@@ -1123,8 +1136,8 @@ impl DashboardUI {
                 // Wait, if we want them to be "stepped", we should call step().
                 
                 // Let's draw a window for the app
-                let win_x = 100 + idx * 30;
-                let win_y = 100 + idx * 30;
+                let win_x = self.app_window_position.0 + idx * 30;
+                let win_y = self.app_window_position.1 + idx * 30;
                 let win_w = app_ctx.application.dimensions()[0] + 2;
                 let win_h = app_ctx.application.dimensions()[1] + 20;
                 
@@ -1808,6 +1821,16 @@ impl DashboardUI {
                         self.selected_app_idx += 1;
                     }
                 }
+            }
+
+            Key::Special(ScanCode::FUNCTION_2) => {
+                self.ctrl_mode = !self.ctrl_mode;
+            }
+            Key::Special(ScanCode::FUNCTION_3) => {
+                self.alt_mode = !self.alt_mode;
+            }
+            Key::Special(ScanCode::FUNCTION_4) => {
+                self.fn_mode = !self.fn_mode;
             }
             _ => {}
         }

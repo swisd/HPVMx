@@ -16,6 +16,7 @@ use crate::apps::keystepper::CH64App;
 use crate::apps::manual::InstructionManualApp;
 use crate::apps::snake::SnakeApp;
 use crate::apps::doom::DoomApp;
+use crate::apps::resource_tester::SysTestApp;
 use crate::env::Runnable;
 use crate::ui::pixel_graphics::icons;
 use crate::ui::pixel_graphics::icons::ICON32;
@@ -30,6 +31,7 @@ mod appinstaller;
 mod snake;
 mod doom;
 pub mod doom_glue;
+mod resource_tester;
 
 /// A type alias for a function that creates a boxed app and returns its preferred window dimensions.
 type AppConstructor = fn() -> (Box<dyn Runnable>, (usize, usize));
@@ -67,11 +69,16 @@ pub(crate) static APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
        let dims = crate::env::AppInfo::dimensions(&app);
        (Box::new(app), dims)
     }, icons::CUBE_WINDOW_RED_32_ICON_DATA, "0.2.3"),
-    ("DOOM", || {
-        let app = DoomApp::new();
+    // ("DOOM", || {
+    //     let app = DoomApp::new();
+    //     let dims = crate::env::AppInfo::dimensions(&app);
+    //     (Box::new(app), dims)
+    // }, icons::DOOM_32_ICON_DATA, "1.1.0"),
+    ("ResTest", || {
+        let app = SysTestApp::new();
         let dims = crate::env::AppInfo::dimensions(&app);
         (Box::new(app), dims)
-    }, icons::DOOM_32_ICON_DATA, "1.1.0"),
+    }, icons::INTEGRATED_CIRCUIT_32_ICON_DATA, "0.1.0"),
     ("Add..", || {
         let app = AppInstallerApp{};
         let dims = crate::env::AppInfo::dimensions(&app);

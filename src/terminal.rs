@@ -977,22 +977,26 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
             }
         }
 
-        let frame_end_tsc = unsafe { core::arch::x86_64::_rdtsc() };
+        // 2. Mark the end of the "active" work (Before the stall)
+        let work_end_tsc = unsafe { core::arch::x86_64::_rdtsc() };
 
-        let cycles = frame_end_tsc.saturating_sub(frame_start_tsc);
-        
-        // Calculate CPU usage for this frame
-        if cycles > 0 {
+        // 3. Calculate "Work" Cycles vs "Total Budget" Cycles
+        let work_cycles = work_end_tsc.saturating_sub(frame_start_tsc);
+
+        // Target budget in cycles (e.g., 45 FPS = 22,222us)
+        let target_cycles = unsafe { 22_222 * TSC_PER_US };
+
+        // Calculate CPU usage based on actual Busy TSC tracked during work
+        if target_cycles > 0 {
             let busy = unsafe { crate::hpvmlog::BUSY_TSC };
-            current_cpu_usage = ((busy * 100) / cycles) as usize;
+            // Use the target budget as the denominator to see % of the "frame pipe" used
+            current_cpu_usage = ((busy * 100) / target_cycles) as usize;
             if current_cpu_usage > 100 { current_cpu_usage = 100; }
         }
 
-        // Limit frame rate to ~60Hz (16,666 microseconds)
-        // 22_222 for 45 fps
-        // currently at 32
+        // 4. Calculate time elapsed for pacing
         let us_elapsed = unsafe {
-            if TSC_PER_US > 0 { cycles / TSC_PER_US } else { 0 }
+            if TSC_PER_US > 0 { work_cycles / TSC_PER_US } else { 0 }
         };
 
         current_frame_ms = (us_elapsed / 1000) as usize;

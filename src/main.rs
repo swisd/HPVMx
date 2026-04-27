@@ -33,6 +33,7 @@ mod micro_c;
 mod cpucheck;
 mod env;
 mod apps;
+mod input;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -191,7 +192,7 @@ fn main() -> Status {
     hpvm_info!("fs", "building devicelist");
 
     // Identify boot disk
-    let loaded_image = uefi::boot::open_protocol_exclusive::<uefi::proto::loaded_image::LoadedImage>(uefi::boot::image_handle()).unwrap();
+    let loaded_image = boot::open_protocol_exclusive::<uefi::proto::loaded_image::LoadedImage>(boot::image_handle()).unwrap();
     let boot_device = loaded_image.device();
     FileSystem::set_root_handle(boot_device);
 
@@ -244,6 +245,7 @@ fn main() -> Status {
     hpvm_info!("CPU", "calibrating tsc");
     calibrate_tsc();
     hpvm_info!("CPU", "tsc cyc/us {}", TSC_PER_US);
+    let _ = boot::set_watchdog_timer(0, 0, None);
 
     hpvm_info!("HPVMx", "ready");
     hpvm_warn!("HPVMx", "within spinloop");
