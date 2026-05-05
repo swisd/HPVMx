@@ -1563,7 +1563,11 @@ impl DashboardUI {
                                         let _ = crate::FileSystem::write_to_file_bytes(&ed.file_path, &ed.buffer, 'w');
                                         self.selected_tab = DashboardTab::Storage;
                                     }
-                                    _ => ed.mode = EditorMode::Normal,
+                                    _ => {
+                                        ed.mode = EditorMode::Normal;
+                                        self.ui_error(1);
+
+                                    },
                                 }
                             } else {
                                 ed.command_buffer.push(ch);
