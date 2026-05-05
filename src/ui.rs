@@ -28,12 +28,9 @@ pub mod graphics3d;
 use crate::{handle_vm_command, hpvm_warn, message, terminal};
 use crate::pm::{Package, PackageManager, PackageType};
 use pixel_graphics::{PixelGraphics, TreeViewNode};
-use crate::apps::AppConstructor;
 use crate::apps::error::ErrorApp;
-use crate::env::{Application, Runnable, SteppedApplicationContext};
+use crate::env::{Application, SteppedApplicationContext};
 use crate::input::ScanCodeV2;
-use crate::ui::pixel_graphics::icons;
-use crate::ui::pixel_graphics::icons::ICON32;
 
 #[derive(Clone, Debug)]
 pub struct FileEntry {
@@ -1315,15 +1312,24 @@ impl DashboardUI {
 
         let handle = match uefi::boot::get_handle_for_protocol::<SimpleFileSystem>() {
             Ok(h) => h,
-            Err(_) => return,
+            Err(_) => {
+                self.ui_error(27);
+                return;
+            },
         };
         let mut sfs = match uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle) {
             Ok(s) => s,
-            Err(_) => return,
+            Err(_) => {
+                self.ui_error(19);
+                return;
+            },
         };
         let mut root_dir = match sfs.open_volume() {
             Ok(d) => d,
-            Err(_) => return,
+            Err(_) => {
+                self.ui_error(28);
+                return;
+            },
         };
 
         let mut target_dir = if self.current_path == "\\" || self.current_path == "/" {
@@ -1333,17 +1339,26 @@ impl DashboardUI {
             u16_path.push(0);
             let path_cstr = match uefi::data_types::CStr16::from_u16_with_nul(&u16_path) {
                 Ok(c) => c,
-                Err(_) => return,
+                Err(_) => {
+                    self.ui_error(24);
+                    return;
+                },
             };
 
             let handle = match root_dir.open(path_cstr, FileMode::Read, FileAttribute::DIRECTORY) {
                 Ok(h) => h,
-                Err(_) => return,
+                Err(_) => {
+                    self.ui_error(10);
+                    return;
+                },
             };
 
             match handle.into_directory() {
                 Some(d) => d,
-                None => return,
+                None => {
+                    self.ui_error(28);
+                    return;
+                },
             }
         };
 
@@ -1485,7 +1500,8 @@ impl DashboardUI {
                                 if (entry.name == "PAGEFILE") || (entry.name == "BOOTX64.EFI") {
                                     self.ui_error(25);
                                 } else {
-                                    if let Ok(data) = crate::FileSystem::read_file(&full_path) {
+                                    match crate::FileSystem::read_file(&full_path) {
+                                        Ok(data) => {
                                         // Detect if binary: check for null bytes or invalid UTF-8
                                         let is_hex = core::str::from_utf8(&data).is_err();
 
@@ -1499,6 +1515,8 @@ impl DashboardUI {
                                             command_buffer: "".to_string(),
                                         });
                                         self.selected_tab = DashboardTab::Editor;
+                                        }
+                                        Err(_) => self.ui_error(29),
                                     }
                                 }
                             }
@@ -1508,7 +1526,14 @@ impl DashboardUI {
                 }
             }
             DashboardTab::Editor => {
-                let ed = self.editor.as_mut().unwrap();
+                let ed = match self.editor.as_mut() {
+                    Some(ed) => ed,
+                    None => {
+                        self.ui_error(30);
+                        self.selected_tab = DashboardTab::Storage;
+                        return;
+                    },
+                };
 
                 match ed.mode {
                     EditorMode::Normal => match key {
@@ -1555,13 +1580,21 @@ impl DashboardUI {
                             if ch == '\r' || ch == '\n' {
                                 match ed.command_buffer.as_str() {
                                     "w" => {
-                                        let _ = crate::FileSystem::write_to_file_bytes(&ed.file_path, &ed.buffer, 'w');
+                                        let failed = crate::FileSystem::write_to_file_bytes(&ed.file_path, &ed.buffer, 'w').is_err();
                                         ed.mode = EditorMode::Normal;
+                                        if failed {
+                                            self.ui_error(16);
+                                        }
                                     }
                                     "q" => self.selected_tab = DashboardTab::Storage,
                                     "wq" => {
-                                        let _ = crate::FileSystem::write_to_file_bytes(&ed.file_path, &ed.buffer, 'w');
-                                        self.selected_tab = DashboardTab::Storage;
+                                        let failed = crate::FileSystem::write_to_file_bytes(&ed.file_path, &ed.buffer, 'w').is_err();
+                                        if failed {
+                                            ed.mode = EditorMode::Normal;
+                                            self.ui_error(16);
+                                        } else {
+                                            self.selected_tab = DashboardTab::Storage;
+                                        }
                                     }
                                     _ => {
                                         ed.mode = EditorMode::Normal;
@@ -1891,180 +1924,61 @@ impl DashboardUI {
         self.exit_requested
     }
 
-    pub fn ui_error(&mut self, typ: usize){
+    pub fn ui_error(&mut self, typ: usize) {
+        self.ui_error_with_detail(typ, None);
+    }
 
-        let types: &[&str] = &[
-            "0: Generic",
-            "1: Invalid",
-            "2: AcessDenied",
-            "3: NotFound",
-            "4: OutOfMemBounds",
-            "5: Overflow",
-            "6: SegFault",
-            "7: Lookup",
-            "8: RuntimeProblem",
-            "9: OutOfMemory",
-            "10: PathNotFound",
-            "11: BadEnvironment",
-            "12: WriteProtect",
-            "13: BadCommand",
-            "14: CRC",
-            "15: DiskReadFault",
-            "16: DiskWriteFault",
-            "17: NetTxFault",
-            "18: NetRxFault",
-            "19: DeviceBusy",
-            "20: BadSector",
-            "21: BadDevice",
-            "22: WrongOperation",
-            "23: CpuFault",
-            "24: InvalidFormat",
-            "25: SystemFile",
-            "26: ActiveFile",
-        ];
-        hpvm_error!("UI", "ERROR: {}", types[typ]);
-        let TEMPREG: &[(&str, AppConstructor, ICON32, &str)] = &[
-            ("ERROR 0", || {
-                let app = ErrorApp { error: "Error 0: Generic\n Generic Error".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 1", || {
-                let app = ErrorApp { error: "Error 1: Invalid".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 2", || {
-                let app = ErrorApp { error: "Error 2: AcessDenied".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 3", || {
-                let app = ErrorApp { error: "Error 3: NotFound".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 4", || {
-                let app = ErrorApp { error: "Error 4: OutOfMemBounds".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 5", || {
-                let app = ErrorApp { error: "Error 5: Overflow".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 6", || {
-                let app = ErrorApp { error: "Error 6: SegFault".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 7", || {
-                let app = ErrorApp { error: "Error 7: Lookup".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 8", || {
-                let app = ErrorApp { error: "Error 8: RuntimeProblem".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 9", || {
-                let app = ErrorApp { error: "Error 9: OutOfMemory".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 10", || {
-                let app = ErrorApp { error: "Error 10: PathNotFound".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 11", || {
-                let app = ErrorApp { error: "Error 11: BadEnvironment".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 12", || {
-                let app = ErrorApp { error: "Error 12: WriteProtect".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 13", || {
-                let app = ErrorApp { error: "Error 13: BadCommand".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 14", || {
-                let app = ErrorApp { error: "Error 14: CRC".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 15", || {
-                let app = ErrorApp { error: "Error 15: DiskReadFault".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 16", || {
-                let app = ErrorApp { error: "Error 16: DiskWriteFault".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 17", || {
-                let app = ErrorApp { error: "Error 17: NetTxFault".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 18", || {
-                let app = ErrorApp { error: "Error 18: NetRxFault".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 19", || {
-                let app = ErrorApp { error: "Error 19: DeviceBusy".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 20", || {
-                let app = ErrorApp { error: "Error 20: BadSector".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 21", || {
-                let app = ErrorApp { error: "Error 21: BadDevice".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 22", || {
-                let app = ErrorApp { error: "Error 22: WrongOperation\n The operation was incorrect".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 23", || {
-                let app = ErrorApp { error: "Error 23: CpuFault".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 24", || {
-                let app = ErrorApp { error: "Error 24: InvalidFormat".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 25", || {
-                let app = ErrorApp { error: "Error 23: SystemFile\n The file is of the system".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
-            ("ERROR 26", || {
-                let app = ErrorApp { error: "Error 24: ActiveFile\n The file is in use".parse().unwrap() };
-                let dims = crate::env::AppInfo::dimensions(&app);
-                (Box::new(app), dims)
-            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+    pub fn ui_error_with_detail(&mut self, typ: usize, detail: Option<&str>) {
+        let types: &[(&str, &str)] = &[
+            ("Generic", "Generic Error"),
+            ("Invalid", ""),
+            ("AccessDenied", ""),
+            ("NotFound", ""),
+            ("OutOfMemBounds", ""),
+            ("Overflow", ""),
+            ("SegFault", ""),
+            ("Lookup", ""),
+            ("RuntimeProblem", ""),
+            ("OutOfMemory", ""),
+            ("PathNotFound", ""),
+            ("BadEnvironment", ""),
+            ("WriteProtect", ""),
+            ("BadCommand", ""),
+            ("CRC", ""),
+            ("DiskReadFault", ""),
+            ("DiskWriteFault", ""),
+            ("NetTxFault", ""),
+            ("NetRxFault", ""),
+            ("DeviceBusy", ""),
+            ("BadSector", ""),
+            ("BadDevice", ""),
+            ("WrongOperation", "The operation was incorrect"),
+            ("CpuFault", ""),
+            ("InvalidFormat", ""),
+            ("SystemFile", "The file is of the system"),
+            ("ActiveFile", "The file is in use"),
+            ("StorageUnavailable", "The filesystem protocol is unavailable"),
+            ("DirectoryOpen", "The directory could not be opened"),
+            ("FileReadFault", "The file could not be read"),
+            ("EditorUnavailable", "The editor has no active file"),
         ];
 
-        let (name, _, _, _) = TEMPREG[typ];
-        if let Some(app_ctx) = SteppedApplicationContext::from_name_custom_registry(name, TEMPREG) {
-            self.active_apps.push(app_ctx);
-            self.focused_process_idx = Some(self.active_apps.len() - 1);
-        }
+        let (name, default_detail) = types.get(typ).copied().unwrap_or(types[0]);
+        let detail = detail.unwrap_or(default_detail);
+        hpvm_error!("UI", "ERROR {}: {}", typ, name);
+
+        let error = if detail.is_empty() {
+            format!("Error {}: {}", typ, name)
+        } else {
+            format!("Error {}: {}\n {}", typ, name, detail)
+        };
+        let app = ErrorApp { error };
+        let dims = crate::env::AppInfo::dimensions(&app);
+        let mut app = Application::new(Box::new(app));
+        app.name = format!("ERROR {}", typ);
+        app.dimensions = dims;
+
+        self.active_apps.push(SteppedApplicationContext::new(app, None));
+        self.focused_process_idx = Some(self.active_apps.len() - 1);
     }
 }
