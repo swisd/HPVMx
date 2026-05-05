@@ -1,6 +1,6 @@
 # Crate Documentation
 
-**Version:** 1.7.1
+**Version:** 1.9.2
 
 **Format Version:** 57
 
@@ -1116,6 +1116,10 @@ pub struct PixelGraphics {
   ```
 
 - ```rust
+  pub fn draw_char_adv(self: &mut Self, x: usize, y: usize, c: char, color: u32, scale: usize) { /* ... */ }
+  ```
+
+- ```rust
   pub fn draw_symbol(self: &mut Self, x: usize, y: usize, symbol: u16, color: u32) { /* ... */ }
   ```
 
@@ -1129,6 +1133,10 @@ pub struct PixelGraphics {
 
 - ```rust
   pub fn draw_text(self: &mut Self, x: usize, y: usize, text: &str, color: u32) { /* ... */ }
+  ```
+
+- ```rust
+  pub fn draw_text_adv(self: &mut Self, x: usize, y: usize, text: &str, color: u32, scale: usize) { /* ... */ }
   ```
 
 - ```rust
@@ -1915,6 +1923,10 @@ pub struct DashboardUI {
     pub active_apps: alloc::vec::Vec<crate::env::SteppedApplicationContext>,
     pub focused_process_idx: Option<usize>,
     pub selected_app_idx: usize,
+    pub app_window_position: (usize, usize),
+    pub ctrl_mode: bool,
+    pub alt_mode: bool,
+    pub fn_mode: bool,
 }
 ```
 
@@ -1948,6 +1960,10 @@ pub struct DashboardUI {
 | `active_apps` | `alloc::vec::Vec<crate::env::SteppedApplicationContext>` |  |
 | `focused_process_idx` | `Option<usize>` |  |
 | `selected_app_idx` | `usize` |  |
+| `app_window_position` | `(usize, usize)` |  |
+| `ctrl_mode` | `bool` |  |
+| `alt_mode` | `bool` |  |
+| `fn_mode` | `bool` |  |
 
 ##### Implementations
 
@@ -25050,6 +25066,7 @@ This trait is implemented for the following types:
 - `SnakeApp`
 - `DoomApp`
 - `SysTestApp`
+- `MinecraftApp`
 
 #### Trait `BackgroundTask`
 
@@ -25107,6 +25124,7 @@ This trait is implemented for the following types:
 - `SnakeApp`
 - `DoomApp`
 - `SysTestApp`
+- `MinecraftApp`
 
 ## Module `apps`
 
@@ -25642,6 +25660,10 @@ pub(in ::apps) mod manual { /* ... */ }
 
 ```rust
 pub struct InstructionManualApp {
+    pub(in ::apps::manual) pages: alloc::vec::Vec<alloc::vec::Vec<alloc::string::String>>,
+    pub(in ::apps::manual) current_page: usize,
+    pub(in ::apps::manual) scroll_y: usize,
+    pub(in ::apps::manual) width: usize,
 }
 ```
 
@@ -25649,8 +25671,18 @@ pub struct InstructionManualApp {
 
 | Name | Type | Documentation |
 |------|------|---------------|
+| `pages` | `alloc::vec::Vec<alloc::vec::Vec<alloc::string::String>>` |  |
+| `current_page` | `usize` |  |
+| `scroll_y` | `usize` |  |
+| `width` | `usize` |  |
 
 ##### Implementations
+
+###### Methods
+
+- ```rust
+  pub fn new(content: &str, window_width: usize) -> Self { /* ... */ }
+  ```
 
 ###### Trait Implementations
 
@@ -25703,11 +25735,11 @@ pub struct InstructionManualApp {
 - **RefUnwindSafe**
 - **Runnable**
   - ```rust
-    fn draw(self: &Self, graphics_entity: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) { /* ... */ }
+    fn draw(self: &Self, graphics: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) { /* ... */ }
     ```
 
   - ```rust
-    fn logic(self: &mut Self, vars: &mut Vec<String>) { /* ... */ }
+    fn logic(self: &mut Self, _vars: &mut Vec<String>) { /* ... */ }
     ```
 
   - ```rust
@@ -26167,7 +26199,7 @@ pub struct SysTestApp {
     pub(in ::apps::resource_tester) heat_map: [f32; 100],
     pub(in ::apps::resource_tester) rng_state: u64,
     pub(in ::apps::resource_tester) test_buffer: alloc::vec::Vec<u8>,
-    pub(in ::apps::resource_tester) mem_raw_buf: alloc::vec::Vec<u8>,
+    pub(in ::apps::resource_tester) mem_raw_buf: alloc::vec::Vec<u64>,
 }
 ```
 
@@ -26183,7 +26215,7 @@ pub struct SysTestApp {
 | `heat_map` | `[f32; 100]` |  |
 | `rng_state` | `u64` |  |
 | `test_buffer` | `alloc::vec::Vec<u8>` |  |
-| `mem_raw_buf` | `alloc::vec::Vec<u8>` |  |
+| `mem_raw_buf` | `alloc::vec::Vec<u64>` |  |
 
 ##### Implementations
 
@@ -26277,6 +26309,194 @@ pub struct SysTestApp {
 
 - **Unpin**
 - **UnwindSafe**
+## Module `mc_app`
+
+```rust
+pub(in ::apps) mod mc_app { /* ... */ }
+```
+
+### Types
+
+#### Struct `Block`
+
+```rust
+pub(in ::apps::mc_app) struct Block {
+    pub(in ::apps::mc_app) x: f64,
+    pub(in ::apps::mc_app) y: f64,
+    pub(in ::apps::mc_app) z: f64,
+    pub(in ::apps::mc_app) color: u32,
+}
+```
+
+##### Fields
+
+| Name | Type | Documentation |
+|------|------|---------------|
+| `x` | `f64` |  |
+| `y` | `f64` |  |
+| `z` | `f64` |  |
+| `color` | `u32` |  |
+
+##### Implementations
+
+###### Trait Implementations
+
+- **Any**
+  - ```rust
+    fn type_id(self: &Self) -> TypeId { /* ... */ }
+    ```
+
+- **Borrow**
+  - ```rust
+    fn borrow(self: &Self) -> &T { /* ... */ }
+    ```
+
+- **BorrowMut**
+  - ```rust
+    fn borrow_mut(self: &mut Self) -> &mut T { /* ... */ }
+    ```
+
+- **Freeze**
+- **From**
+  - ```rust
+    fn from(t: T) -> T { /* ... */ }
+    ```
+    Returns the argument unchanged.
+
+- **Into**
+  - ```rust
+    fn into(self: Self) -> U { /* ... */ }
+    ```
+    Calls `U::from(self)`.
+
+- **Pointee**
+- **RefUnwindSafe**
+- **Send**
+- **Sync**
+- **TryFrom**
+  - ```rust
+    fn try_from(value: U) -> Result<T, <T as TryFrom<U>>::Error> { /* ... */ }
+    ```
+
+- **TryInto**
+  - ```rust
+    fn try_into(self: Self) -> Result<U, <U as TryFrom<T>>::Error> { /* ... */ }
+    ```
+
+- **Unpin**
+- **UnwindSafe**
+#### Struct `MinecraftApp`
+
+```rust
+pub struct MinecraftApp {
+    pub(in ::apps::mc_app) cam_x: f64,
+    pub(in ::apps::mc_app) cam_y: f64,
+    pub(in ::apps::mc_app) cam_z: f64,
+    pub(in ::apps::mc_app) yaw: f64,
+    pub(in ::apps::mc_app) pitch: f64,
+    pub(in ::apps::mc_app) world: alloc::vec::Vec<Block>,
+}
+```
+
+##### Fields
+
+| Name | Type | Documentation |
+|------|------|---------------|
+| `cam_x` | `f64` |  |
+| `cam_y` | `f64` |  |
+| `cam_z` | `f64` |  |
+| `yaw` | `f64` |  |
+| `pitch` | `f64` |  |
+| `world` | `alloc::vec::Vec<Block>` |  |
+
+##### Implementations
+
+###### Methods
+
+- ```rust
+  pub fn new() -> Self { /* ... */ }
+  ```
+
+- ```rust
+  pub(in ::apps::mc_app) fn draw_block(self: &Self, graphics: &mut PixelGraphics, block: &Block, ox: usize, oy: usize, sy: f64, cy: f64, sp: f64, cp: f64) { /* ... */ }
+  ```
+
+###### Trait Implementations
+
+- **Any**
+  - ```rust
+    fn type_id(self: &Self) -> TypeId { /* ... */ }
+    ```
+
+- **AppInfo**
+  - ```rust
+    fn name(self: &Self) -> &str { /* ... */ }
+    ```
+
+  - ```rust
+    fn version(self: &Self) -> &str { /* ... */ }
+    ```
+
+  - ```rust
+    fn icon(self: &Self) -> [u32; 1024] { /* ... */ }
+    ```
+
+  - ```rust
+    fn dimensions(self: &Self) -> (usize, usize) { /* ... */ }
+    ```
+
+- **Borrow**
+  - ```rust
+    fn borrow(self: &Self) -> &T { /* ... */ }
+    ```
+
+- **BorrowMut**
+  - ```rust
+    fn borrow_mut(self: &mut Self) -> &mut T { /* ... */ }
+    ```
+
+- **Freeze**
+- **From**
+  - ```rust
+    fn from(t: T) -> T { /* ... */ }
+    ```
+    Returns the argument unchanged.
+
+- **Into**
+  - ```rust
+    fn into(self: Self) -> U { /* ... */ }
+    ```
+    Calls `U::from(self)`.
+
+- **Pointee**
+- **RefUnwindSafe**
+- **Runnable**
+  - ```rust
+    fn input(self: &mut Self, key: Key) { /* ... */ }
+    ```
+
+  - ```rust
+    fn draw(self: &Self, graphics: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) { /* ... */ }
+    ```
+
+  - ```rust
+    fn logic(self: &mut Self, vars: &mut Vec<String>) { /* ... */ }
+    ```
+
+- **Send**
+- **Sync**
+- **TryFrom**
+  - ```rust
+    fn try_from(value: U) -> Result<T, <T as TryFrom<U>>::Error> { /* ... */ }
+    ```
+
+- **TryInto**
+  - ```rust
+    fn try_into(self: Self) -> Result<U, <U as TryFrom<T>>::Error> { /* ... */ }
+    ```
+
+- **Unpin**
+- **UnwindSafe**
 ### Types
 
 #### Type Alias `AppConstructor`
@@ -26297,6 +26517,428 @@ The Registry: A static list of application names, their constructors, icons, and
 pub(crate) static APP_REGISTRY: &[(&str, fn() -> (alloc::boxed::Box<dyn Runnable>, (usize, usize)), [u32; 1024], &str)] = _;
 ```
 
+## Module `input`
+
+```rust
+pub(crate) mod input { /* ... */ }
+```
+
+### Types
+
+#### Enum `ScanCodeV2`
+
+**Attributes:**
+
+- `Repr(AttributeRepr { kind: Rust, align: None, packed: None, int: Some("u16") })`
+
+Taken from uefi 0.36.1 input
+A keyboard scan code
+
+Codes 0x8000 -> 0xFFFF are reserved for future OEM extensibility, therefore
+this C enum is **_not_** safe to model as a Rust enum (where the compiler must
+know about all variants at compile time).
+
+```rust
+pub enum ScanCodeV2 {
+    NULL = 0x00,
+    UP = 0x01,
+    DOWN = 0x02,
+    RIGHT = 0x03,
+    LEFT = 0x04,
+    HOME = 0x05,
+    END = 0x06,
+    INSERT = 0x07,
+    DELETE = 0x08,
+    PAGE_UP = 0x09,
+    PAGE_DOWN = 0x0A,
+    FUNCTION_1 = 0x0B,
+    FUNCTION_2 = 0x0C,
+    FUNCTION_3 = 0x0D,
+    FUNCTION_4 = 0x0E,
+    FUNCTION_5 = 0x0F,
+    FUNCTION_6 = 0x10,
+    FUNCTION_7 = 0x11,
+    FUNCTION_8 = 0x12,
+    FUNCTION_9 = 0x13,
+    FUNCTION_10 = 0x14,
+    FUNCTION_11 = 0x15,
+    FUNCTION_12 = 0x16,
+    ESCAPE = 0x17,
+    FUNCTION_13 = 0x68,
+    FUNCTION_14 = 0x69,
+    FUNCTION_15 = 0x6A,
+    FUNCTION_16 = 0x6B,
+    FUNCTION_17 = 0x6C,
+    FUNCTION_18 = 0x6D,
+    FUNCTION_19 = 0x6E,
+    FUNCTION_20 = 0x6F,
+    FUNCTION_21 = 0x70,
+    FUNCTION_22 = 0x71,
+    FUNCTION_23 = 0x72,
+    FUNCTION_24 = 0x73,
+    LEFT_CONTROL = 0x1D,
+    LEFT_ALT = 0x38,
+    MUTE = 0x7F,
+    VOLUME_UP = 0x80,
+    VOLUME_DOWN = 0x81,
+    BRIGHTNESS_UP = 0x100,
+    BRIGHTNESS_DOWN = 0x101,
+    SUSPEND = 0x102,
+    HIBERNATE = 0x103,
+    TOGGLE_DISPLAY = 0x104,
+    RECOVERY = 0x105,
+    EJECT = 0x106,
+}
+```
+
+##### Variants
+
+###### `NULL`
+
+Null scan code, indicates that the Unicode character should be used.
+
+Discriminant: `0x00`
+
+Discriminant value: `0`
+
+###### `UP`
+
+Move cursor up 1 row.
+
+Discriminant: `0x01`
+
+Discriminant value: `1`
+
+###### `DOWN`
+
+Move cursor down 1 row.
+
+Discriminant: `0x02`
+
+Discriminant value: `2`
+
+###### `RIGHT`
+
+Move cursor right 1 column.
+
+Discriminant: `0x03`
+
+Discriminant value: `3`
+
+###### `LEFT`
+
+Move cursor left 1 column.
+
+Discriminant: `0x04`
+
+Discriminant value: `4`
+
+###### `HOME`
+
+Discriminant: `0x05`
+
+Discriminant value: `5`
+
+###### `END`
+
+Discriminant: `0x06`
+
+Discriminant value: `6`
+
+###### `INSERT`
+
+Discriminant: `0x07`
+
+Discriminant value: `7`
+
+###### `DELETE`
+
+Discriminant: `0x08`
+
+Discriminant value: `8`
+
+###### `PAGE_UP`
+
+Discriminant: `0x09`
+
+Discriminant value: `9`
+
+###### `PAGE_DOWN`
+
+Discriminant: `0x0A`
+
+Discriminant value: `10`
+
+###### `FUNCTION_1`
+
+Discriminant: `0x0B`
+
+Discriminant value: `11`
+
+###### `FUNCTION_2`
+
+Discriminant: `0x0C`
+
+Discriminant value: `12`
+
+###### `FUNCTION_3`
+
+Discriminant: `0x0D`
+
+Discriminant value: `13`
+
+###### `FUNCTION_4`
+
+Discriminant: `0x0E`
+
+Discriminant value: `14`
+
+###### `FUNCTION_5`
+
+Discriminant: `0x0F`
+
+Discriminant value: `15`
+
+###### `FUNCTION_6`
+
+Discriminant: `0x10`
+
+Discriminant value: `16`
+
+###### `FUNCTION_7`
+
+Discriminant: `0x11`
+
+Discriminant value: `17`
+
+###### `FUNCTION_8`
+
+Discriminant: `0x12`
+
+Discriminant value: `18`
+
+###### `FUNCTION_9`
+
+Discriminant: `0x13`
+
+Discriminant value: `19`
+
+###### `FUNCTION_10`
+
+Discriminant: `0x14`
+
+Discriminant value: `20`
+
+###### `FUNCTION_11`
+
+Discriminant: `0x15`
+
+Discriminant value: `21`
+
+###### `FUNCTION_12`
+
+Discriminant: `0x16`
+
+Discriminant value: `22`
+
+###### `ESCAPE`
+
+Discriminant: `0x17`
+
+Discriminant value: `23`
+
+###### `FUNCTION_13`
+
+Discriminant: `0x68`
+
+Discriminant value: `104`
+
+###### `FUNCTION_14`
+
+Discriminant: `0x69`
+
+Discriminant value: `105`
+
+###### `FUNCTION_15`
+
+Discriminant: `0x6A`
+
+Discriminant value: `106`
+
+###### `FUNCTION_16`
+
+Discriminant: `0x6B`
+
+Discriminant value: `107`
+
+###### `FUNCTION_17`
+
+Discriminant: `0x6C`
+
+Discriminant value: `108`
+
+###### `FUNCTION_18`
+
+Discriminant: `0x6D`
+
+Discriminant value: `109`
+
+###### `FUNCTION_19`
+
+Discriminant: `0x6E`
+
+Discriminant value: `110`
+
+###### `FUNCTION_20`
+
+Discriminant: `0x6F`
+
+Discriminant value: `111`
+
+###### `FUNCTION_21`
+
+Discriminant: `0x70`
+
+Discriminant value: `112`
+
+###### `FUNCTION_22`
+
+Discriminant: `0x71`
+
+Discriminant value: `113`
+
+###### `FUNCTION_23`
+
+Discriminant: `0x72`
+
+Discriminant value: `114`
+
+###### `FUNCTION_24`
+
+Discriminant: `0x73`
+
+Discriminant value: `115`
+
+###### `LEFT_CONTROL`
+
+Discriminant: `0x1D`
+
+Discriminant value: `29`
+
+###### `LEFT_ALT`
+
+Discriminant: `0x38`
+
+Discriminant value: `56`
+
+###### `MUTE`
+
+Discriminant: `0x7F`
+
+Discriminant value: `127`
+
+###### `VOLUME_UP`
+
+Discriminant: `0x80`
+
+Discriminant value: `128`
+
+###### `VOLUME_DOWN`
+
+Discriminant: `0x81`
+
+Discriminant value: `129`
+
+###### `BRIGHTNESS_UP`
+
+Discriminant: `0x100`
+
+Discriminant value: `256`
+
+###### `BRIGHTNESS_DOWN`
+
+Discriminant: `0x101`
+
+Discriminant value: `257`
+
+###### `SUSPEND`
+
+Discriminant: `0x102`
+
+Discriminant value: `258`
+
+###### `HIBERNATE`
+
+Discriminant: `0x103`
+
+Discriminant value: `259`
+
+###### `TOGGLE_DISPLAY`
+
+Discriminant: `0x104`
+
+Discriminant value: `260`
+
+###### `RECOVERY`
+
+Discriminant: `0x105`
+
+Discriminant value: `261`
+
+###### `EJECT`
+
+Discriminant: `0x106`
+
+Discriminant value: `262`
+
+##### Implementations
+
+###### Trait Implementations
+
+- **Any**
+  - ```rust
+    fn type_id(self: &Self) -> TypeId { /* ... */ }
+    ```
+
+- **Borrow**
+  - ```rust
+    fn borrow(self: &Self) -> &T { /* ... */ }
+    ```
+
+- **BorrowMut**
+  - ```rust
+    fn borrow_mut(self: &mut Self) -> &mut T { /* ... */ }
+    ```
+
+- **Freeze**
+- **From**
+  - ```rust
+    fn from(t: T) -> T { /* ... */ }
+    ```
+    Returns the argument unchanged.
+
+- **Into**
+  - ```rust
+    fn into(self: Self) -> U { /* ... */ }
+    ```
+    Calls `U::from(self)`.
+
+- **Pointee**
+- **RefUnwindSafe**
+- **Send**
+- **Sync**
+- **TryFrom**
+  - ```rust
+    fn try_from(value: U) -> Result<T, <T as TryFrom<U>>::Error> { /* ... */ }
+    ```
+
+- **TryInto**
+  - ```rust
+    fn try_into(self: Self) -> Result<U, <U as TryFrom<T>>::Error> { /* ... */ }
+    ```
+
+- **Unpin**
+- **UnwindSafe**
 ## Functions
 
 ### Function `get_total_physical_memory_mb`

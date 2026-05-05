@@ -53,6 +53,7 @@ pub fn get_total_physical_memory_mb() -> u32 {
 
 //extern crate alloc;
 use alloc::string::{String, ToString};
+use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::Write;
 use core::ptr::addr_of_mut;
@@ -212,6 +213,11 @@ fn main() -> Status {
             }
         }
     }
+    let page = vec![0u8; 134217728];
+    FileSystem::cd("/");
+    FileSystem::write_to_file_bytes("PAGEFILE", &*page, 'w');
+    // Header PAGE magic, header size, block size (00 10 is 4096 in hex LE), block count (32767) (FF 7F)
+    FileSystem::write_to_file_bytes_position("PAGEFILE", &[0x50, 0x41, 0x47, 0x45, 0x00, 0x10, 0x00, 0x10, 0xFF, 0x7F], 0x00);
 
     // 1. Get all handles
     let handles = boot::find_handles::<DevicePath>().unwrap();
@@ -919,8 +925,6 @@ pub fn calibrate_tsc() {
     let start_tsc = unsafe { core::arch::x86_64::_rdtsc() };
 
     // Stall for 50,000 microseconds (50ms)
-    // We use 25ms because a 1us stall is too short to account for
-    // the overhead of the function call itself.
     boot::stall(Duration::from_micros(50_000));
     // somehow one-core operation messes up the time measurement
 
@@ -928,7 +932,7 @@ pub fn calibrate_tsc() {
     let total_ticks = end_tsc.saturating_sub(start_tsc);
 
     unsafe {
-        // Ticks per microsecond10
+        // Ticks per microsecond
         TSC_PER_US = total_ticks / 50_000;
         if TSC_PER_US < 200 {
             TSC_PER_US += 240;

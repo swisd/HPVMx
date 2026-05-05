@@ -12,7 +12,9 @@ use core::fmt::Write;
 use uefi::proto::console::text::{Key, OutputMode};
 use uefi::system;
 use crate::apps;
+use crate::apps::AppConstructor;
 use crate::hpvmlog::LOGGING_SILENCED;
+use crate::ui::pixel_graphics::icons::ICON32;
 use crate::ui::pixel_graphics::PixelGraphics;
 
 pub type EnvironmentVariable = (String, String);
@@ -311,6 +313,19 @@ impl SteppedApplicationContext {
     }
     pub fn from_name(name: &str) -> Option<SteppedApplicationContext> {
         let registry_entry = crate::apps::APP_REGISTRY.iter()
+            .find(|(app_id, _, _, _)| *app_id == name)?;
+
+        let constructor = registry_entry.1;
+        let (app_logic, dims) = constructor();
+
+        let mut app = Application::new(app_logic);
+        app.name = name.to_string();
+        app.dimensions = dims;
+
+        Some(SteppedApplicationContext::new(app, None))
+    }
+    pub fn from_name_custom_registry(name: &str, registry: &[(&str, AppConstructor, ICON32, &str)]) -> Option<SteppedApplicationContext> {
+        let registry_entry = registry.iter()
             .find(|(app_id, _, _, _)| *app_id == name)?;
 
         let constructor = registry_entry.1;

@@ -781,6 +781,8 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                 net_rx_history: alloc::vec![],
                 net_tx_history: alloc::vec![],
                 gpu_history: alloc::vec![],
+                fps_history: alloc::vec![],
+                ft_ms_history: alloc::vec![],
                 fps: 0,
                 frame_ms: 0,
             });
@@ -872,6 +874,8 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                         net_rx_history: alloc::vec![],
                         net_tx_history: alloc::vec![],
                         gpu_history: alloc::vec![],
+                        fps_history: alloc::vec![],
+                        ft_ms_history: alloc::vec![],
                         fps: current_fps,
                         frame_ms: current_frame_ms,
                     });
@@ -892,12 +896,12 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
             // Draw: Give the app a reference to the screen
             // Note: You can pass a 'Viewport' or 'Offset' here so
             // the app knows where its "window" is located.
-            if let Some(pg) = PixelGraphics::new() {
-                let mut pg = pg.with_backbuffer();
-                let (width, height) = pg.resolution();
-                ctx.application.draw(&mut pg, &vars, 200, 200);
-                pg.app_context_border(&ctx.application.name);
-            }
+            // if let Some(pg) = PixelGraphics::new() {
+            //     let mut pg = pg.with_backbuffer();
+            //     let (width, height) = pg.resolution();
+            //     ctx.application.draw(&mut pg, &vars, 200, 200);
+            //     pg.app_context_border(&ctx.application.name);
+            // }
 
             // Input: Forward the key if this app is focused
             // This reads key from stdin, which might consume it for others.
@@ -919,12 +923,14 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
             let mut old_tab = dashboard.get_tab();
             // Forward input to focused app if any
             if let Some(focused_idx) = dashboard.focused_process_idx {
-                if focused_idx < dashboard.active_apps.len() {
+                if (focused_idx < dashboard.active_apps.len()) && (dashboard.ctrl_mode == false) {
                     let app = &mut dashboard.active_apps[focused_idx];
                     app.handle_input(key);
                     if app.exit_requested {
-                        dashboard.focused_process_idx = None;
+                        dashboard.focused_process_idx = if dashboard.active_apps.len() >= 2 { Some(dashboard.active_apps.len() - 2) } else { None } ;
                     }
+                } else {
+                    dashboard.handle_input(key);
                 }
             } else {
                 dashboard.handle_input(key);

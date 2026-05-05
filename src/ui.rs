@@ -5,12 +5,14 @@
 //! This module contains the core UI logic, including the `DashboardUI`
 //! which manages the main display, active applications, and system status.
 
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use crate::{hpvm_info, hpvm_log, TSC_PER_US};
+use crate::{hpvm_error, hpvm_info, hpvm_log, TSC_PER_US};
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::any::Any;
 use core::char;
 use uefi::proto::console::text::{Color, Key, ScanCode};
 use uefi::runtime;
@@ -26,8 +28,12 @@ pub mod graphics3d;
 use crate::{handle_vm_command, hpvm_warn, message, terminal};
 use crate::pm::{Package, PackageManager, PackageType};
 use pixel_graphics::{PixelGraphics, TreeViewNode};
+use crate::apps::AppConstructor;
+use crate::apps::error::ErrorApp;
 use crate::env::{Application, Runnable, SteppedApplicationContext};
 use crate::input::ScanCodeV2;
+use crate::ui::pixel_graphics::icons;
+use crate::ui::pixel_graphics::icons::ICON32;
 
 #[derive(Clone, Debug)]
 pub struct FileEntry {
@@ -172,6 +178,9 @@ pub struct SystemResources {
     pub net_tx_history: Vec<u64>,
     pub gpu_history: Vec<u32>,
 
+    pub fps_history: Vec<u32>,
+    pub ft_ms_history: Vec<u32>,
+
     pub fps: usize,
     pub frame_ms: usize,
 }
@@ -199,6 +208,8 @@ impl DashboardUI {
                 net_rx_history: Vec::with_capacity(100),
                 net_tx_history: Vec::with_capacity(100),
                 gpu_history: Vec::with_capacity(100),
+                fps_history: Vec::with_capacity(100),
+                ft_ms_history: Vec::with_capacity(100),
                 fps: 0,
                 frame_ms: 0,
             },
@@ -245,6 +256,8 @@ impl DashboardUI {
         let old_net_rx_hist = self.resources.net_rx_history.clone();
         let old_net_tx_hist = self.resources.net_tx_history.clone();
         let old_gpu_hist = self.resources.gpu_history.clone();
+        let old_fps_hist = self.resources.fps_history.clone();
+        let old_ft_hist = self.resources.ft_ms_history.clone();
 
         self.resources = resources;
 
@@ -256,6 +269,9 @@ impl DashboardUI {
         self.resources.net_rx_history = old_net_rx_hist;
         self.resources.net_tx_history = old_net_tx_hist;
         self.resources.gpu_history = old_gpu_hist;
+        self.resources.fps_history = old_fps_hist;
+        self.resources.ft_ms_history = old_ft_hist;
+
 
         fn push_limit<T>(vec: &mut Vec<T>, val: T, limit: usize) {
             if vec.len() >= limit {
@@ -274,6 +290,8 @@ impl DashboardUI {
         push_limit(&mut self.resources.net_rx_history, self.resources.net_rx_kbps, 100);
         push_limit(&mut self.resources.net_tx_history, self.resources.net_tx_kbps, 100);
         push_limit(&mut self.resources.gpu_history, self.resources.gpu_usage, 100);
+        push_limit(&mut self.resources.fps_history, self.resources.fps as u32, 100);
+        push_limit(&mut self.resources.ft_ms_history, self.resources.frame_ms as u32, 100);
     }
 
     //noinspection GrazieInspectionRunner
@@ -554,6 +572,11 @@ impl DashboardUI {
                         pg.draw_text(right_x + 10, row_y, &alloc::format!("C{}:{:>2}%", i, usage), 0xCCCCCC);
                         pg.draw_progress_bar(right_x + 70, row_y, right_w - 80, 12, usage as usize, 100, 0x00FF00);
                     }
+
+                    pg.draw_text_bg(right_x + 10, right_y + 300, "FPS History:", 0xFFFFFF, 0x222222);
+                    pg.draw_line_graph(right_x + 10, right_y + 300, right_w - 20, 80, &self.resources.fps_history, 75, 0xFF44FF, 60);
+                    pg.draw_text_bg(right_x + 10, right_y + 400, "Frame MS History:", 0xFFFFFF, 0x222222);
+                    pg.draw_line_graph(right_x + 10, right_y + 400, right_w - 20, 80, &self.resources.ft_ms_history, 750, 0xFFAAFF, 60);
 
                     // draw u64 le text for all stats
 
@@ -1136,14 +1159,16 @@ impl DashboardUI {
                 // Wait, if we want them to be "stepped", we should call step().
                 
                 // Let's draw a window for the app
-                let win_x = self.app_window_position.0 + idx * 30;
-                let win_y = self.app_window_position.1 + idx * 30;
+                let win_x = self.app_window_position.0 + idx * 60;
+                let win_y = self.app_window_position.1 + idx * 60;
                 let win_w = app_ctx.application.dimensions()[0] + 2;
                 let win_h = app_ctx.application.dimensions()[1] + 20;
                 
                 pg.fill_rect(win_x, win_y, win_w, win_h, 0x111111);
                 pg.draw_rect_outline(win_x, win_y, win_w, win_h, if is_focused { 0x00FFFF } else { 0x888888 });
                 pg.fill_rect(win_x, win_y, win_w, 20, if is_focused { 0x008080 } else { 0x444444 });
+                pg.fill_rect(win_x+win_w-20, win_y, 20, 20, if is_focused { 0xAA0000 } else { 0x440000 });
+                pg.draw_text(win_x+win_w-15, win_y+2, "X", 0xFFFFFF);
                 pg.draw_text(win_x + 5, win_y + 2, &app_ctx.application.name, 0xFFFFFF);
                 
                 // App content - the app's draw() takes x, y.
@@ -1457,20 +1482,24 @@ impl DashboardUI {
                             let entry = &self.files[self.selected_file_idx];
                             if !entry.is_dir {
                                 let full_path = format!("{}/{}", self.current_path, entry.name);
-                                if let Ok(data) = crate::FileSystem::read_file(&full_path) {
-                                    // Detect if binary: check for null bytes or invalid UTF-8
-                                    let is_hex = core::str::from_utf8(&data).is_err();
+                                if (entry.name == "PAGEFILE") || (entry.name == "BOOTX64.EFI") {
+                                    self.ui_error(25);
+                                } else {
+                                    if let Ok(data) = crate::FileSystem::read_file(&full_path) {
+                                        // Detect if binary: check for null bytes or invalid UTF-8
+                                        let is_hex = core::str::from_utf8(&data).is_err();
 
-                                    self.editor = Some(TextEditor {
-                                        file_path: full_path,
-                                        buffer: data,
-                                        cursor_pos: (0, 0),
-                                        scroll_offset: 0,
-                                        mode: EditorMode::Normal,
-                                        is_hex,
-                                        command_buffer: "".to_string(),
-                                    });
-                                    self.selected_tab = DashboardTab::Editor;
+                                        self.editor = Some(TextEditor {
+                                            file_path: full_path,
+                                            buffer: data,
+                                            cursor_pos: (0, 0),
+                                            scroll_offset: 0,
+                                            mode: EditorMode::Normal,
+                                            is_hex,
+                                            command_buffer: "".to_string(),
+                                        });
+                                        self.selected_tab = DashboardTab::Editor;
+                                    }
                                 }
                             }
                         }
@@ -1609,10 +1638,9 @@ impl DashboardUI {
                 let ch = char::from(c).to_ascii_lowercase();
                 if !(matches!(self.selected_tab, DashboardTab::Editor)) && !self.term_selected {
                     match ch {
-                        // 'q' => {
-                        //     self.exit_requested = true;
-                        //     return;
-                        // }
+                        'q' => {
+                            self.ui_error(22);
+                        }
                         'o' => self.selected_tab = DashboardTab::Overview,
                         'v' => self.selected_tab = DashboardTab::VirtualMachines,
                         'r' => self.selected_tab = DashboardTab::Resources,
@@ -1857,5 +1885,182 @@ impl DashboardUI {
 
     pub fn exit_requested(&self) -> bool {
         self.exit_requested
+    }
+
+    pub fn ui_error(&mut self, typ: usize){
+
+        let types: &[&str] = &[
+            "0: Generic",
+            "1: Invalid",
+            "2: AcessDenied",
+            "3: NotFound",
+            "4: OutOfMemBounds",
+            "5: Overflow",
+            "6: SegFault",
+            "7: Lookup",
+            "8: RuntimeProblem",
+            "9: OutOfMemory",
+            "10: PathNotFound",
+            "11: BadEnvironment",
+            "12: WriteProtect",
+            "13: BadCommand",
+            "14: CRC",
+            "15: DiskReadFault",
+            "16: DiskWriteFault",
+            "17: NetTxFault",
+            "18: NetRxFault",
+            "19: DeviceBusy",
+            "20: BadSector",
+            "21: BadDevice",
+            "22: WrongOperation",
+            "23: CpuFault",
+            "24: InvalidFormat",
+            "25: SystemFile",
+            "26: ActiveFile",
+        ];
+        hpvm_error!("UI", "ERROR: {}", types[typ]);
+        let TEMPREG: &[(&str, AppConstructor, ICON32, &str)] = &[
+            ("ERROR 0", || {
+                let app = ErrorApp { error: "Error 0: Generic\n Generic Error".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 1", || {
+                let app = ErrorApp { error: "Error 1: Invalid".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 2", || {
+                let app = ErrorApp { error: "Error 2: AcessDenied".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 3", || {
+                let app = ErrorApp { error: "Error 3: NotFound".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 4", || {
+                let app = ErrorApp { error: "Error 4: OutOfMemBounds".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 5", || {
+                let app = ErrorApp { error: "Error 5: Overflow".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 6", || {
+                let app = ErrorApp { error: "Error 6: SegFault".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 7", || {
+                let app = ErrorApp { error: "Error 7: Lookup".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 8", || {
+                let app = ErrorApp { error: "Error 8: RuntimeProblem".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 9", || {
+                let app = ErrorApp { error: "Error 9: OutOfMemory".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 10", || {
+                let app = ErrorApp { error: "Error 10: PathNotFound".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 11", || {
+                let app = ErrorApp { error: "Error 11: BadEnvironment".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 12", || {
+                let app = ErrorApp { error: "Error 12: WriteProtect".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 13", || {
+                let app = ErrorApp { error: "Error 13: BadCommand".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 14", || {
+                let app = ErrorApp { error: "Error 14: CRC".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 15", || {
+                let app = ErrorApp { error: "Error 15: DiskReadFault".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 16", || {
+                let app = ErrorApp { error: "Error 16: DiskWriteFault".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 17", || {
+                let app = ErrorApp { error: "Error 17: NetTxFault".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 18", || {
+                let app = ErrorApp { error: "Error 18: NetRxFault".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 19", || {
+                let app = ErrorApp { error: "Error 19: DeviceBusy".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 20", || {
+                let app = ErrorApp { error: "Error 20: BadSector".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 21", || {
+                let app = ErrorApp { error: "Error 21: BadDevice".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 22", || {
+                let app = ErrorApp { error: "Error 22: WrongOperation\n The operation was incorrect".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 23", || {
+                let app = ErrorApp { error: "Error 23: CpuFault".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 24", || {
+                let app = ErrorApp { error: "Error 24: InvalidFormat".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 25", || {
+                let app = ErrorApp { error: "Error 23: SystemFile\n The file is of the system".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+            ("ERROR 26", || {
+                let app = ErrorApp { error: "Error 24: ActiveFile\n The file is in use".parse().unwrap() };
+                let dims = crate::env::AppInfo::dimensions(&app);
+                (Box::new(app), dims)
+            }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+        ];
+
+        let (name, _, _, _) = TEMPREG[typ];
+        if let Some(app_ctx) = SteppedApplicationContext::from_name_custom_registry(name, TEMPREG) {
+            self.active_apps.push(app_ctx);
+            self.focused_process_idx = Some(self.active_apps.len() - 1);
+        }
     }
 }

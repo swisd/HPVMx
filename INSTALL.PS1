@@ -6,8 +6,9 @@ echo "Running Build Script..."
 
 
 echo "Updating docs"
-cargo +nightly rustdoc -p HPVMx -- -Z unstable-options --output-format json --document-private-items
-rustdoc-md --path /target/doc/HPVMx.json --output hpvmx.md
+cargo +nightly rustdoc -p HPVMx -- -Z unstable-options --document-private-items
+#cargo +nightly rustdoc -p HPVMx -- -Z unstable-options --output-format json --document-private-items
+#rustdoc-md --path ./target/doc/HPVMx.json --output hpvmx.md
 
 echo "Installing..."
 
@@ -18,14 +19,26 @@ $EFI_PATH = "target\x86_64-unknown-uefi\release\HPVMx.efi"
 echo "Mounting VHD at $VHD_PATH"
 
 # the vhd must have the id X:\ and be at least 256 MB
-Mount-DiskImage -ImagePath $VHD_PATH
+#Mount-DiskImage -ImagePath $VHD_PATH -PassThru | Get-Disk | Get-Partition | Where-Object { $_.DriveLetter -ne $MOUNT_LETTER } | Set-Partition -NewDriveLetter $MOUNT_LETTER
+
+# Create a temporary script for diskpart
+$dpScript = @"
+select vdisk file="$VHD_PATH"
+attach vdisk
+select partition 1
+assign letter=$MOUNT_LETTER
+"@
+
+$dpScript | diskpart
+
+
 
 # 2. Copy the binary
 echo "Copying Binary EFI"
 New-Item -Path "$($MOUNT_LETTER):\EFI\BOOT" -ItemType Directory -Force
 Copy-Item $EFI_PATH "$($MOUNT_LETTER):\EFI\BOOT\BOOTX64.EFI"
-New-Item -Path "$($MOUNT_LETTER):\docs\man" -ItemType Directory -Force
-Copy-Item "hpvmx.md" "$($MOUNT_LETTER):\docs\man\manual.md"
+#New-Item -Path "$($MOUNT_LETTER):\docs\man" -ItemType Directory -Force
+#Copy-Item "hpvmx.md" "$($MOUNT_LETTER):\docs\man\manual.md"
 
 # 3. Detach
 echo "Detaching VHD $MOUNT_LETTER"

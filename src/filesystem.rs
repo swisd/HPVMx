@@ -416,6 +416,19 @@ impl FileSystem {
         Ok(())
     }
 
+    pub fn write_to_file_bytes_position(path: &str, data: &[u8], position: u64) -> Result<(), &'static str> {
+        let mut root = Self::get_root(None)?;
+        let path_cstr = Self::path_to_cstr16(path)?;
+
+        let handle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
+            .map_err(|_| "Open for write failed")?;
+        let mut file = handle.into_regular_file().ok_or("Not a file")?;
+
+        file.set_position(position).map_err(|_| "Seek error")?;
+        file.write(data).map_err(|_| "Write error")?;
+        Ok(())
+    }
+
     // --- Private Helpers ---
 
     fn path_to_cstr16(path: &str) -> Result<&CStr16, &'static str> {

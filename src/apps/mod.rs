@@ -16,6 +16,7 @@ use crate::apps::keystepper::CH64App;
 use crate::apps::manual::InstructionManualApp;
 use crate::apps::snake::SnakeApp;
 use crate::apps::doom::DoomApp;
+use crate::apps::error::ErrorApp;
 use crate::apps::mc_app::MinecraftApp;
 use crate::apps::resource_tester::SysTestApp;
 use crate::env::Runnable;
@@ -36,8 +37,11 @@ pub mod doom_glue;
 mod resource_tester;
 mod mc_app;
 
+#[path = "./core/error.rs"]
+pub(crate) mod error;
+
 /// A type alias for a function that creates a boxed app and returns its preferred window dimensions.
-type AppConstructor = fn() -> (Box<dyn Runnable>, (usize, usize));
+pub type AppConstructor = fn() -> (Box<dyn Runnable>, (usize, usize));
 
 /// The Registry: A static list of application names, their constructors, icons, and versions.
 pub(crate) static APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
@@ -93,4 +97,22 @@ pub(crate) static APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
         let dims = crate::env::AppInfo::dimensions(&app);
         (Box::new(app), dims)
     }, icons::ADD_PLUS_32_ICON_DATA, "0.1.0"),
+    ("ERROR", || {
+        let app = ErrorApp{error: "BaseError".parse().unwrap() };
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+    ("WARNING", || {
+        let app = ErrorApp{error: "BaseWarning".parse().unwrap() };
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::WARNING_32_ICON_DATA, "0.1.0"),
 ];
+
+// pub(crate) static HIDDEN_APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
+//     ("ERROR", || {
+//         let app = ErrorApp{};
+//         let dims = crate::env::AppInfo::dimensions(&app);
+//         (Box::new(app), dims)
+//     }, icons::ERROR_32_ICON_DATA, "0.1.0"),
+// ];
