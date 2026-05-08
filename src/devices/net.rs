@@ -288,7 +288,7 @@ fn poll_for_dhcp_response() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
 }
 
 /// Helper to parse "1.2.3.4" into [u8; 4]
-fn parse_ip(ip: &str) -> Option<[u8; 4]> {
+pub fn parse_ip(ip: &str) -> Option<[u8; 4]> {
     let parts: Vec<&str> = ip.split('.').collect();
     if parts.len() != 4 { return None; }
     let mut octets = [0u8; 4];
@@ -296,6 +296,21 @@ fn parse_ip(ip: &str) -> Option<[u8; 4]> {
         octets[i] = parts[i].parse().ok()?;
     }
     Some(octets)
+}
+
+/// Helper to parse "1.2.3.4:80" or "1.2.3.4" into ([u8; 4], u16)
+pub fn parse_endpoint(endpoint: &str) -> Option<([u8; 4], u16)> {
+    let parts: Vec<&str> = endpoint.split(':').collect();
+    if parts.len() == 1 {
+        let ip = parse_ip(parts[0])?;
+        Some((ip, 80))
+    } else if parts.len() == 2 {
+        let ip = parse_ip(parts[0])?;
+        let port = parts[1].parse().ok()?;
+        Some((ip, port))
+    } else {
+        None
+    }
 }
 
 /// Ensure hardware is initialized (SNP). Best-effort.

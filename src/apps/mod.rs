@@ -19,6 +19,7 @@ use crate::apps::snake::SnakeApp;
 use crate::apps::doom::DoomApp;
 use crate::apps::error::ErrorApp;
 use crate::apps::mc_app::MinecraftApp;
+use crate::apps::browser::BrowserApp;
 use crate::apps::micro_ide::MicroIdeApp;
 use crate::apps::resource_tester::SysTestApp;
 use crate::env::Runnable;
@@ -34,6 +35,7 @@ mod netman;
 mod manual;
 mod appinstaller;
 mod snake;
+mod browser;
 mod doom;
 pub mod doom_glue;
 mod resource_tester;
@@ -80,6 +82,11 @@ pub(crate) static APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
         let dims = crate::env::AppInfo::dimensions(&app);
         (Box::new(app), dims)
     }, icons::SNAKE_32_ICON_DATA, "0.1.0"),
+    ("Browser", || {
+        let app = BrowserApp::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::COMPUTE_UNIT_V_GLOBE_32_ICON_DATA, "0.1.0"),
 
     ("Cube", || {
        let app = CubeApp::new();

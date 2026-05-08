@@ -2,7 +2,8 @@
 #![allow(dead_code, static_mut_refs)]
 
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use crate::Color;
 use crate::hpvm_log;
 use core::mem::{MaybeUninit, size_of};
@@ -22,6 +23,7 @@ const TCP_FLAG_FIN: u8 = 0x01;
 const TCP_FLAG_SYN: u8 = 0x02;
 const TCP_FLAG_RST: u8 = 0x04;
 const TCP_FLAG_ACK: u8 = 0x10;
+const TCP_FLAG_PSH: u8 = 0x08;
 
 
 const MAX_ARP_ENTRIES: usize = 16;
@@ -125,7 +127,7 @@ struct ArpEntry {
     valid: bool,
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct NetState {
     pub ip_addr: [u8; 4],
     pub gateway: [u8; 4],
@@ -134,6 +136,11 @@ pub struct NetState {
     pub stats: NetStats,
     arp_cache: [ArpEntry; MAX_ARP_ENTRIES],
     pub ping_success: bool,
+    pub tcp_rx_data: Vec<u8>,
+    pub tcp_connected: bool,
+    pub tcp_seq: u32,
+    pub tcp_ack: u32,
+    pub tcp_fin_received: bool,
 }
 
 static mut NET_STATE: MaybeUninit<Option<NetState>> = MaybeUninit::uninit();
@@ -189,6 +196,11 @@ pub fn init(ip: [u8; 4], gw: [u8; 4], mask: [u8; 4]) {
         },
         arp_cache: [ArpEntry { ip: [0; 4], mac: [0; 6], valid: false }; MAX_ARP_ENTRIES],
         ping_success: false,
+        tcp_rx_data: Vec::new(),
+        tcp_connected: false,
+        tcp_seq: 0,
+        tcp_ack: 0,
+        tcp_fin_received: false,
     };
 
     #[allow(static_mut_refs)]
@@ -306,28 +318,26 @@ pub fn poll_tick() {
     if crate::devices::net_hw::is_initialized() {
         let mut buf = [0u8; 1514]; // Max Ethernet frame
 
-        // Drain the SNP RX buffer
-        while let Ok(sz) = crate::devices::net_hw::rx(&mut buf) {
-            let frame = &buf[..sz];
-            if frame.len() < size_of::<EthHeader>() { continue; }
+    // Drain the SNP RX buffer
+    while let Ok(sz) = crate::devices::net_hw::rx(&mut buf) {
+        if sz == 0 { break; }
+        let frame = &buf[..sz];
+        if frame.len() < size_of::<EthHeader>() { continue; }
 
-            let eth = unsafe { &*(frame.as_ptr() as *const EthHeader) };
-            match u16::from_be(eth.ethertype) {
-                ETHERTYPE_ARP => handle_arp(&frame[size_of::<EthHeader>()..]),
-                ETHERTYPE_IPV4 => handle_ipv4(&frame[size_of::<EthHeader>()..], eth.src),
-                _ => {}
+        let eth = unsafe { &*(frame.as_ptr() as *const EthHeader) };
+        match u16::from_be(eth.ethertype) {
+            ETHERTYPE_ARP => handle_arp(&frame[size_of::<EthHeader>()..]),
+            ETHERTYPE_IPV4 => handle_ipv4(&frame[size_of::<EthHeader>()..], eth.src),
+            _ => {}
+        }
+
+        unsafe {
+            if let Some(st) = NET_STATE.assume_init_mut().as_mut() {
+                st.stats.rx_pkts += 1;
+                st.stats.rx_bytes += sz as u64;
             }
         }
-        //         process_packet(&buf[..sz]);
-        //
-        //         unsafe {
-        //             if let Some(st) = NET_STATE.assume_init_mut().as_mut() {
-        //                 st.stats.rx_pkts += 1;
-        //                 st.stats.rx_bytes += sz as u64;
-        //             }
-        //         }
-        //     }
-        // }
+    }
 
     }
 }
@@ -425,9 +435,7 @@ fn handle_ipv4(packet: &[u8], src_mac: [u8; 6]) {
             }
         }
         IP_PROTO_TCP  => {
-            if HTTPD.load(Ordering::SeqCst) {
-                handle_tcp(ip.src, src_mac, payload);
-            }
+            handle_tcp(ip.src, src_mac, payload);
         }
         _ => {}
     }
@@ -540,9 +548,20 @@ fn handle_tcp(src_ip: [u8; 4], src_mac: [u8; 6], packet: &[u8]) {
     let flags = u16::from_be(tcp.off_flags) & 0x3F;
     let dst_port = u16::from_be(tcp.dst_port);
 
-    // We only care about HTTP port 80
-    if dst_port != 80 { return; }
+    // We only care about HTTP port 80 or our outgoing connection
+    let state_mut = unsafe { NET_STATE.assume_init_mut().as_mut().unwrap() };
+    if dst_port == 80 {
+        if HTTPD.load(Ordering::SeqCst) {
+            handle_httpd(src_ip, src_mac, tcp, flags, packet);
+        }
+    } else if dst_port >= 49152 {
+        // Potential client response
+        hpvm_info!("TCP", "Client packet: flags=0x{:x} seq={} ack={} payload={}", flags, u32::from_be(tcp.seq), u32::from_be(tcp.ack), packet.len() - (((u16::from_be(tcp.off_flags) >> 12) * 4) as usize));
+        handle_tcp_client(src_ip, src_mac, tcp, flags, packet, state_mut);
+    }
+}
 
+fn handle_httpd(src_ip: [u8; 4], src_mac: [u8; 6], tcp: &TcpHeader, flags: u16, packet: &[u8]) {
     let seq = u32::from_be(tcp.seq);
     let ack = u32::from_be(tcp.ack);
 
@@ -557,24 +576,113 @@ fn handle_tcp(src_ip: [u8; 4], src_mac: [u8; 6], packet: &[u8]) {
         let header_len = ((u16::from_be(tcp.off_flags) >> 12) * 4) as usize;
         let payload = &packet[header_len..];
 
-        if payload.starts_with(b"GET") {
+        if !payload.is_empty() && payload.starts_with(b"GET") {
+            hpvm_info!("HTTPD", "GET request from {}.{}.{}.{}", src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
             let body = "<html><body><h1>HPVM UEFI Server</h1><p>Status: OK</p></body></html>";
             let response = [
                 "HTTP/1.1 200 OK\r\n",
                 "Content-Type: text/html\r\n",
+                "Content-Length: ", &body.len().to_string(), "\r\n",
                 "Connection: close\r\n",
                 "\r\n"
             ].join("");
 
-            // In a real stack, we'd handle window sizes. Here we just blast the response.
-            // We combine headers and body
             let mut full_res = response.into_bytes();
             full_res.extend_from_slice(body.as_bytes());
 
             send_tcp_packet(src_ip, src_mac, 80, u16::from_be(tcp.src_port),
-                            ack, seq + payload.len() as u32, TCP_FLAG_ACK | TCP_FLAG_FIN, &full_res);
+                            ack, seq + payload.len() as u32, TCP_FLAG_ACK | TCP_FLAG_PSH | TCP_FLAG_FIN, &full_res);
+        } else if (flags & (TCP_FLAG_FIN as u16)) != 0 {
+             // Client closed connection
+             send_tcp_packet(src_ip, src_mac, 80, u16::from_be(tcp.src_port),
+                            ack, seq + 1, TCP_FLAG_ACK, &[]);
         }
     }
+}
+
+fn handle_tcp_client(src_ip: [u8; 4], src_mac: [u8; 6], tcp: &TcpHeader, flags: u16, packet: &[u8], state: &mut NetState) {
+    let seq = u32::from_be(tcp.seq);
+    let ack = u32::from_be(tcp.ack);
+    let src_port = u16::from_be(tcp.src_port);
+    let dst_port = u16::from_be(tcp.dst_port);
+
+    if (flags & (TCP_FLAG_SYN as u16)) != 0 && (flags & (TCP_FLAG_ACK as u16)) != 0 {
+        // SYN/ACK received
+        hpvm_info!("TCP", "SYN/ACK received, connecting...");
+        state.tcp_connected = true;
+        state.tcp_seq = ack;
+        state.tcp_ack = seq + 1;
+        // ACK it
+        send_tcp_packet(src_ip, src_mac, dst_port, src_port, state.tcp_seq, state.tcp_ack, TCP_FLAG_ACK, &[]);
+    } else if (flags & (TCP_FLAG_ACK as u16)) != 0 {
+        let header_len = ((u16::from_be(tcp.off_flags) >> 12) * 4) as usize;
+        state.tcp_seq = ack;
+        if packet.len() > header_len {
+            let payload = &packet[header_len..];
+            hpvm_info!("TCP", "Received {} bytes of data", payload.len());
+            state.tcp_rx_data.extend_from_slice(payload);
+            state.tcp_ack = seq + payload.len() as u32;
+            // ACK the data
+            send_tcp_packet(src_ip, src_mac, dst_port, src_port, state.tcp_seq, state.tcp_ack, TCP_FLAG_ACK, &[]);
+        } else if (flags & (TCP_FLAG_FIN as u16)) == 0 {
+             // Pure ACK (no data, no FIN) - usually a response to our PSH|ACK
+             // We don't need to ACK an ACK unless it has data or FIN.
+             // Just updating state.tcp_seq = ack (done above) is enough.
+        }
+
+        if (flags & (TCP_FLAG_FIN as u16)) != 0 {
+            state.tcp_connected = false;
+            state.tcp_fin_received = true;
+            state.tcp_ack = seq + 1;
+            // ACK the FIN
+            send_tcp_packet(src_ip, src_mac, dst_port, src_port, state.tcp_seq, state.tcp_ack, TCP_FLAG_ACK, &[]);
+        }
+    }
+}
+
+pub fn tcp_connect(dst_ip: [u8; 4], dst_port: u16) -> bool {
+    let state = unsafe { NET_STATE.assume_init_mut().as_mut().unwrap() };
+    state.tcp_connected = false;
+    state.tcp_rx_data.clear();
+    state.tcp_seq = 1000; // Initial Sequence Number
+    state.tcp_ack = 0;
+    state.tcp_fin_received = false;
+
+    let mac = match resolve_mac(dst_ip, 100) {
+        Some(m) => m,
+        None => return false,
+    };
+
+    // Send SYN
+    send_tcp_packet(dst_ip, mac, 49152, dst_port, state.tcp_seq, 0, TCP_FLAG_SYN, &[]);
+
+    // Wait for connection
+    for _ in 0..500 {
+        poll_tick();
+        if state.tcp_connected { return true; }
+        uefi::boot::stall(core::time::Duration::from_micros(10_000));
+    }
+    false
+}
+
+pub fn tcp_send(dst_ip: [u8; 4], dst_port: u16, data: &[u8]) {
+    let state = unsafe { NET_STATE.assume_init_mut().as_mut().unwrap() };
+    let mac = match find_mac(dst_ip) {
+        Some(m) => m,
+        None => return,
+    };
+    
+    send_tcp_packet(dst_ip, mac, 49152, dst_port, state.tcp_seq, state.tcp_ack, TCP_FLAG_ACK | TCP_FLAG_PSH, data);
+    state.tcp_seq += data.len() as u32;
+}
+
+pub fn tcp_disconnect(dst_ip: [u8; 4], dst_port: u16) {
+    let state = unsafe { NET_STATE.assume_init_mut().as_mut().unwrap() };
+    let mac = match find_mac(dst_ip) {
+        Some(m) => m,
+        None => return,
+    };
+    send_tcp_packet(dst_ip, mac, 49152, dst_port, state.tcp_seq, state.tcp_ack, TCP_FLAG_ACK | TCP_FLAG_FIN, &[]);
 }
 
 
@@ -870,18 +978,7 @@ pub fn ping(target_ip: [u8; 4], timeout_loops: u32) -> bool {
     state.ping_success = false;
 
     // 1. Resolve MAC via ARP
-    let mut target_mac = find_mac(target_ip);
-    if target_mac.is_none() {
-        send_arp_packet(ARP_REQUEST, target_ip, [0; 6]);
-        // Wait for ARP reply
-        for _ in 0..timeout_loops / 10 {
-            poll_tick();
-            target_mac = find_mac(target_ip);
-            if target_mac.is_some() { break; }
-        }
-    }
-
-    let mac = match target_mac {
+    let mac = match resolve_mac(target_ip, timeout_loops / 10) {
         Some(m) => m,
         None => {
             hpvm_warn!("PING", "ARP failed: destination unreachable");
