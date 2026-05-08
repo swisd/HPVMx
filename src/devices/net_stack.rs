@@ -1,6 +1,8 @@
 //! UEFI Network Module (0.36.1) - Basic ICMP/IP over SNP
 #![allow(dead_code, static_mut_refs)]
 
+use alloc::format;
+use alloc::string::String;
 use crate::Color;
 use crate::hpvm_log;
 use core::mem::{MaybeUninit, size_of};
@@ -440,7 +442,7 @@ pub fn send_raw_udp(
     src_port: u16,
     dst_port: u16,
     data: &[u8],
-) -> Result<(), &'static str> {
+) -> Result<(), String> {
     let mut frame = [0u8; 1514];
     let mac = crate::devices::net_hw::get_mac();
     let src_mac: [u8; 6] = mac[0..6].try_into().unwrap_or([0; 6]);
@@ -449,7 +451,7 @@ pub fn send_raw_udp(
     let ip_len = (size_of::<Ipv4Header>() as u16) + udp_len;
     let total_len = size_of::<EthHeader>() + (ip_len as usize);
 
-    if total_len > frame.len() { return Err("Payload too large"); }
+    if total_len > frame.len() { return Err("Payload too large".parse().unwrap()); }
 
     // 1. Ethernet Header
     let eth = unsafe { &mut *(frame.as_mut_ptr() as *mut EthHeader) };
@@ -485,7 +487,7 @@ pub fn send_raw_udp(
     // 5. Transmit
     match crate::devices::net_hw::tx(&frame[..total_len]) {
         Ok(_) => Ok(()),
-        Err(_) => Err("Hardware TX failed"),
+        Err(e) => Err(format!("Hardware TX failed: {}", e)),
     }
 }
 

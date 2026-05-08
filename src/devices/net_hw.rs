@@ -9,10 +9,14 @@ use crate::hpvm_log;
 use crate::hpvm_info;
 use crate::hpvm_warn;
 use crate::hpvm_error;
-use uefi::boot::{self, ScopedProtocol, SearchType};
+use uefi::boot::{self, OpenProtocolAttributes, OpenProtocolParams, ScopedProtocol, SearchType};
 use uefi::proto::network::snp::SimpleNetwork;
 use uefi::{Identify, Handle};
+use uefi_raw::protocol::network::snp::{NetworkState, ReceiveFlags};
+use core::ffi::c_void;
+use core::ops::Deref;
 
+static mut OWNED_SNP: Option<ScopedProtocol<SimpleNetwork>> = None;
 static NET_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 
@@ -64,11 +68,36 @@ pub fn link_up() -> bool {
 
 /// Transmit a raw Ethernet frame via SNP (best-effort).
 pub fn tx(frame: &[u8]) -> Result<(), &'static str> {
-    let Some(snp) = snp_open() else { return Err("no snp"); };
-    // Safety: UEFI SNP expects a DMA-safe buffer; firmware copies internally.
-    match snp.transmit(0, frame, None, None, None) {
-        Ok(_) => Ok(()),
-        Err(_) => Err("tx failed"),
+    unsafe {
+        if let Some(ref snp_scoped) = OWNED_SNP {
+            let snp = &**snp_scoped;
+
+            // 1. Send the frame
+            // transmit() returns Result<()>
+            if snp.transmit(0, frame, None, None, None).is_err() {
+                return Err("tx hardware rejected packet");
+            }
+
+            // 2. Poll for the recycled buffer
+            // VirtualBox's virtual NIC needs this to "acknowledge" the packet is sent
+            let mut timeout = 1000000;
+            while timeout > 0 {
+                // In 0.36.1, this is the specialized method for tx cleanup
+                if let Ok(maybe_buf) = snp.get_recycled_transmit_buffer_status() {
+                    // maybe_buf is Option<NonNull<u8>>
+                    if maybe_buf.is_some() {
+                        return Ok(()); // Hardware is done; slot is free
+                    }
+                }
+
+                timeout -= 1;
+                core::hint::spin_loop();
+            }
+
+            Err("tx timeout: hardware didn't return buffer")
+        } else {
+            Err("no snp")
+        }
     }
 }
 
@@ -97,36 +126,59 @@ pub fn init() -> Result<(), &'static str> {
     };
 
     for &h in handles.as_slice().iter() {
-        let snp_scoped: Result<ScopedProtocol<SimpleNetwork>, _> = boot::open_protocol_exclusive(h);
-        if let Ok(snp) = snp_scoped {
-            let snp_ref: &SimpleNetwork = &snp;
-            // Best-effort start/initialize
-            let _ = snp_ref.start();
-            let _ = snp_ref.initialize(0, 0);
+        let Ok(snp_scoped) = boot::open_protocol_exclusive::<SimpleNetwork>(h) else {
+            continue;
+        };
 
-            let mode = snp_ref.mode();
-            let mut mac = [0u8; 32];
-            let mac_len = (mode.hw_address_size as usize).min(32);
-            let src = &mode.current_address.0[..mac_len];
-            mac[..mac_len].copy_from_slice(src);
-            let mtu = mode.max_packet_size;
-            let media_present: bool = mode.media_present.into();
+        let snp = &*snp_scoped;
+        let mode = snp.mode();
 
-            unsafe {
-                NET_INFO = Some(NetHwInfo { mac, mac_len, mtu, media_present, state: 2 });
-                NIC_HANDLE = Some(h);
+        match mode.state {
+            NetworkState::STOPPED => { // EfiSimpleNetworkStopped
+                if snp.start().is_err() { continue; }
             }
-            NET_INITIALIZED.store(true, Ordering::SeqCst);
-
-            hpvm_info!("NETHW",
-                "SNP initialized: MAC={} MTU={} media_present={:?}",
-                format_mac(&mac, mac_len), mtu, media_present
-            );
-            return Ok(());
+            NetworkState::STARTED => {} // EfiSimpleNetworkStarted - Ready to initialize
+            _ => {
+                // If already initialized (state 2), reset it to be safe
+                let _ = snp.reset(false);
+            }
         }
+
+        if let Err(e) = snp.initialize(0, 0) {
+            hpvm_warn!("NETHW", "SNP init failed on handle {:?}: {:?}", h, e);
+            continue;
+        }
+
+        let _ = snp.receive_filters(
+            ReceiveFlags::UNICAST | ReceiveFlags::BROADCAST,
+            ReceiveFlags::empty(),
+            false,   // Don't go into Promiscuous mode
+            None     // No hardware MAC list needed
+        ).map_err(|_| "Failed to set receive filters")?;
+
+        let mode = snp.mode(); // Refresh mode after init
+        let mac_len = (mode.hw_address_size as usize).min(32);
+        let mut mac = [0u8; 32];
+        mac[..mac_len].copy_from_slice(&mode.current_address.0[..mac_len]);
+
+        // 5. Global State Update
+        unsafe {
+            NET_INFO = Some(NetHwInfo {
+                mac,
+                mac_len,
+                mtu: mode.max_packet_size,
+                media_present: mode.media_present.into(),
+                state: 2,
+            });
+
+            NIC_HANDLE = Some(h);
+            OWNED_SNP = Some(snp_scoped);
+        }
+
+        NET_INITIALIZED.store(true, Ordering::SeqCst);
+        return Ok(());
     }
 
-    hpvm_error!("NETHW", ": SNP handles found but none could be initialized");
     Err("no usable nic")
 }
 
@@ -149,23 +201,29 @@ pub(crate) fn get_mac() -> [u8; 32] {
         }
     };
     let mut mc: [u8;32] = [0; 32];
+    unsafe {
+        for &h in handles.as_slice().iter() {
+            let snp_scoped: Result<ScopedProtocol<SimpleNetwork>, _> = boot::open_protocol(OpenProtocolParams {
+                handle: h,
+                agent: boot::image_handle(),
+                controller: None,
+            }, OpenProtocolAttributes::GetProtocol
+            );
+            if let Ok(snp) = snp_scoped {
+                let snp_ref: &SimpleNetwork = &snp;
+                // Best-effort start/initialize
+                let _ = snp_ref.start();
+                let _ = snp_ref.initialize(0, 0);
 
-    for &h in handles.as_slice().iter() {
-        let snp_scoped: Result<ScopedProtocol<SimpleNetwork>, _> = boot::open_protocol_exclusive(h);
-        if let Ok(snp) = snp_scoped {
-            let snp_ref: &SimpleNetwork = &snp;
-            // Best-effort start/initialize
-            let _ = snp_ref.start();
-            let _ = snp_ref.initialize(0, 0);
-
-            let mode = snp_ref.mode();
-            let mut mac = [0u8; 32];
-            let mac_len = (mode.hw_address_size as usize).min(32);
-            let src = &mode.current_address.0[..mac_len];
-            mac[..mac_len].copy_from_slice(src);
-            //mac
-            mc = mac;
-        } else { return [0; 32] }
+                let mode = snp_ref.mode();
+                let mut mac = [0u8; 32];
+                let mac_len = (mode.hw_address_size as usize).min(32);
+                let src = &mode.current_address.0[..mac_len];
+                mac[..mac_len].copy_from_slice(src);
+                //mac
+                mc = mac;
+            } else { return [0; 32] }
+        }
     }
     mc
 }

@@ -428,6 +428,19 @@ impl FileSystem {
         file.write(data).map_err(|_| "Write error")?;
         Ok(())
     }
+    pub fn read_from_file_bytes_position(path: &str, buffer: &mut [u8], position: u64) -> Result<(), &'static str> {
+        let mut root = Self::get_root(None)?;
+        let path_cstr = Self::path_to_cstr16(path)?;
+
+        let handle = root.open(path_cstr, FileMode::Read, FileAttribute::empty())
+            .map_err(|_| "Open for read failed")?;
+
+        let mut file = handle.into_regular_file().ok_or("Not a file")?;
+
+        file.set_position(position).map_err(|_| "Seek error")?;
+        file.read(buffer).map_err(|_| "Read error")?;
+        Ok(())
+    }
 
     // --- Private Helpers ---
 

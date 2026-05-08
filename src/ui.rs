@@ -53,6 +53,14 @@ pub struct DeviceCategory {
     pub icon: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FilePendingAction {
+    Rename,
+    Copy,
+    Move,
+    Delete,
+}
+
 /// Main UI manager for the HPVMx system.
 ///
 /// Handles the dashboard, windowing system for applications,
@@ -78,6 +86,8 @@ pub struct DashboardUI {
     pub vm_action_idx: usize, // For VM actions (0: Start, 1: Stop, 2: Reset, 3: Zero, 4: Delete)
     pub selected_vm_idx: usize,
     pub filesys_action_idx: usize,
+    pub filesys_pending_action: Option<FilePendingAction>,
+    pub filesys_new_counter: usize,
     pub term_selected: bool,
     pub term_buf: String,
     pub editor: Option<TextEditor>,
@@ -90,7 +100,35 @@ pub struct DashboardUI {
     pub ctrl_mode: bool,
     pub alt_mode: bool,
     pub fn_mode: bool,
+    pub selected_package_idx: usize,
+    pub package_action_idx: usize,
+    pub selected_network_action_idx: usize,
+    pub network_target: String,
+    pub selected_settings_category_idx: usize,
+    pub selected_settings_idx: usize,
+    pub settings: UiSettings,
+    pub status_line: String,
 
+}
+
+#[derive(Clone, Debug)]
+pub struct UiSettings {
+    pub extra_debug_info: bool,
+    pub folder_absolute_sizes: bool,
+    pub state_save_restore: bool,
+    pub extended_symbol_library: bool,
+    pub ring0_udmi_udxi: bool,
+    pub controllang_support: bool,
+    pub pg_vshaders: bool,
+    pub general_profile: usize,
+    pub boot_target: usize,
+    pub interface_density: usize,
+    pub vm_safety_policy: usize,
+    pub network_profile: usize,
+    pub storage_policy: usize,
+    pub package_policy: usize,
+    pub developer_level: usize,
+    pub security_policy: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -225,6 +263,8 @@ impl DashboardUI {
             vm_action_idx: 0,
             selected_vm_idx: 0,
             filesys_action_idx: 0,
+            filesys_pending_action: None,
+            filesys_new_counter: 1,
             term_selected: false,
             term_buf: "".to_string(),
             editor: None,
@@ -238,6 +278,31 @@ impl DashboardUI {
             ctrl_mode: false,
             alt_mode: false,
             fn_mode: false,
+            selected_package_idx: 0,
+            package_action_idx: 0,
+            selected_network_action_idx: 0,
+            network_target: String::from("127.0.0.1"),
+            selected_settings_category_idx: 0,
+            selected_settings_idx: 0,
+            settings: UiSettings {
+                extra_debug_info: false,
+                folder_absolute_sizes: false,
+                state_save_restore: true,
+                extended_symbol_library: true,
+                ring0_udmi_udxi: false,
+                controllang_support: false,
+                pg_vshaders: true,
+                general_profile: 0,
+                boot_target: 0,
+                interface_density: 0,
+                vm_safety_policy: 0,
+                network_profile: 0,
+                storage_policy: 0,
+                package_policy: 0,
+                developer_level: 0,
+                security_policy: 0,
+            },
+            status_line: String::from("Ready"),
         }
     }
 
@@ -461,15 +526,15 @@ impl DashboardUI {
                     if !self.vms.is_empty() {
                         let actions_y = table_y + table_h + gutter;
                         pg.draw_text(margin, actions_y, "Actions for Selected VM:", 0xCCCCCC);
-                        let actions = ["Start", "Stop", "Reset", "Zero", "Delete"];
+                        let actions = ["Start", "Stop", "Reset", "Zero", "Delete", "Save", "Restore"];
                         let mut action_x = margin;
                         let action_y = actions_y + 20;
                         for (idx, action) in actions.iter().enumerate() {
                             let is_focused = idx == self.vm_action_idx;
                             let color = if is_focused { 0x00AA00 } else { 0x444444 };
-                            pg.fill_rect(action_x, action_y, 70, 24, color);
+                            pg.fill_rect(action_x, action_y, 78, 24, color);
                             pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
-                            action_x += 80;
+                            action_x += 88;
                         }
                         pg.draw_text(margin, action_y + 32, "Press ENTER to execute action | SPACE to Create VM", 0x888888);
                     } else {
@@ -610,7 +675,24 @@ impl DashboardUI {
                     pg.draw_text(x, y, &alloc::format!("MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", state.mac_addr[0], state.mac_addr[1], state.mac_addr[2], state.mac_addr[3], state.mac_addr[4], state.mac_addr[5]), 0xCCCCCC);
                     y += 40;
                     let is_init = crate::devices::net_stack::is_initialized();
-                    pg.draw_text(x, y, &alloc::format!("Initialized: {is_init}", ), 0xFFFFFF)
+                    pg.draw_text(x, y, &alloc::format!("Initialized: {is_init}", ), 0xFFFFFF);
+                    y += 35;
+
+                    pg.draw_text(x, y, &alloc::format!("Target: {}", self.network_target), 0xCCCCCC);
+                    y += 28;
+
+                    let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off"];
+                    let mut action_x = x;
+                    for (idx, action) in actions.iter().enumerate() {
+                        let is_focused = idx == self.selected_network_action_idx;
+                        pg.fill_rect(action_x, y, 88, 24, if is_focused { 0x00AA00 } else { 0x444444 });
+                        pg.draw_text(action_x + 8, y + 4, action, 0xFFFFFF);
+                        action_x += 96;
+                    }
+                    y += 36;
+                    pg.draw_text(x, y, "LEFT/RIGHT chooses action, ENTER runs it, +/- cycles ping target", 0x888888);
+                    y += 20;
+                    pg.draw_text(x, y, &self.status_line, 0xFFFF00);
 
 
 
@@ -711,7 +793,7 @@ impl DashboardUI {
                     // Table area
                     let list_x = margin;
                     let list_y = base_y + 28;
-                    let list_w = core::cmp::min(width - margin * 2, 760);
+                    let list_w = core::cmp::min(width - margin * 2, 720);
                     let list_h = core::cmp::min(height - list_y - 90, 460);
                     pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
 
@@ -724,11 +806,9 @@ impl DashboardUI {
 
                     // Rows
                     let mut y = list_y + line_h + gutter;
-                    let mut idx_types: Vec<&str> = Vec::new();
                     for (i, entry) in self.files.iter().enumerate() {
                         if y + line_h > list_y + list_h - 2 { break; }
                         let color = if i == self.selected_file_idx { 0xFFFF00 } else { 0xFFFFFF };
-                        idx_types.push(if entry.is_dir { "D" } else { "F" }  );
                         let icon = if entry.is_dir { pixel_graphics::icons::FOLDER_ICON_DATA } else {
                             let dec_syn = ["json", "xml", "toml", "yaml", "yml"];
                             let sys_syn = ["sys", "efi", "asm"];
@@ -749,10 +829,10 @@ impl DashboardUI {
 
                         let size: String = if entry.size < 10000 {
                             format!("{}", entry.size)
-                        } else if entry.size/1000 < 10000 {
-                            format!("{}K", (entry.size/1000))
+                        } else if entry.size/1024 < 10000 {
+                            format!("{}K", (entry.size/1024))
                         } else {
-                            format!("{}M", (entry.size/1000)/1000)
+                            format!("{}M", (entry.size/1024)/1024)
                         };
 
 
@@ -764,33 +844,47 @@ impl DashboardUI {
                         y += line_h;
                     }
 
-                    if idx_types[self.selected_file_idx] == "F" {
-                        let actions_y = list_h + margin*8;
-                        pg.draw_text(margin, actions_y, "Actions for Selected Item", 0xCCCCCC);
-                        let actions = ["Open", "Edit", "Props", "Delete", "Clone", "Copy", "Cut", "Copy Path"];
-                        let mut action_x = margin;
-                        let action_y = actions_y + 20;
-                        for (idx, action) in actions.iter().enumerate() {
-                            let is_focused = idx == self.filesys_action_idx;
-                            let color = if is_focused { 0x00AA00 } else { 0x444444 };
-                            pg.fill_rect(action_x, action_y, 90, 24, color);
-                            pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
-                            action_x += 100;
+                    let props_x = list_x + list_w + gutter;
+                    let props_w = core::cmp::min(width.saturating_sub(props_x + margin), 360);
+                    if props_w > 120 {
+                        pg.draw_rect_outline(props_x, list_y, props_w, list_h, 0x777777);
+                        pg.draw_text(props_x + 10, list_y + 10, "Properties", 0x00FF00);
+                        if let Some(entry) = self.files.get(self.selected_file_idx) {
+                            let sep = if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" };
+                            let full_path = format!("{}{}{}", self.current_path, sep, entry.name);
+                            pg.draw_text(props_x + 10, list_y + 40, &format!("Name: {}", entry.name), 0xFFFFFF);
+                            pg.draw_text(props_x + 10, list_y + 60, &format!("Type: {}", if entry.is_dir { "Directory" } else { "File" }), 0xCCCCCC);
+                            pg.draw_text(props_x + 10, list_y + 80, &format!("Size: {} bytes", entry.size), 0xCCCCCC);
+                            pg.draw_text(props_x + 10, list_y + 100, &format!("Path: {}", full_path), 0x888888);
+                            pg.draw_text(props_x + 10, list_y + 130, &format!("Index: {} / {}", self.selected_file_idx + 1, self.files.len()), 0x888888);
+                        } else {
+                            pg.draw_text(props_x + 10, list_y + 40, "No item selected", 0x888888);
                         }
-                    } else {
-                        let actions_y = list_h + margin*8;
-                        pg.draw_text(margin, actions_y, "Actions for Selected Item", 0xCCCCCC);
-                        let actions = ["Props", "Delete", "Clone", "Copy", "Cut", "Compress", "Copy Path", "New"];
-                        let mut action_x = margin;
-                        let action_y = actions_y + 20;
-                        for (idx, action) in actions.iter().enumerate() {
-                            let is_focused = idx == self.filesys_action_idx;
-                            let color = if is_focused { 0x00AA00 } else { 0x444444 };
-                            pg.fill_rect(action_x, action_y, 90, 24, color);
-                            pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
-                            action_x += 100;
+
+                        if let Some(action) = self.filesys_pending_action {
+                            let confirm_y = list_y + list_h - 90;
+                            pg.fill_rect(props_x + 8, confirm_y, props_w - 16, 72, 0x332222);
+                            pg.draw_rect_outline(props_x + 8, confirm_y, props_w - 16, 72, 0xFFAA00);
+                            pg.draw_text(props_x + 16, confirm_y + 10, "Confirm Operation", 0xFFAA00);
+                            pg.draw_text(props_x + 16, confirm_y + 30, &format!("{:?}", action), 0xFFFFFF);
+                            pg.draw_text(props_x + 16, confirm_y + 50, "END confirms, ESC cancels", 0xCCCCCC);
                         }
                     }
+
+                    let actions_y = list_h + margin*8;
+                    pg.draw_text(margin, actions_y, "Actions for Selected Item", 0xCCCCCC);
+                    let actions = ["Open", "Props", "New File", "New Dir", "Rename", "Copy", "Move", "Delete"];
+                    let mut action_x = margin;
+                    let action_y = actions_y + 20;
+                    for (idx, action) in actions.iter().enumerate() {
+                        let is_focused = idx == self.filesys_action_idx;
+                        let color = if is_focused { 0x00AA00 } else { 0x444444 };
+                        pg.fill_rect(action_x, action_y, 92, 24, color);
+                        pg.draw_text(action_x + 6, action_y + 4, action, 0xFFFFFF);
+                        action_x += 100;
+                    }
+                    pg.draw_text(margin, action_y + 34, "LEFT/RIGHT chooses action, END runs it; rename/copy/move/delete ask for confirmation", 0x888888);
+                    pg.draw_text(margin, action_y + 52, &self.status_line, 0xFFFF00);
                 }
                 DashboardTab::Test => {
                     pg.draw_text(20, 100, &alloc::format!("UI Components Test Bed (Qt6 Style)  res: {}x{}", width, height), 0x00FF00);
@@ -998,44 +1092,78 @@ impl DashboardUI {
                 }
                 DashboardTab::Settings => {
 
-                    pg.draw_text(5, page_y - 15, "this page is in development.... coming soon!", 0xFFFFFF);
+                    pg.draw_text(5, page_y - 15, "Settings", 0x00FF00);
 
 
-                    // settings ideas
-                    // .. general boot settings (for now)
+                    let left_x = 10;
+                    let left_y = page_y + 2;
+                    let left_w = (width/3)-10;
+                    let left_h = (height*2)/3;
+                    pg.draw_rect_outline(left_x, left_y, left_w, left_h, 0xFFFFFF);
+                    pg.draw_text(left_x + 10, left_y + 10, "Categories", 0xFFFFFF);
 
-                    pg.draw_rect_outline(10, page_y + 2, (width/3)-10, (height*2)/3, 0xFFFFFF);
+                    let categories = [
+                        ("General", "Runtime defaults and global behavior"),
+                        ("Boot", "Startup, watchdog, and state restore"),
+                        ("Interface", "Dashboard display and visual features"),
+                        ("Virtual Machines", "VM lifecycle and safety defaults"),
+                        ("Network", "NIC, ping, LAN scan, and HTTP controls"),
+                        ("Storage", "File explorer and filesystem behavior"),
+                        ("Packages", "Package index and verification policy"),
+                        ("Developer", "Language, debug, and toolchain flags"),
+                        ("Security", "Protected and experimental ring0 options"),
+                        ("About", "Build and environment information"),
+                    ];
 
-
-
-                    // features section
-                    //
-                    // [] = checkbox   () = radiobutton
-                    //
-                    // [] extra debug info
-                    // [] folder absolute sizes
+                    let mut left_row_y = left_y + 38;
+                    for (idx, (name, summary)) in categories.iter().enumerate() {
+                        if left_row_y + 30 > left_y + left_h - 8 { break; }
+                        let selected = idx == self.selected_settings_category_idx;
+                        if selected {
+                            pg.fill_rect(left_x + 6, left_row_y - 4, left_w - 12, 30, 0x334433);
+                            pg.draw_rect_outline(left_x + 6, left_row_y - 4, left_w - 12, 30, 0x00AA00);
+                        }
+                        pg.draw_text(left_x + 16, left_row_y, name, if selected { 0xFFFF00 } else { 0xFFFFFF });
+                        pg.draw_text(left_x + 16, left_row_y + 12, summary, 0x888888);
+                        left_row_y += 34;
+                    }
 
                     pg.draw_rect_outline_adv((width/3) + 10, page_y + 2, (width/3) - 10, (height*2)/3, 0x777777, 1, 0x3FFFFF);
                     let mut x = (width/3) + 20;
                     let mut y = page_y + 10;
 
 
-                    pg.draw_text(x, y, "Optional Features", 0xFFFFFF);
+                    let selected_category = categories
+                        .get(self.selected_settings_category_idx)
+                        .map(|(name, _)| *name)
+                        .unwrap_or("General");
+                    pg.draw_text(x, y, selected_category, 0xFFFFFF);
                     y += 25;
 
-                    pg.draw_checkbox(x, y, false, false, false, "Extra Debug Info");
+                    let settings = self.settings_rows();
+                    for (idx, (label, value, blocked, disabled)) in settings.iter().enumerate() {
+                        if idx == self.selected_settings_idx {
+                            pg.fill_rect(x - 4, y - 2, 390, 18, 0x333333);
+                        }
+                        if value.as_str() == "on" || value.as_str() == "off" {
+                            pg.draw_checkbox(x, y, value.as_str() == "on", *blocked, *disabled, label);
+                        } else {
+                            pg.draw_text(x, y, label, if *disabled { 0x777777 } else { 0xFFFFFF });
+                            pg.draw_text(x + 190, y, value, if *blocked { 0xFF7777 } else { 0x00FFFF });
+                        }
+                        y += 20;
+                    }
                     y += 20;
-                    pg.draw_checkbox(x, y, false, false, true, "Folder Absolute Sizes");
+                    pg.draw_text(x, y, "LEFT/RIGHT changes category, UP/DOWN selects, ENTER cycles/toggles", 0x888888);
                     y += 20;
-                    pg.draw_checkbox(x, y, true, false, false, "State Save/Restore");
+                    pg.draw_text(x, y, &self.status_line, 0xFFFF00);
+                    y += 25;
+                    pg.draw_text(x, y, "Environment", 0xAAAAAA);
                     y += 20;
-                    pg.draw_checkbox(x, y, true, false, false, "Extended Symbol Library");
-                    y += 20;
-                    pg.draw_checkbox(x, y, false, true, false, "Ring0 UDMI/UDXI");
-                    y += 20;
-                    pg.draw_checkbox(x, y, false, false, true, "ControlLang Support");
-                    y += 20;
-                    pg.draw_checkbox(x, y, true, false, false, "PG VShaders");
+                    for (key, value) in crate::env::global_vars_snapshot().iter().rev().take(5) {
+                        pg.draw_text(x, y, &format!("{}={}", key, value), 0x888888);
+                        y += 16;
+                    }
 
 
 
@@ -1045,69 +1173,52 @@ impl DashboardUI {
                 DashboardTab::Packages => {
                     pg.draw_text(20, 100, "Packages", 0x00FF00);
 
-                    let grouped_packages: BTreeMap<PackageType, Vec<Package>> = self.package_manager.get_packages();
+                    let package_names = self.package_names();
+                    let list_x = 40;
+                    let list_y = 140;
+                    let list_w = 360;
+                    let list_h = 420;
+                    pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
+                    pg.fill_rect(list_x + 1, list_y + 1, list_w - 2, 18, 0x333333);
+                    pg.draw_text(list_x + 8, list_y + 4, "NAME                         TYPE", 0xCCCCCC);
 
-                    let mut category_children: BTreeMap<PackageType, Vec<TreeViewNode>> = BTreeMap::new();
-
-                    for (p_type, pkgs) in &grouped_packages {
-                        let nodes: Vec<TreeViewNode> = pkgs
-                            .iter()
-                            .map(|p| {
-                            TreeViewNode {
-                                label: &p.name, // Note: p.name must live as long as the tree
-                                children: &[],
-                                expanded: true,
-                            }
-                        })
-                            .collect();
-
-                        category_children
-                            .insert(p_type.clone(), nodes);
+                    let mut y = list_y + 28;
+                    for (idx, name) in package_names.iter().enumerate() {
+                        if y > list_y + list_h - 20 { break; }
+                        let Some(pkg) = self.package_manager.registry.get(name) else { continue; };
+                        if idx == self.selected_package_idx {
+                            pg.fill_rect(list_x + 2, y - 2, list_w - 4, 16, 0x444400);
+                        }
+                        pg.draw_text(list_x + 8, y, &format!("{:<28} {:?}", pkg.name, pkg.package_type), if idx == self.selected_package_idx { 0xFFFF00 } else { 0xFFFFFF });
+                        y += 18;
                     }
 
-                    // Now create the category-level nodes
-                    let categories: Vec<TreeViewNode> = category_children
-                        .iter()
-                        .map(|(p_type, children)| {
-                        TreeViewNode {
-                            label: match p_type { // Map enum to display string
-                                PackageType::Library => "Libraries",
-                                PackageType::Executable => "Executables",
-                                PackageType::Driver => "Drivers",
-                                PackageType::Extension => "Extensions",
-                                PackageType::PShader => "Shaders",
-                                PackageType::ResourcePack => "ResourcePacks",
-                                _ => "Other",
-                            },
-                            children, // Reference the Vec stored in category_children
-                            expanded: true,
+                    let detail_x = list_x + list_w + 30;
+                    pg.draw_rect_outline(detail_x, list_y, 520, 220, 0x888888);
+                    pg.draw_text(detail_x + 10, list_y + 10, "Selected Package", 0x00FF00);
+                    if let Some(name) = self.selected_package_name() {
+                        if let Some(pkg) = self.package_manager.registry.get(&name) {
+                            pg.draw_text(detail_x + 10, list_y + 40, &format!("Name: {}", pkg.name), 0xFFFFFF);
+                            pg.draw_text(detail_x + 10, list_y + 60, &format!("Version: {}", pkg.version), 0xFFFFFF);
+                            pg.draw_text(detail_x + 10, list_y + 80, &format!("Type: {:?}", pkg.package_type), 0xFFFFFF);
+                            pg.draw_text(detail_x + 10, list_y + 100, &format!("Author: {}", pkg.author), 0xFFFFFF);
+                            pg.draw_text(detail_x + 10, list_y + 120, &format!("Deps: {}", if pkg.deps.is_empty() { String::from("none") } else { pkg.deps.join(", ") }), 0xCCCCCC);
+                            pg.draw_text(detail_x + 10, list_y + 145, &pkg.description, 0xAAAAAA);
                         }
-                    })
-                        .collect();
+                    } else {
+                        pg.draw_text(detail_x + 10, list_y + 40, "No packages loaded", 0xAAAAAA);
+                    }
 
-                    let root = TreeViewNode {
-                        label: "Packages",
-                        children: &categories,
-                        expanded: true,
-                    };
-                    pg.draw_tree_view_icon(60, 160, 285, 450, &root, &pixel_graphics::icons::PACKAGE_ICON_DATA);
-                    pg.draw_table_view(360, 160, 200, 450,  &["property", "value"], &[&["none", "none"]]);
-                    pg.draw_table_view(660, 160,  150, 400, &["property", "value"], &[&["none", "none"]]);
-                    pg.draw_table_view(820, 160,  400, 500, &["col"], &[&["row"]]);
-                    pg.draw_button(660, 580, 120,30,  "Install", false);
-                    pg.draw_button(60, 640, 120, 30,  "Uninstall", false);
-                    pg.draw_button(220, 640, 120,30,  "Update", false);
-                    pg.draw_button(380, 640, 120, 30,  "Disable", false);
-                    pg.draw_button(660, 640,  120, 30,  "____", false);
-                    pg.draw_rect_outline(820, 680, 300, 25, 0xCCCCC0);
-                    pg.draw_button(1140, 680, 100, 25, "Search", false);
-
-
-
-
-                    pg.draw_button(220, 120, 120, 30, "Refresh LT", false);
-                    pg.draw_checkbox(360, 120, false, false, false, "Advanced");
-                    pg.draw_button(820, 120, 120, 30, "Update Index", false);
+                    let actions = ["Refresh", "Verify", "Uninstall", "Update"];
+                    let mut action_x = 40;
+                    let action_y = list_y + list_h + 24;
+                    for (idx, action) in actions.iter().enumerate() {
+                        pg.fill_rect(action_x, action_y, 110, 26, if idx == self.package_action_idx { 0x00AA00 } else { 0x444444 });
+                        pg.draw_text(action_x + 8, action_y + 5, action, 0xFFFFFF);
+                        action_x += 120;
+                    }
+                    pg.draw_text(40, action_y + 40, "UP/DOWN selects package, LEFT/RIGHT chooses action, ENTER runs it", 0x888888);
+                    pg.draw_text(40, action_y + 60, &self.status_line, 0xFFFF00);
                 }
                 _ => {
                     pg.draw_text(5, page_y - 15, "this page is unavailable", 0xFFFFFF)
@@ -1401,6 +1512,201 @@ impl DashboardUI {
         self.create_vm_focus_idx = 0;
     }
 
+    fn option_value(options: &[&'static str], idx: usize) -> String {
+        options.get(idx).copied().unwrap_or(options[0]).to_string()
+    }
+
+    pub fn settings_rows(&self) -> Vec<(String, String, bool, bool)> {
+        match self.selected_settings_category_idx {
+            0 => alloc::vec![
+                (String::from("HPVMX_PROFILE"), Self::option_value(&["balanced", "diagnostic", "performance"], self.settings.general_profile), false, false),
+                (String::from("Extra Debug Info"), if self.settings.extra_debug_info { "on" } else { "off" }.to_string(), false, false),
+                (String::from("HPVMX_USER"), String::from("operator"), false, false),
+            ],
+            1 => alloc::vec![
+                (String::from("HPVMX_BOOT_TARGET"), Self::option_value(&["dashboard", "shell", "last-vm"], self.settings.boot_target), false, false),
+                (String::from("State Save/Restore"), if self.settings.state_save_restore { "on" } else { "off" }.to_string(), false, false),
+                (String::from("HPVMX_WATCHDOG"), String::from("disabled"), false, false),
+            ],
+            2 => alloc::vec![
+                (String::from("HPVMX_UI_DENSITY"), Self::option_value(&["normal", "compact", "wide"], self.settings.interface_density), false, false),
+                (String::from("Extended Symbol Library"), if self.settings.extended_symbol_library { "on" } else { "off" }.to_string(), false, false),
+                (String::from("PG VShaders"), if self.settings.pg_vshaders { "on" } else { "off" }.to_string(), false, false),
+            ],
+            3 => alloc::vec![
+                (String::from("HPVMX_VM_SAFETY"), Self::option_value(&["prompt", "auto-save", "strict"], self.settings.vm_safety_policy), false, false),
+                (String::from("HPVMX_VM_DEFAULT_MEM"), format!("{}MB", self.new_vm_memory_mb), false, false),
+                (String::from("HPVMX_VM_DEFAULT_CPUS"), format!("{}", self.new_vm_vcpus), false, false),
+            ],
+            4 => alloc::vec![
+                (String::from("HPVMX_NET_PROFILE"), Self::option_value(&["dhcp", "static", "loopback"], self.settings.network_profile), false, false),
+                (String::from("HPVMX_NET_TARGET"), self.network_target.clone(), false, false),
+                (String::from("HPVMX_HTTPD_PORT"), String::from("8080"), false, false),
+            ],
+            5 => alloc::vec![
+                (String::from("HPVMX_STORAGE_POLICY"), Self::option_value(&["preserve", "confirm-delete", "developer"], self.settings.storage_policy), false, false),
+                (String::from("Folder Absolute Sizes"), if self.settings.folder_absolute_sizes { "on" } else { "off" }.to_string(), false, false),
+                (String::from("HPVMX_CLIPBOARD"), String::from("path-only"), false, false),
+            ],
+            6 => alloc::vec![
+                (String::from("HPVMX_PM_VERIFY"), Self::option_value(&["standard", "quick", "full"], self.settings.package_policy), false, false),
+                (String::from("HPVMX_PM_AUTOHEAL"), String::from("off"), false, false),
+                (String::from("HPVMX_PM_INDEX"), self.package_manager.package_path.clone(), false, false),
+            ],
+            7 => alloc::vec![
+                (String::from("HPVMX_DEV_LEVEL"), Self::option_value(&["normal", "verbose", "toolchain"], self.settings.developer_level), false, false),
+                (String::from("ControlLang Support"), if self.settings.controllang_support { "on" } else { "off" }.to_string(), false, true),
+                (String::from("HPVMX_MICRO_C_TARGET"), String::from("x86_64"), false, false),
+            ],
+            8 => alloc::vec![
+                (String::from("HPVMX_SECURITY_POLICY"), Self::option_value(&["standard", "paranoid", "lab"], self.settings.security_policy), false, false),
+                (String::from("Ring0 UDMI/UDXI"), if self.settings.ring0_udmi_udxi { "on" } else { "off" }.to_string(), true, false),
+                (String::from("HPVMX_AUTOLYTIC"), String::from("enabled"), false, false),
+            ],
+            _ => alloc::vec![
+                (String::from("HPVMX_VERSION"), env!("CARGO_PKG_VERSION").to_string(), false, true),
+                (String::from("HPVMX_BUILD"), String::from("dev"), false, true),
+                (String::from("HPVMX_ENV_COUNT"), format!("{}", crate::env::global_vars_snapshot().len()), false, true),
+            ],
+        }
+    }
+
+    pub fn package_names(&self) -> Vec<String> {
+        self.package_manager.registry.keys().cloned().collect()
+    }
+
+    pub fn selected_package_name(&self) -> Option<String> {
+        self.package_names().get(self.selected_package_idx).cloned()
+    }
+
+    pub fn execute_package_action(&mut self) {
+        match self.package_action_idx {
+            0 => {
+                self.package_manager.load_registry();
+                self.status_line = String::from("Package registry refreshed");
+            }
+            1 => {
+                if let Some(name) = self.selected_package_name() {
+                    self.package_manager.verify_dependencies(&name);
+                    self.status_line = format!("Verified dependencies for {}", name);
+                }
+            }
+            2 => {
+                if let Some(name) = self.selected_package_name() {
+                    self.package_manager.registry.remove(&name);
+                    self.selected_package_idx = self.selected_package_idx.saturating_sub(1);
+                    self.status_line = format!("Uninstalled {}", name);
+                }
+            }
+            3 => {
+                if let Some(name) = self.selected_package_name() {
+                    self.status_line = format!("{} marked for update on next index refresh", name);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn execute_network_action(&mut self) {
+        match self.selected_network_action_idx {
+            0 => {
+                match crate::devices::net_hw::init() {
+                    Ok(()) => self.status_line = String::from("NIC initialized"),
+                    Err(e) => self.status_line = format!("NIC init failed: {}", e),
+                }
+            }
+            1 => {
+                crate::devices::net::status();
+                self.status_line = String::from("Network status refreshed");
+            }
+            2 => {
+                let _ = crate::devices::net::ping(&self.network_target, 4, 250);
+                self.status_line = format!("Ping sent to {}", self.network_target);
+            }
+            3 => {
+                crate::devices::net::lanscan("192.168.1.");
+                self.status_line = String::from("LAN scan started for 192.168.1.*");
+            }
+            4 => {
+                crate::devices::net::httpd_start(8080);
+                self.status_line = String::from("HTTP management server started on 8080");
+            }
+            5 => {
+                crate::devices::net::httpd_stop();
+                self.status_line = String::from("HTTP management server stopped");
+            }
+            _ => {}
+        }
+    }
+
+    pub fn toggle_selected_setting(&mut self) {
+        let cycle = |idx: &mut usize, max: usize| {
+            *idx = (*idx + 1) % max;
+        };
+
+        match (self.selected_settings_category_idx, self.selected_settings_idx) {
+            (0, 0) => cycle(&mut self.settings.general_profile, 3),
+            (0, 1) => self.settings.extra_debug_info = !self.settings.extra_debug_info,
+            (1, 0) => cycle(&mut self.settings.boot_target, 3),
+            (1, 1) => self.settings.state_save_restore = !self.settings.state_save_restore,
+            (2, 0) => cycle(&mut self.settings.interface_density, 3),
+            (2, 1) => self.settings.extended_symbol_library = !self.settings.extended_symbol_library,
+            (2, 2) => self.settings.pg_vshaders = !self.settings.pg_vshaders,
+            (3, 0) => cycle(&mut self.settings.vm_safety_policy, 3),
+            (3, 1) => {
+                self.new_vm_memory_mb = match self.new_vm_memory_mb {
+                    256 => 512,
+                    512 => 1024,
+                    1024 => 2048,
+                    _ => 256,
+                };
+            }
+            (3, 2) => self.new_vm_vcpus = if self.new_vm_vcpus >= 4 { 1 } else { self.new_vm_vcpus + 1 },
+            (4, 0) => cycle(&mut self.settings.network_profile, 3),
+            (4, 1) => {
+                self.network_target = if self.network_target == "127.0.0.1" {
+                    String::from("192.168.1.1")
+                } else if self.network_target == "192.168.1.1" {
+                    String::from("10.0.0.1")
+                } else {
+                    String::from("127.0.0.1")
+                };
+            }
+            (5, 0) => cycle(&mut self.settings.storage_policy, 3),
+            (5, 1) => self.settings.folder_absolute_sizes = !self.settings.folder_absolute_sizes,
+            (6, 0) => cycle(&mut self.settings.package_policy, 3),
+            (7, 0) => cycle(&mut self.settings.developer_level, 3),
+            (7, 1) => {
+                if !self.settings.controllang_support {
+                    self.status_line = String::from("ControlLang support is disabled in this build");
+                    self.publish_selected_setting();
+                    return;
+                }
+                self.settings.controllang_support = !self.settings.controllang_support;
+            }
+            (8, 0) => cycle(&mut self.settings.security_policy, 3),
+            (8, 1) => {
+                self.status_line = String::from("Ring0 UDMI/UDXI is blocked");
+                self.publish_selected_setting();
+                return;
+            }
+            _ => {}
+        }
+        self.publish_selected_setting();
+    }
+
+    pub fn publish_selected_setting(&mut self) {
+        let rows = self.settings_rows();
+        if let Some((key, value, blocked, disabled)) = rows.get(self.selected_settings_idx) {
+            if *blocked || *disabled {
+                self.status_line = format!("{} is not writable", key);
+                return;
+            }
+            crate::env::set_global_var(key, value);
+            self.status_line = format!("{}={}", key, value);
+        }
+    }
+
     pub fn get_selected_vm_id(&self) -> Option<u32> {
         self.vms.get(self.selected_vm_idx).map(|vm| vm.id)
     }
@@ -1492,35 +1798,232 @@ impl DashboardUI {
                     Key::Special(ScanCode::RIGHT) => {
                         if self.filesys_action_idx < 7 {self.filesys_action_idx += 1 } else { self.filesys_action_idx = 7 }
                     }
+                    Key::Special(ScanCode::ESCAPE) => {
+                        self.filesys_pending_action = None;
+                        self.status_line = String::from("File operation canceled");
+                    }
                     Key::Special(ScanCode::END) => {
-                        if self.filesys_action_idx == 0 || self.filesys_action_idx == 1 { // Open/Edit
-                            let entry = &self.files[self.selected_file_idx];
-                            if !entry.is_dir {
-                                let full_path = format!("{}/{}", self.current_path, entry.name);
+                        if self.files.is_empty() {
+                            if self.filesys_action_idx == 2 {
+                                let new_file = format!("{}{}new_file_{}.txt", self.current_path, if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" }, self.filesys_new_counter);
+                                match crate::FileSystem::touch(&new_file) {
+                                    Ok(_) => {
+                                        self.filesys_new_counter += 1;
+                                        self.status_line = format!("Created {}", new_file);
+                                        self.refresh_storage();
+                                    }
+                                    Err(e) => self.status_line = format!("Create failed: {}", e),
+                                }
+                            } else if self.filesys_action_idx == 3 {
+                                let new_dir = format!("{}{}new_folder_{}", self.current_path, if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" }, self.filesys_new_counter);
+                                match crate::FileSystem::mkdir(&new_dir) {
+                                    Ok(_) => {
+                                        self.filesys_new_counter += 1;
+                                        self.status_line = format!("Created {}", new_dir);
+                                        self.refresh_storage();
+                                    }
+                                    Err(e) => self.status_line = format!("Create folder failed: {}", e),
+                                }
+                            }
+                            return;
+                        }
+                        let entry = self.files[self.selected_file_idx].clone();
+                        let sep = if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" };
+                        let full_path = format!("{}{}{}", self.current_path, sep, entry.name);
+
+                        if let Some(action) = self.filesys_pending_action {
+                            let result = match action {
+                                FilePendingAction::Rename => {
+                                    let dst = format!("{}{}renamed_{}", self.current_path, sep, entry.name);
+                                    crate::FileSystem::move_file(&full_path, &dst)
+                                }
+                                FilePendingAction::Copy => {
+                                    let dst = format!("{}{}{}_copy", self.current_path, sep, entry.name);
+                                    if entry.is_dir {
+                                        crate::FileSystem::clone_dir(&full_path, &dst)
+                                    } else {
+                                        crate::FileSystem::copy(&full_path, &dst)
+                                    }
+                                }
+                                FilePendingAction::Move => {
+                                    let dst = format!("{}{}{}_moved", self.current_path, sep, entry.name);
+                                    crate::FileSystem::move_file(&full_path, &dst)
+                                }
+                                FilePendingAction::Delete => crate::FileSystem::remove(&full_path),
+                            };
+
+                            match result {
+                                Ok(_) => {
+                                    self.status_line = format!("{:?} complete for {}", action, entry.name);
+                                    self.filesys_pending_action = None;
+                                    self.refresh_storage();
+                                }
+                                Err(e) => {
+                                    self.status_line = format!("{:?} failed: {}", action, e);
+                                    self.filesys_pending_action = None;
+                                }
+                            }
+                            return;
+                        }
+
+                        match self.filesys_action_idx {
+                            0 => {
+                                if entry.is_dir {
+                                    if entry.name == "." {
+                                        return;
+                                    } else if entry.name == ".." {
+                                        if let Some(pos) = self.current_path.rfind('\\') {
+                                            if pos == 0 {
+                                                self.current_path = String::from("\\");
+                                            } else {
+                                                self.current_path.truncate(pos);
+                                            }
+                                        }
+                                        self.refresh_storage();
+                                        return;
+                                    } else {
+                                        if !self.current_path.ends_with('\\') {
+                                            self.current_path.push('\\');
+                                        }
+                                        self.current_path.push_str(&entry.name);
+                                        self.selected_file_idx = 0;
+                                        self.refresh_storage();
+                                        return;
+                                    }
+                                }
                                 if (entry.name == "PAGEFILE") || (entry.name == "BOOTX64.EFI") {
                                     self.ui_error(25);
                                 } else {
                                     match crate::FileSystem::read_file(&full_path) {
                                         Ok(data) => {
-                                        // Detect if binary: check for null bytes or invalid UTF-8
-                                        let is_hex = core::str::from_utf8(&data).is_err();
+                                            let is_hex = core::str::from_utf8(&data).is_err();
 
-                                        self.editor = Some(TextEditor {
-                                            file_path: full_path,
-                                            buffer: data,
-                                            cursor_pos: (0, 0),
-                                            scroll_offset: 0,
-                                            mode: EditorMode::Normal,
-                                            is_hex,
-                                            command_buffer: "".to_string(),
-                                        });
-                                        self.selected_tab = DashboardTab::Editor;
+                                            self.editor = Some(TextEditor {
+                                                file_path: full_path,
+                                                buffer: data,
+                                                cursor_pos: (0, 0),
+                                                scroll_offset: 0,
+                                                mode: EditorMode::Normal,
+                                                is_hex,
+                                                command_buffer: "".to_string(),
+                                            });
+                                            self.selected_tab = DashboardTab::Editor;
                                         }
                                         Err(_) => self.ui_error(29),
                                     }
                                 }
                             }
+                            1 => {
+                                self.status_line = format!("{}: {} bytes, {}", entry.name, entry.size, if entry.is_dir { "directory" } else { "file" });
+                            }
+                            2 => {
+                                let new_file = format!("{}{}new_file_{}.txt", self.current_path, sep, self.filesys_new_counter);
+                                match crate::FileSystem::touch(&new_file) {
+                                    Ok(_) => {
+                                        self.filesys_new_counter += 1;
+                                        self.status_line = format!("Created {}", new_file);
+                                        self.refresh_storage();
+                                    }
+                                    Err(e) => self.status_line = format!("Create failed: {}", e),
+                                }
+                            }
+                            3 => {
+                                let new_dir = format!("{}{}new_folder_{}", self.current_path, sep, self.filesys_new_counter);
+                                match crate::FileSystem::mkdir(&new_dir) {
+                                    Ok(_) => {
+                                        self.filesys_new_counter += 1;
+                                        self.status_line = format!("Created {}", new_dir);
+                                        self.refresh_storage();
+                                    }
+                                    Err(e) => self.status_line = format!("Create folder failed: {}", e),
+                                }
+                            }
+                            4 => {
+                                self.filesys_pending_action = Some(FilePendingAction::Rename);
+                                self.status_line = format!("Confirm rename of {}", entry.name);
+                            }
+                            5 => {
+                                self.filesys_pending_action = Some(FilePendingAction::Copy);
+                                self.status_line = format!("Confirm copy of {}", entry.name);
+                            }
+                            6 => {
+                                self.filesys_pending_action = Some(FilePendingAction::Move);
+                                self.status_line = format!("Confirm move of {}", entry.name);
+                            }
+                            7 => {
+                                self.filesys_pending_action = Some(FilePendingAction::Delete);
+                                self.status_line = format!("Confirm delete of {}", entry.name);
+                            }
+                            _ => {}
                         }
+                    }
+                    _ => {}
+                }
+            }
+            DashboardTab::Network => {
+                match key {
+                    Key::Printable(c) => {
+                        match char::from(c) {
+                            '\r' | '\n' => self.execute_network_action(),
+                            '+' | '=' => self.network_target = String::from("192.168.1.1"),
+                            '-' | '_' => self.network_target = String::from("127.0.0.1"),
+                            _ => {}
+                        }
+                    }
+                    Key::Special(ScanCode::LEFT) => {
+                        self.selected_network_action_idx = self.selected_network_action_idx.saturating_sub(1);
+                    }
+                    Key::Special(ScanCode::RIGHT) => {
+                        self.selected_network_action_idx = (self.selected_network_action_idx + 1).min(5);
+                    }
+                    _ => {}
+                }
+            }
+            DashboardTab::Packages => {
+                match key {
+                    Key::Printable(c) => {
+                        if matches!(char::from(c), '\r' | '\n') {
+                            self.execute_package_action();
+                        }
+                    }
+                    Key::Special(ScanCode::UP) => {
+                        self.selected_package_idx = self.selected_package_idx.saturating_sub(1);
+                    }
+                    Key::Special(ScanCode::DOWN) => {
+                        let len = self.package_manager.registry.len();
+                        if len > 0 {
+                            self.selected_package_idx = (self.selected_package_idx + 1).min(len - 1);
+                        }
+                    }
+                    Key::Special(ScanCode::LEFT) => {
+                        self.package_action_idx = self.package_action_idx.saturating_sub(1);
+                    }
+                    Key::Special(ScanCode::RIGHT) => {
+                        self.package_action_idx = (self.package_action_idx + 1).min(3);
+                    }
+                    _ => {}
+                }
+            }
+            DashboardTab::Settings => {
+                match key {
+                    Key::Printable(c) => {
+                        if matches!(char::from(c), '\r' | '\n') {
+                            self.toggle_selected_setting();
+                        }
+                    }
+                    Key::Special(ScanCode::LEFT) => {
+                        self.selected_settings_category_idx = self.selected_settings_category_idx.saturating_sub(1);
+                        self.selected_settings_idx = 0;
+                    }
+                    Key::Special(ScanCode::RIGHT) => {
+                        self.selected_settings_category_idx = (self.selected_settings_category_idx + 1).min(9);
+                        self.selected_settings_idx = 0;
+                    }
+                    Key::Special(ScanCode::UP) => {
+                        self.selected_settings_idx = self.selected_settings_idx.saturating_sub(1);
+                    }
+                    Key::Special(ScanCode::DOWN) => {
+                        self.selected_settings_idx = (self.selected_settings_idx + 1).min(6);
                     }
                     _ => {}
                 }
@@ -1880,7 +2383,7 @@ impl DashboardUI {
             }
             Key::Special(ScanCode::RIGHT) => {
                 if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
-                    self.vm_action_idx = (self.vm_action_idx + 1).min(4);
+                    self.vm_action_idx = (self.vm_action_idx + 1).min(6);
                 } else if matches!(self.selected_tab, DashboardTab::Apps) {
                     if self.selected_app_idx + 1 < crate::apps::APP_REGISTRY.len() {
                         self.selected_app_idx += 1;

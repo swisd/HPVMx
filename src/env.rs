@@ -9,6 +9,8 @@ use uefi::fs::Path;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
+use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, Ordering};
 use uefi::proto::console::text::{Key, OutputMode};
 use uefi::system;
 use crate::apps;
@@ -18,6 +20,41 @@ use crate::ui::pixel_graphics::icons::ICON32;
 use crate::ui::pixel_graphics::PixelGraphics;
 
 pub type EnvironmentVariable = (String, String);
+
+static GLOBAL_ENV_READY: AtomicBool = AtomicBool::new(false);
+static mut GLOBAL_ENV_VARS: MaybeUninit<BTreeMap<String, String>> = MaybeUninit::uninit();
+
+fn global_env_vars_mut() -> &'static mut BTreeMap<String, String> {
+    unsafe {
+        if !GLOBAL_ENV_READY.load(Ordering::SeqCst) {
+            GLOBAL_ENV_VARS.write(BTreeMap::new());
+            GLOBAL_ENV_READY.store(true, Ordering::SeqCst);
+        }
+        GLOBAL_ENV_VARS.assume_init_mut()
+    }
+}
+
+fn global_env_vars_ref() -> Option<&'static BTreeMap<String, String>> {
+    if !GLOBAL_ENV_READY.load(Ordering::SeqCst) {
+        return None;
+    }
+    unsafe { Some(GLOBAL_ENV_VARS.assume_init_ref()) }
+}
+
+pub fn set_global_var(key: &str, value: &str) {
+    global_env_vars_mut().insert(key.to_string(), value.to_string());
+}
+
+pub fn get_global_var(key: &str) -> Option<String> {
+    global_env_vars_ref().and_then(|vars| vars.get(key).cloned())
+}
+
+pub fn global_vars_snapshot() -> Vec<EnvironmentVariable> {
+    match global_env_vars_ref() {
+        Some(vars) => vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        None => Vec::new(),
+    }
+}
 
 /// Local environment, app-specific
 /// Local environment for an application.

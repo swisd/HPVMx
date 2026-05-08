@@ -6,6 +6,7 @@
 #![feature(c_variadic)]
 #![no_std]
 #![no_main]
+#![feature(const_heap)]
 extern crate alloc;
 
 mod ui;
@@ -34,6 +35,8 @@ mod cpucheck;
 mod env;
 mod apps;
 mod input;
+mod page;
+mod modules;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -84,8 +87,7 @@ use crate::paging::PagingManager;
 use crate::rng::XorShiftRng;
 use crate::ui::DashboardTab;
 use pm::PackageManager;
-
-
+use crate::page::{Pagefile, PagefileHeader};
 
 //#[global_allocator]
 #[allow(dead_code, unused)]
@@ -97,6 +99,7 @@ static mut HEAP_STORAGE: [u8; 2 * 1024 * 1024] = [0; 2 * 1024 * 1024];
 #[allow(dead_code, unused)]
 static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
 
+static mut PAGEFILE: Pagefile = Pagefile { header: PagefileHeader::DefaultHeader() };
 
 //use crate::graphics::Cursor;
 
@@ -205,6 +208,10 @@ fn main() -> Status {
     FileSystem::scan_and_map_devices("DEVICELIST").unwrap();
 
     unsafe {
+        PAGEFILE.create_pagefile();
+    }
+
+    unsafe {
         HYPERVISOR = Some(HypervisorManager::new());
         if let Some(ref mut hv) = HYPERVISOR {
             match hv.initialize() {
@@ -213,11 +220,7 @@ fn main() -> Status {
             }
         }
     }
-    let page = vec![0u8; 134217728];
-    FileSystem::cd("/");
-    FileSystem::write_to_file_bytes("PAGEFILE", &*page, 'w');
-    // Header PAGE magic, header size, block size (00 10 is 4096 in hex LE), block count (32767) (FF 7F)
-    FileSystem::write_to_file_bytes_position("PAGEFILE", &[0x50, 0x41, 0x47, 0x45, 0x00, 0x10, 0x00, 0x10, 0xFF, 0x7F], 0x00);
+
 
     // 1. Get all handles
     let handles = boot::find_handles::<DevicePath>().unwrap();

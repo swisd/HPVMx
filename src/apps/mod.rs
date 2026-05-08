@@ -7,6 +7,7 @@
 //! an icon, and a version string.
 
 use alloc::boxed::Box;
+use alloc::string::ToString;
 use uefi::fs::IoErrorContext::CantDeleteFile;
 use crate::apps::appinstaller::AppInstallerApp;
 use crate::apps::simple_app::SimpleApp;
@@ -18,6 +19,7 @@ use crate::apps::snake::SnakeApp;
 use crate::apps::doom::DoomApp;
 use crate::apps::error::ErrorApp;
 use crate::apps::mc_app::MinecraftApp;
+use crate::apps::micro_ide::MicroIdeApp;
 use crate::apps::resource_tester::SysTestApp;
 use crate::env::Runnable;
 use crate::filesystem::FileSystem;
@@ -36,6 +38,7 @@ mod doom;
 pub mod doom_glue;
 mod resource_tester;
 mod mc_app;
+mod micro_ide;
 
 #[path = "./core/error.rs"]
 pub(crate) mod error;
@@ -56,11 +59,17 @@ pub(crate) static APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
         (Box::new(app), dims)
     }, icons::CLOCK_RED_32_ICON_DATA, "0.2.1"),
     ("Manual", || {
-        let book = FileSystem::read_file_to_string("/docs/man/manual.md").unwrap();
+        let book = FileSystem::read_file_to_string("/docs/man/manual.md")
+            .unwrap_or_else(|_| include_str!("../../doc/manual.md").to_string());
         let app = InstructionManualApp::new(&*book, 1200usize);
         let dims = crate::env::AppInfo::dimensions(&app);
         (Box::new(app), dims)
     }, icons::MANUAL_BOOK_32_ICON_DATA, "0.1.1"),
+    ("MicroIDE", || {
+        let app = MicroIdeApp::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::SCRIPT_YELLOW_32_ICON_DATA, "0.1.0"),
     // ("CH64", || {
     //     let app = CH64App{};
     //     let dims = crate::env::AppInfo::dimensions(&app);

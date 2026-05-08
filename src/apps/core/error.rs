@@ -35,6 +35,8 @@ impl Runnable for ErrorApp {
         if error.len() > 1 {
             graphics_entity.draw_text(x + 5, y + 48, error[1], 0xFFFFFF)
         }
+        graphics_entity.draw_rect_outline(x+30, y+160, 90, 20, 0xFFFFFF);
+        graphics_entity.draw_text(x+32, y+162, "[ESC] Close", 0xFFFFFF);
     }
 
     fn logic(&mut self, vars: &mut Vec<String>) {

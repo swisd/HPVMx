@@ -11,6 +11,7 @@ use crate::vmm::ghm::GlobalHardwareManager;
 use crate::vmm::partitioner::HardwarePartitioner;
 use crate::vmm::security::{DeepLevelSecurity, AutolyticProtocol};
 use crate::{hpvm_info, hpvm_error, hpvm_log};
+use crate::filesystem::FileSystem;
 use uefi::proto::console::text::Color;
 use uefi::mem::memory_map::MemoryMap;
 
@@ -305,6 +306,52 @@ impl HypervisorManager {
         hpvm_info!("Boot", "VM {} is now running from {}", vm_id, media_path);
 
         Ok(())
+    }
+
+    pub fn save_vm_metadata(&self, path: &str) -> Result<(), &'static str> {
+        let mut data = String::from("HPVMX_VMSTATE_V1\n");
+        for (id, vm) in &self.vms {
+            data.push_str(&format!(
+                "{},{},{},{},{}\n",
+                id,
+                vm.name,
+                vm.memory_mb,
+                vm.vcpu_count,
+                vm.state
+            ));
+        }
+
+        let _ = FileSystem::remove(path);
+        FileSystem::touch(path)?;
+        FileSystem::write_to_file(path, &data, 'w')?;
+        hpvm_info!("VMM", "saved {} VM definitions to {}", self.vms.len(), path);
+        Ok(())
+    }
+
+    pub fn restore_vm_metadata(&mut self, path: &str) -> Result<u32, &'static str> {
+        let data = FileSystem::read_file_to_string(path)?;
+        let mut restored = 0;
+
+        for line in data.lines().skip(1) {
+            let cols: Vec<&str> = line.split(',').collect();
+            if cols.len() < 5 {
+                continue;
+            }
+
+            let name = cols[1];
+            if self.vms.values().any(|vm| vm.name == name) {
+                continue;
+            }
+
+            let memory_mb = cols[2].parse::<u32>().unwrap_or(256);
+            let vcpu_count = cols[3].parse::<u32>().unwrap_or(1);
+            if self.create_vm(name, memory_mb, vcpu_count).is_ok() {
+                restored += 1;
+            }
+        }
+
+        hpvm_info!("VMM", "restored {} VM definitions from {}", restored, path);
+        Ok(restored)
     }
 }
 

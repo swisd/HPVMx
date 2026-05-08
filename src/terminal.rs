@@ -949,6 +949,8 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                                 2 => { let _ = hv.reset_vm(vm_id); }
                                 3 => { let _ = hv.zero_vm(vm_id); }
                                 4 => { let _ = hv.delete_vm(vm_id); }
+                                5 => { let _ = hv.save_vm_metadata("/VMSTATE"); }
+                                6 => { let _ = hv.restore_vm_metadata("/VMSTATE"); }
                                 _ => {}
                             }
                         }

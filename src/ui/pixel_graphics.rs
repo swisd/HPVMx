@@ -2,9 +2,13 @@ use uefi::proto::console::gop::GraphicsOutput;
 use uefi::boot;
 use core::ptr;
 use alloc::string::{String, ToString};
+use embedded_graphics::Pixel;
 use libm::{cos, floor, pow, sin, sqrt};
+use tinybmp::Bmp;
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
 use uefi::table::system_table_raw;
+use crate::filesystem::FileSystem;
+use embedded_graphics::pixelcolor::{Rgb888, RgbColor};
 
 pub struct TreeViewNode<'a> {
     pub label: &'a str,
@@ -874,6 +878,33 @@ impl PixelGraphics {
 
     }
 
+    pub fn draw_bmp(&mut self, x: usize, y: usize, path: String) {
+        FileSystem::cd("/");
+        let bmp_data = &FileSystem::read_file(&*path).unwrap();
+        let bmp: Bmp<Rgb888> = Bmp::from_slice(bmp_data).unwrap();
+        let pixels = Bmp::pixels(&bmp);
+        for Pixel(position, color) in bmp.pixels() {
+            let argb = ((255u32) << 24) |
+                ((color.r() as u32) << 16) |
+                ((color.g() as u32) << 8)  |
+                (color.b() as u32);
+            self.draw_pixel((x as i32 - position.x) as usize, (y as i32 - position.y) as usize, argb)
+        }
+    }
+
+    pub fn draw_bmp_bytes(&mut self, x: usize, y: usize, data: &[u8]) {
+        let bmp: Bmp<Rgb888> = Bmp::from_slice(data).unwrap();
+        let pixels = Bmp::pixels(&bmp);
+        for Pixel(position, color) in bmp.pixels() {
+            let argb = ((255u32) << 24) |
+                ((color.r() as u32) << 16) |
+                ((color.g() as u32) << 8)  |
+                (color.b() as u32);
+            self.draw_pixel((x as i32 - position.x) as usize, (y as i32 - position.y) as usize, argb)
+        }
+    }
+
+
 
 }
 
@@ -1085,10 +1116,6 @@ const SYMBOL_LIB: [[u8; 16]; 256] = {
     library[50] = [0x00, 0x00, 0x00, 0x00, 0x38, 0x44, 0x82, 0x82, 0x12, 0xA4, 0xC0, 0xE0, 0x00, 0x00, 0x00, 0x00];
     library
 };
-
-
-
-
 
 pub mod icons {
 
