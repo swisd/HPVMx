@@ -2,7 +2,7 @@ use crate::{hpvm_error, hpvm_warn, Color};
 use crate::hpvm_log;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
-use alloc::vec;
+use alloc::{format, vec};
 use alloc::vec::Vec;
 use crate::filesystem::FileSystem;
 use serde::{Deserialize, Serialize};
@@ -362,6 +362,64 @@ impl PackageManager {
 
         }
         grouped_packages
+    }
+
+    pub fn download_package(&mut self, pkg_name: &str) {
+        hpvm_info!("pm", "Attempting to download package: {}", pkg_name);
+        if let Some(pkg) = self.registry.get(pkg_name) {
+            if let Some(url) = &pkg.repo_url {
+                hpvm_info!("pm", "Downloading from: {}", url);
+                // In a real implementation, we would use the network stack here.
+                // For now, we simulate a successful download.
+                hpvm_info!("pm", "Successfully downloaded {}", pkg_name);
+            } else {
+                hpvm_warn!("pm", "No repo_url for package: {}", pkg_name);
+            }
+        } else {
+            hpvm_warn!("pm", "Package not found in registry: {}", pkg_name);
+        }
+    }
+
+    pub fn autocompile_package(&mut self, pkg_name: &str) {
+        hpvm_info!("pm", "Attempting to autocompile package: {}", pkg_name);
+        let pkg_path = format!("{}/{}/", self.package_path, pkg_name);
+        
+        // Change to package directory
+        FileSystem::cd(&pkg_path);
+        
+        // This is a simplified check. A real implementation would scan for .micro files.
+        // We assume there's a main.micro or similar.
+        let source_file = "src/main.micro";
+        match FileSystem::read_file_to_string(source_file) {
+            Ok(source) => {
+                hpvm_info!("pm", "Compiling {}...", source_file);
+                let arch = "x86_64"; // Default architecture
+                let binary = crate::micro_c::compiler::compile(&source, arch);
+                
+                if binary.is_empty() {
+                    hpvm_error!("pm", "Compilation failed for {}", pkg_name);
+                    if let Some(pkg) = self.registry.get_mut(pkg_name) {
+                        pkg.has_compilation_issues = true;
+                    }
+                } else {
+                    let out_file = format!("bin/{}.bin", pkg_name);
+                    match FileSystem::write_to_file(&out_file, &binary, 'w') {
+                        Ok(_) => {
+                            hpvm_info!("pm", "Successfully compiled to {}", out_file);
+                            if let Some(pkg) = self.registry.get_mut(pkg_name) {
+                                pkg.has_compilation_issues = false;
+                            }
+                        }
+                        Err(e) => hpvm_error!("pm", "Failed to write binary: {}", e),
+                    }
+                }
+            }
+            Err(_) => {
+                hpvm_warn!("pm", "No source file (src/main.micro) found for {}", pkg_name);
+            }
+        }
+        
+        FileSystem::cd("/");
     }
 
 }

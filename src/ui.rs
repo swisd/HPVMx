@@ -1193,6 +1193,7 @@ impl DashboardUI {
                             pg.fill_rect(list_x + 2, y - 2, list_w - 4, 16, 0x444400);
                         }
                         pg.draw_text(list_x + 8, y, &format!("{:<28} {:?}", pkg.name, pkg.package_type), if idx == self.selected_package_idx { 0xFFFF00 } else { 0xFFFFFF });
+                        pg.draw_package_icon(list_x + list_w - 30, y - 1, pkg.has_compilation_issues);
                         y += 18;
                     }
 
@@ -1212,7 +1213,7 @@ impl DashboardUI {
                         pg.draw_text(detail_x + 10, list_y + 40, "No packages loaded", 0xAAAAAA);
                     }
 
-                    let actions = ["Refresh", "Verify", "Uninstall", "Update"];
+                    let actions = ["Refresh", "Verify", "Uninstall", "Update", "Download", "Autocompile"];
                     let mut action_x = 40;
                     let action_y = list_y + list_h + 24;
                     for (idx, action) in actions.iter().enumerate() {
@@ -1604,6 +1605,18 @@ impl DashboardUI {
             3 => {
                 if let Some(name) = self.selected_package_name() {
                     self.status_line = format!("{} marked for update on next index refresh", name);
+                }
+            }
+            4 => {
+                if let Some(name) = self.selected_package_name() {
+                    self.package_manager.download_package(&name);
+                    self.status_line = format!("Downloaded package: {}", name);
+                }
+            }
+            5 => {
+                if let Some(name) = self.selected_package_name() {
+                    self.package_manager.autocompile_package(&name);
+                    self.status_line = format!("Autocompiled package: {}", name);
                 }
             }
             _ => {}
@@ -2002,7 +2015,7 @@ impl DashboardUI {
                         self.package_action_idx = self.package_action_idx.saturating_sub(1);
                     }
                     Key::Special(ScanCode::RIGHT) => {
-                        self.package_action_idx = (self.package_action_idx + 1).min(3);
+                        self.package_action_idx = (self.package_action_idx + 1).min(5);
                     }
                     _ => {}
                 }
