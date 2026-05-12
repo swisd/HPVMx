@@ -1,7 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Runnable};
+use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -50,7 +50,7 @@ impl AppInfo for SnakeApp {
 }
 
 impl Runnable for SnakeApp {
-    fn logic(&mut self, _vars: &mut Vec<String>) {
+    fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
         if self.game_over { return; }
 
         // Control the speed: only move every 5 frames (~12 FPS)

@@ -224,7 +224,7 @@ impl X86_64RawBackend {
 
                 for (i, arg) in args.iter().enumerate() {
                     if i >= arg_regs.len() {
-                        panic!("Too many call args");
+                        error("Too many call args");
                     }
 
                     let r = self.regs.alloc(arg);

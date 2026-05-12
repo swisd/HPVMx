@@ -1,7 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Runnable};
+use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 pub struct ErrorApp {
@@ -39,7 +39,7 @@ impl Runnable for ErrorApp {
         graphics_entity.draw_text(x+32, y+162, "[ESC] Close", 0xFFFFFF);
     }
 
-    fn logic(&mut self, vars: &mut Vec<String>) {
+    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
         //
     }
 

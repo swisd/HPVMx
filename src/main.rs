@@ -47,6 +47,7 @@ pub use crate::micro_c::codegen_ir;
 pub use crate::micro_c::ir;
 pub use crate::micro_c::regalloc;
 pub use crate::micro_c::stackframe;
+pub use crate::micro_c::fs;
 
 
 pub fn get_total_physical_memory_mb() -> u32 {

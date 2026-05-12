@@ -119,7 +119,7 @@ impl IRGenerator {
                 }
             }
 
-            _ => {}
+            _ => {error(&format!("{:#X} Stmt {:?}", self.position, stmt));}
         }
     }
 
@@ -171,7 +171,7 @@ impl IRGenerator {
                 out
             }
 
-            _ => {error(&format!("{:#X} {:?}", self.position, expr)); String::new()}
+            _ => {error(&format!("{:#X} Expr {:?}", self.position, expr)); String::new()}
         }
     }
 }

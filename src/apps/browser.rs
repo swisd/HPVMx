@@ -1,7 +1,7 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Runnable};
+use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 use crate::devices::net_stack;
 use crate::devices::net;
@@ -123,7 +123,7 @@ impl Runnable for BrowserApp {
         }
     }
 
-    fn logic(&mut self, _vars: &mut Vec<String>) {
+    fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
     }
 
     fn input(&mut self, key: Key) {

@@ -1,7 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Runnable};
+use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 use crate::message;
 
@@ -57,7 +57,7 @@ impl AppInfo for DoomApp {
 }
 
 impl Runnable for DoomApp {
-    fn logic(&mut self, _vars: &mut Vec<String>) {
+    fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
         // We call into the C-exported "doom_tick" function
         // unsafe {
         //     doomgeneric_tick();

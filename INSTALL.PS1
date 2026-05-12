@@ -6,7 +6,7 @@ echo "Running Build Script..."
 
 
 echo "Updating docs"
-cargo +nightly rustdoc -p HPVMx -- -Z unstable-options --document-private-items
+#cargo +nightly rustdoc -p HPVMx -- -Z unstable-options --document-private-items
 #cargo +nightly rustdoc -p HPVMx -- -Z unstable-options --output-format json --document-private-items
 #rustdoc-md --path ./target/doc/HPVMx.json --output hpvmx.md
 
@@ -37,8 +37,8 @@ $dpScript | diskpart
 echo "Copying Binary EFI"
 New-Item -Path "$($MOUNT_LETTER):\EFI\BOOT" -ItemType Directory -Force
 Copy-Item $EFI_PATH "$($MOUNT_LETTER):\EFI\BOOT\BOOTX64.EFI"
-#New-Item -Path "$($MOUNT_LETTER):\docs\man" -ItemType Directory -Force
-#Copy-Item "hpvmx.md" "$($MOUNT_LETTER):\docs\man\manual.md"
+New-Item -Path "$($MOUNT_LETTER):\docs\man" -ItemType Directory -Force
+Copy-Item "./doc/manual.md" "$($MOUNT_LETTER):\docs\man\manual.md"
 
 # 3. Detach
 echo "Detaching VHD $MOUNT_LETTER"

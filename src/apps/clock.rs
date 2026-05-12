@@ -2,7 +2,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use uefi::prelude::*;
 use uefi::runtime::Time;
-use crate::env::{AppInfo, Runnable};
+use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 use libm::{sin, cos};
 
@@ -65,6 +65,6 @@ impl Runnable for ClockApp {
         graphics.fill_rect((center_x - 2.0) as usize, (center_y - 2.0) as usize, 4, 4, 0xFFFFFF);
     }
 
-    fn logic(&mut self, _vars: &mut Vec<String>) {}
+    fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {}
     fn input(&mut self, _key: uefi::proto::console::text::Key) {}
 }

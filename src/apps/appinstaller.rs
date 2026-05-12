@@ -1,7 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Runnable};
+use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 pub struct AppInstallerApp {
@@ -31,7 +31,7 @@ impl Runnable for AppInstallerApp {
         graphics_entity.draw_text(x+10, y+10, "AppInstaller UI", 0xFF9955)
     }
 
-    fn logic(&mut self, vars: &mut Vec<String>) {
+    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
         //
     }
 

@@ -19,6 +19,7 @@ use crate::hpvmlog::LOGGING_SILENCED;
 use crate::ui::pixel_graphics::icons::ICON32;
 use crate::ui::pixel_graphics::PixelGraphics;
 
+
 pub type EnvironmentVariable = (String, String);
 
 static GLOBAL_ENV_READY: AtomicBool = AtomicBool::new(false);
@@ -71,8 +72,9 @@ pub struct Environment {
 
 }
 
+
 impl Environment {
-    fn new() -> Environment {
+    pub fn new() -> Environment {
         Environment {
             cd: ("".to_string(), "".to_string()),
             xd: ("".to_string(), "".to_string()),
@@ -110,11 +112,24 @@ pub struct Application {
     /// Entry point for JIT-compiled code, if applicable.
     pub jit_entry: Unknown<(String, u64)>,
     /// The local environment variables for this application.
-    pub local_env: Unknown<Environment>,
+    pub local_env: Environment,
     /// The actual application logic.
     pub inner: Box<dyn Runnable>,
     /// The preferred window dimensions (width, height).
     pub dimensions: (usize, usize),
+}
+
+pub struct Background {
+    /// The name of the application.
+    pub name: String,
+    /// The version string.
+    pub version: String,
+    /// Entry point for JIT-compiled code, if applicable.
+    pub jit_entry: Unknown<(String, u64)>,
+    /// The local environment variables for this application.
+    pub local_env: Unknown<Environment>,
+    /// The actual application logic.
+    pub inner: Box<dyn BackgroundTask>,
 }
 
 
@@ -125,7 +140,7 @@ pub trait Runnable {
     /// Renders the application to the provided `PixelGraphics` context.
     fn draw(&self, graphics_entity: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize); // Adjust types as needed
     /// Updates the application's internal state.
-    fn logic(&mut self, vars: &mut Vec<String>);
+    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment);
     /// Handles a single keyboard input event.
     fn input(&mut self, key: Key);
 }
@@ -133,10 +148,10 @@ pub trait Runnable {
 /// Represents a task that runs in the background.
 pub trait BackgroundTask {
     /// Performs a single tick of work.
-    /// 
+    /// Drawing and input are not required
     /// Returns `true` if the task is finished and can be removed, 
     /// or `false` if it needs more processing time.
-    fn tick(&mut self) -> bool;
+    fn tick(&mut self, vars: &mut Vec<String>, env: &mut Environment) -> bool;
 }
 
 /// Metadata and capability information about an application.
@@ -160,15 +175,30 @@ impl Application {
                 name: "application".to_string(),
                 version: "0.0.1".to_string(),
                 jit_entry: None,
-                local_env: None,
+                local_env: Environment::new(),
                 inner,
                 dimensions: (400, 300),
             }
         }
     pub fn dimensions(&self) -> [usize; 2] { [self.dimensions.0, self.dimensions.1] }
     pub fn draw(&self, graphics_entity: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) { self.inner.draw(graphics_entity, vars, x, y); }
-    pub fn logic(&mut self, vars: &mut Vec<String>) { self.inner.logic(vars); }
+    pub fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) { self.inner.logic(vars, env); }
     pub fn input(&mut self, key: Key) { self.inner.input(key); }
+}
+
+impl Background {
+    pub fn new(inner: Box<dyn BackgroundTask>) -> Self {
+        Background {
+            name: "background_task".to_string(),
+            version: "0.0.1".to_string(),
+            jit_entry: None,
+            local_env: None,
+            inner,
+        }
+    }
+    pub fn tick(&mut self, vars: &mut Vec<String>, env: &mut Environment) -> bool {
+        self.inner.tick(vars, env)
+    }
 }
 
 /// Local context for an app
@@ -198,6 +228,18 @@ pub struct SteppedApplicationContext {
     pub environment: Environment,
     pub exit_requested: bool,
 }
+
+pub enum AppOrBackground {
+    App(Application),
+    Background(Application),
+}
+
+pub struct BackgroundSteppedApplicationContext {
+    pub parent: Unknown<AppOrBackground>,
+    pub environment: Environment,
+    pub exit_requested: bool,
+}
+
 #[allow(deprecated)]
 impl ApplicationContext {
     pub fn new(app: Application, background_tasks: Unknown<Vec<Box<dyn BackgroundTask>>>) -> ApplicationContext {
@@ -212,69 +254,70 @@ impl ApplicationContext {
         }
     }
 
-    pub unsafe fn run(&mut self){
-        self.application.local_env = Some(self.environment.clone());
-        // more stuff
-        LOGGING_SILENCED = true;
+    // pub unsafe fn run(&mut self){
+    //     self.application.local_env = Some(self.environment.clone());
+    //     // more stuff
+    //     LOGGING_SILENCED = true;
+    //
+    //     let mut app_local_vars = Vec::new();
+    //     loop {
+    //         if self.exit_requested {
+    //             if let Some(mut pg) = PixelGraphics::new() {
+    //                 let mut pg = pg.with_backbuffer();
+    //                 let (width, height) = pg.resolution();
+    //                 pg.exit()
+    //             }
+    //             break
+    //         }
+    //
+    //         if let Some(tasks) = self.background_tasks.as_mut() {
+    //             tasks.retain_mut(|task| !task.tick());
+    //         }
+    //         /// Process chain: draw, logic, input
+    //         if let Some(mut pg) = PixelGraphics::new() {
+    //             let mut pg = pg.with_backbuffer();
+    //             let (width, height) = pg.resolution();
+    //
+    //             // Draw background
+    //             pg.clear(0x222222);
+    //             pg.app_context_border(&self.application.name);
+    //             self.application.draw(&mut pg, &app_local_vars, 200, 200); // UI only has read access to local vars
+    //
+    //             pg.flip();
+    //         }
+    //
+    //         self.application.logic(&mut app_local_vars); // App logic has RW access to local vars
+    //         let key = system::with_stdin(|i| {
+    //             match i.read_key() {
+    //                 Ok(Some(key)) => Some(key),
+    //                 _ => None,
+    //             }
+    //         });
+    //
+    //         if let Some(key) = key {
+    //             self.handle_input(key)
+    //         }
+    //
+    //     }
+    //     uefi::system::with_stdout(|stdout| {
+    //         // Reset() is the most effective way to tell UEFI "ignore previous pixels, start over"
+    //         let _ = stdout.reset(true);
+    //         let _ = stdout.clear();
+    //     });
+    //     LOGGING_SILENCED = false;
+    // }
+    // pub fn handle_input(&mut self, key: Key) {
+    //     use uefi::proto::console::text::ScanCode;
+    //     match key {
+    //         Key::Special(ScanCode::ESCAPE) => {
+    //             self.exit_requested = true;
+    //         }
+    //         _ => {
+    //             self.application.input(key);
+    //         }
+    //     }
+    // }
 
-        let mut app_local_vars = Vec::new();
-        loop {
-            if self.exit_requested {
-                if let Some(mut pg) = PixelGraphics::new() {
-                    let mut pg = pg.with_backbuffer();
-                    let (width, height) = pg.resolution();
-                    pg.exit()
-                }
-                break
-            }
-
-            if let Some(tasks) = self.background_tasks.as_mut() {
-                tasks.retain_mut(|task| !task.tick());
-            }
-            /// Process chain: draw, logic, input
-            if let Some(mut pg) = PixelGraphics::new() {
-                let mut pg = pg.with_backbuffer();
-                let (width, height) = pg.resolution();
-
-                // Draw background
-                pg.clear(0x222222);
-                pg.app_context_border(&self.application.name);
-                self.application.draw(&mut pg, &app_local_vars, 200, 200); // UI only has read access to local vars
-
-                pg.flip();
-            }
-
-            self.application.logic(&mut app_local_vars); // App logic has RW access to local vars
-            let key = system::with_stdin(|i| {
-                match i.read_key() {
-                    Ok(Some(key)) => Some(key),
-                    _ => None,
-                }
-            });
-
-            if let Some(key) = key {
-                self.handle_input(key)
-            }
-
-        }
-        uefi::system::with_stdout(|stdout| {
-            // Reset() is the most effective way to tell UEFI "ignore previous pixels, start over"
-            let _ = stdout.reset(true);
-            let _ = stdout.clear();
-        });
-        LOGGING_SILENCED = false;
-    }
-    pub fn handle_input(&mut self, key: Key) {
-        use uefi::proto::console::text::ScanCode;
-        match key {
-            Key::Special(ScanCode::ESCAPE) => {
-                self.exit_requested = true;
-            }
-            _ => {
-                self.application.input(key);
-            }
-        }
-    }
     pub fn from_name(name: &str) -> Option<ApplicationContext> {
         let registry_entry = crate::apps::APP_REGISTRY.iter()
             .find(|(app_id, _, _, _)| *app_id == name)?;
@@ -313,12 +356,12 @@ impl SteppedApplicationContext {
         }
 
         // 1. Update Environment
-        self.application.local_env = Some(self.environment.clone());
+        self.application.local_env = self.environment.clone();
 
         // 2. Run logic and draw
         // Note: You may want to pass a sub-region/viewport here later
         let mut app_local_vars = Vec::new();
-        self.application.logic(&mut app_local_vars);
+        self.application.logic(&mut app_local_vars, &mut self.environment);
         if let Some(pg) = PixelGraphics::new() {
             let mut pg = pg.with_backbuffer();
             self.application.draw(&mut pg, &mut app_local_vars, 200, 200);
@@ -342,6 +385,9 @@ impl SteppedApplicationContext {
         match key {
             Key::Special(ScanCode::ESCAPE) => {
                 self.exit_requested = true;
+            }
+            Key::Special(ScanCode::FUNCTION_2) => {
+                //
             }
             _ => {
                 self.application.input(key);
@@ -376,6 +422,8 @@ impl SteppedApplicationContext {
     }
 }
 
+impl BackgroundSteppedApplicationContext {
 
+}
 /// Alias of Option\<T\>
 pub type Unknown<T> = Option<T>;

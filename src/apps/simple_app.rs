@@ -1,7 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Runnable};
+use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 pub struct SimpleApp {
@@ -32,7 +32,7 @@ impl Runnable for SimpleApp {
         graphics_entity.draw_text(x+75, y+125, "[C] to chnage color", self.color[2])
     }
 
-    fn logic(&mut self, _vars: &mut Vec<String>) {
+    fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
         // Update app state
     }
 

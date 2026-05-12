@@ -108,7 +108,8 @@ pub struct DashboardUI {
     pub selected_settings_idx: usize,
     pub settings: UiSettings,
     pub status_line: String,
-
+    pub command_history: Vec<String>,
+    pub history_idx: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -303,6 +304,8 @@ impl DashboardUI {
                 security_policy: 0,
             },
             status_line: String::from("Ready"),
+            command_history: Vec::new(),
+            history_idx: None,
         }
     }
 
@@ -2141,12 +2144,13 @@ impl DashboardUI {
                                     }
 
                                     let body = command.split(" ").collect::<Vec<&str>>();
-                                    let body = command.split(" ").collect::<Vec<&str>>();
                                     if !command.is_empty() {
-                                        let command = command.split(" ").collect::<Vec<&str>>();
-                                        let parts = command.clone();
+                                        let command_parts = command.split(" ").collect::<Vec<&str>>();
+                                        let parts = command_parts.clone();
 
-                                        terminal::cmd(command, &parts, body, &mut self.package_manager);
+                                        terminal::cmd(command_parts, &parts, body, &mut self.package_manager);
+                                        self.command_history.push(command);
+                                        self.history_idx = None;
                                     } else {
                                         hpvm_warn!("dashboard", "empty command");
                                     }
@@ -2162,6 +2166,30 @@ impl DashboardUI {
                         if matches!(self.selected_tab, DashboardTab::Apps) {
                             self.active_apps.clear();
                             self.focused_process_idx = None;
+                        }
+                    }
+                    Key::Special(ScanCode::UP) => {
+                        if self.term_selected && !self.command_history.is_empty() {
+                            let new_idx = match self.history_idx {
+                                Some(idx) => idx.saturating_sub(1),
+                                None => self.command_history.len().saturating_sub(1),
+                            };
+                            self.history_idx = Some(new_idx);
+                            self.term_buf = self.command_history[new_idx].clone();
+                        }
+                    }
+                    Key::Special(ScanCode::DOWN) => {
+                        if self.term_selected {
+                            if let Some(idx) = self.history_idx {
+                                if idx + 1 < self.command_history.len() {
+                                    let new_idx = idx + 1;
+                                    self.history_idx = Some(new_idx);
+                                    self.term_buf = self.command_history[new_idx].clone();
+                                } else {
+                                    self.history_idx = None;
+                                    self.term_buf.clear();
+                                }
+                            }
                         }
                     }
                     Key::Special(ScanCode::END) => {

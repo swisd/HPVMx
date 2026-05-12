@@ -1,10 +1,12 @@
-
+static mut COMMAND_BUFFER_HIST: Vec<Vec<String>> = Vec::new();
 
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
+use core::ops::Deref;
+use core::ptr::addr_of_mut;
 use core::time::Duration;
 use elf::dynamic;
 use libm::{expm1, y0};
@@ -18,13 +20,21 @@ use crate::kernel::KernelLoader;
 use crate::rng::XorShiftRng;
 use crate::ui::DashboardUI;
 use uefi::proto::console::text::{Color, Key};
-use crate::env::{Application, /*ApplicationContext*/};
+use crate::env::{Application, Environment};
 use crate::pm::PackageManager;
 use crate::apps::simple_app::SimpleApp;
 use crate::hpvmlog::LOGGING_SILENCED;
 use crate::ui::pixel_graphics::PixelGraphics;
 
 pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manager: &mut PackageManager) {
+    unsafe {
+        let owned_command: Vec<String> = command
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        COMMAND_BUFFER_HIST.push(owned_command);
+    };
     match command.as_slice()[0] {
         "help" => {
             if parts.len() < 2 {
@@ -891,7 +901,9 @@ unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
         dashboard.active_apps.retain_mut(|ctx| {
             // Logic: Give the app CPU time
             let mut vars = Vec::new();
-            ctx.application.logic(&mut vars);
+            let mut env = Environment::new();
+            ctx.application.logic(&mut vars, &mut env);
+
 
             // Draw: Give the app a reference to the screen
             // Note: You can pass a 'Viewport' or 'Offset' here so

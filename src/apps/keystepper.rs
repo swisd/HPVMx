@@ -1,7 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Runnable};
+use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 pub struct CH64App {
@@ -30,7 +30,7 @@ impl Runnable for CH64App {
         graphics_entity.draw_u64_le_sym(x+ 5, y+ 5, 0x331cdbc25e55d768 , 0xFFFFFF);
     }
 
-    fn logic(&mut self, _vars: &mut Vec<String>) {
+    fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
         // Update app state
     }
 

@@ -3,7 +3,7 @@ use alloc::string::String;
 use libm::sqrt;
 use uefi::proto::console::text::Key;
 use uefi::prelude::*;
-use crate::env::{AppInfo, Runnable};
+use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 pub struct SysTestApp {
@@ -59,7 +59,7 @@ impl AppInfo for SysTestApp {
 }
 
 impl Runnable for SysTestApp {
-    fn logic(&mut self, _vars: &mut Vec<String>) {
+    fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
         match self.test_phase {
             1 => { // PHASE 1: Integer Stress (Sieve)
                 let mut local_primes = 0;

@@ -1,6 +1,13 @@
-import <FileSystem>
+#include <FileSystem>
+
+struct XML {
+    name: String,
+    schema: String,
+    data: String,
+    ir: i64,
+}
 
 fn compile_xml_ui(path) {
-    let data = FileSystem.read_to_string(path)
+    let data = FileSystem.read_to_string(path);
     // more needed
 }

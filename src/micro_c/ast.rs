@@ -23,6 +23,7 @@ pub enum Expr {
     Index(Box<Expr>, Box<Expr>),
 
     Field(Box<Expr>, String),
+    Include(String, String)
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +75,9 @@ pub enum Stmt {
         params: Vec<String>,
         body: Vec<Stmt>,
         export: bool,
+    },
+    Import {
+        name: String,
     },
     None
 }

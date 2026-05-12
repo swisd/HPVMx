@@ -109,7 +109,9 @@ pub struct Package {
     //pub keywords: Vec<String>,
     //pub readme: String,
     //pub requirements: Vec<String>,
-    pub package_type: PackageType
+    pub package_type: PackageType,
+    pub repo_url: Option<String>,
+    pub has_compilation_issues: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -378,6 +380,8 @@ impl Package {
             //readme: "".to_string(),
             //requirements: vec![],
             package_type: PackageType::Library,
+            repo_url: None,
+            has_compilation_issues: false,
         }
     }
 
@@ -402,6 +406,8 @@ impl Package {
                     _ => PackageType::Library,
                 };
             }
+            "repo_url" => self.repo_url = Some(clean_val.to_string()),
+            "has_compilation_issues" => self.has_compilation_issues = clean_val == "true",
             _ => {} // Ignore unknown keys
         }
     }

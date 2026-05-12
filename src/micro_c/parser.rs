@@ -1,9 +1,12 @@
 use alloc::boxed::Box;
 use alloc::{format, vec};
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::fmt::{Debug, Formatter};
+use core::iter::once;
 use crate::ast::*;
-use crate::error::error;
+use crate::error::{error};
+use crate::fs::open_file_or_lib;
 use crate::lexer::{Lexer, Token};
 
 pub struct Parser {
@@ -30,7 +33,8 @@ impl Parser {
         if self.current == t {
             self.advance();
         } else {
-            error(&format!("(@{:#X}), Expected {:?}, got {:?}\n {} {}\n ^", self.position, t, self.current, self.current, self.next));
+            let arrow = String::from_utf8(vec![b'^'; format!("{}", self.current).len()]).unwrap();
+            error(&format!("(@{:#X}), Expected {:?}, got {:?}\n {} {}\n {}", self.position, t, self.current, self.current, self.next, arrow));
             self.advance();
             return;
         }
@@ -460,7 +464,8 @@ impl Parser {
                             let field = match self.current.clone() {
                                 Token::Ident(s) => s,
                                 _ => {
-                                    error(&format!("(@{:#X}) Expected field name\n {} {}\n ^", self.position, self.current, self.next));
+                                    let arrow = String::from_utf8(vec![b'^'; format!("{}", self.current).len()]).unwrap();
+                                    error(&format!("(@{:#X}) Expected field name\n {} {}\n {}", self.position, self.current, self.next, arrow));
                                     self.advance();
                                     return Expr::Number(0)},
                             };
@@ -483,8 +488,19 @@ impl Parser {
                 expr
             }
 
+            Token::Include(p) => {
+                self.advance();
+                // todo: need to add function for library lookup/install
+                let file = open_file_or_lib(&*p);
+                self.lexer.input.extend(file.chars());
+                let path = p.clone();
+                let name: String = if p.contains('.') { p.split('.').last().unwrap().parse().unwrap() } else { p };
+                Expr::Include(path, name)
+            }
+
             _ => {
-                error(&format!("(@{:#X}) Unexpected token: {}\n {} {}\n ^", self.position, self.current, self.current, self.next));
+                let arrow = String::from_utf8(vec![b'^'; format!("{}", self.current).len()]).unwrap();
+                error(&format!("(@{:#X}) Unexpected token: {}\n {} {}\n {}", self.position, self.current, self.current, self.next, arrow));
                 self.advance();
                 Expr::Number(0)},
         }
