@@ -19,10 +19,11 @@ pub fn command(parts: &Vec<&str>, package_manager: &mut PackageManager) {
         }
 
         "verify" => {
-            if !parts.len() == 3 {
-                message!("\n", "usage: pm verify [package-name]");
+            if parts.len() != 3 {
+                message!("\n", "Usage: pm verify [package-name]");
+            } else {
+                package_manager.verify_dependencies(parts[2]);
             }
-            package_manager.verify_dependencies(parts[2]);
         }
 
         "version" => {

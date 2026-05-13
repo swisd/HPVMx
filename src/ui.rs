@@ -121,6 +121,9 @@ pub struct UiSettings {
     pub ring0_udmi_udxi: bool,
     pub controllang_support: bool,
     pub pg_vshaders: bool,
+    pub experimental_mem_comp: bool,
+    pub auto_refresh_storage: bool,
+    pub show_hidden_files: bool,
     pub general_profile: usize,
     pub boot_target: usize,
     pub interface_density: usize,
@@ -130,6 +133,8 @@ pub struct UiSettings {
     pub package_policy: usize,
     pub developer_level: usize,
     pub security_policy: usize,
+    pub ui_scaling: usize,
+    pub terminal_font: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -293,6 +298,9 @@ impl DashboardUI {
                 ring0_udmi_udxi: false,
                 controllang_support: false,
                 pg_vshaders: true,
+                experimental_mem_comp: false,
+                auto_refresh_storage: true,
+                show_hidden_files: false,
                 general_profile: 0,
                 boot_target: 0,
                 interface_density: 0,
@@ -302,6 +310,8 @@ impl DashboardUI {
                 package_policy: 0,
                 developer_level: 0,
                 security_policy: 0,
+                ui_scaling: 1, // 100%
+                terminal_font: 0,
             },
             status_line: String::from("Ready"),
             command_history: Vec::new(),
@@ -508,7 +518,7 @@ impl DashboardUI {
 
                     // Header background
                     pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
-                    pg.draw_text(table_x + 8, table_y + 4, "ID   NAME             STATE        CPU  MEM", 0xCCCCCC);
+                    pg.draw_text(table_x + 8, table_y + 4, "ID  NAME             STATE       CPU  MEM    UPTIME", 0xCCCCCC);
 
                     // Rows
                     let mut y = table_y + line_h + gutter;
@@ -519,10 +529,45 @@ impl DashboardUI {
                         if is_selected {
                             pg.fill_rect(table_x + 2, y - 2, table_w - 4, line_h, 0x444400);
                         }
-                        let info = alloc::format!("{:<4} {:<16} {:<12} {:>3}% {:>5}MB",
-                            vm.id, vm.name, vm.state, vm.cpu_usage, vm.memory_usage_mb);
+                        let uptime = if vm.uptime_seconds < 60 {
+                            alloc::format!("{}s", vm.uptime_seconds)
+                        } else if vm.uptime_seconds < 3600 {
+                            alloc::format!("{}m {}s", vm.uptime_seconds / 60, vm.uptime_seconds % 60)
+                        } else {
+                            alloc::format!("{}h {}m", vm.uptime_seconds / 3600, (vm.uptime_seconds % 3600) / 60)
+                        };
+                        let info = alloc::format!("{:<3} {:<16} {:<11} {:>3}% {:>5}MB  {:>10}",
+                            vm.id, vm.name, vm.state, vm.cpu_usage, vm.memory_usage_mb, uptime);
                         pg.draw_text(table_x + 8, y, &info, text_color);
                         y += line_h;
+                    }
+
+                    // VM Details / Properties Panel
+                    let props_x = table_x + table_w + gutter;
+                    let props_w = width.saturating_sub(props_x + margin);
+                    if props_w > 150 {
+                        let props_h = table_h;
+                        pg.draw_rect_outline(props_x, table_y, props_w, props_h, 0x888888);
+                        pg.draw_text_bg(props_x + 10, table_y - 4, "VM Properties", 0x00FF00, 0x222222);
+                        
+                        if let Some(vm) = self.vms.get(self.selected_vm_idx) {
+                            let mut py = table_y + 10;
+                            pg.draw_text(props_x + 10, py, &alloc::format!("Name: {}", vm.name), 0xFFFFFF);
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &alloc::format!("ID:   {}", vm.id), 0xCCCCCC);
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &alloc::format!("State: {}", vm.state), if vm.state.contains("Running") { 0x00FF00 } else { 0xFFFFFF });
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &alloc::format!("vCPUs: {}", vm.cpu_usage), 0xCCCCCC); // Actually usage, but good to show
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &alloc::format!("RAM:   {} MB", vm.memory_usage_mb), 0xCCCCCC);
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &alloc::format!("Disk:  {} MB", vm.disk_usage_mb), 0xCCCCCC);
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &alloc::format!("Uptime: {}s", vm.uptime_seconds), 0x888888);
+                        } else {
+                            pg.draw_text(props_x + 10, table_y + 10, "No VM selected", 0x888888);
+                        }
                     }
 
                     // VM Actions Bar
@@ -684,6 +729,15 @@ impl DashboardUI {
                     pg.draw_text(x, y, &alloc::format!("Target: {}", self.network_target), 0xCCCCCC);
                     y += 28;
 
+                    pg.draw_text(x, y, "Traffic Monitor (10s):", 0x00FFFF);
+                    y += 20;
+                    pg.draw_text(x, y, &alloc::format!("RX: {} KB/s", self.resources.net_rx_kbps), 0x00FF00);
+                    pg.draw_line_graph(x + 120, y - 10, 200, 40, &self.resources.net_rx_history, 1024, 0x00FF00, 60);
+                    y += 50;
+                    pg.draw_text(x, y, &alloc::format!("TX: {} KB/s", self.resources.net_tx_kbps), 0xFF0000);
+                    pg.draw_line_graph(x + 120, y - 10, 200, 40, &self.resources.net_tx_history, 1024, 0xFF0000, 60);
+                    y += 60;
+
                     let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off"];
                     let mut action_x = x;
                     for (idx, action) in actions.iter().enumerate() {
@@ -778,13 +832,129 @@ impl DashboardUI {
                             for dev in &cat.devices {
                                 let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xFFFFFF };
                                 pg.draw_icon(35, y - 2, 16, 16, if cat.name == "Network Adapters" {&pixel_graphics::icons::PCI_GREEN_ICON_DATA} else { &pixel_graphics::icons::PCI_BLUE_ICON_DATA });
-                                pg.draw_text(45, y, &alloc::format!(" {}: {}", dev.name, dev.path), color);
-                                y += 20;
+                                
+                                // Split path after third '/' for the list view as well
+                                let path = &dev.path;
+                                let mut slash_count = 0;
+                                let mut split_idx = None;
+                                for (i, c) in path.char_indices() {
+                                    if c == '/' {
+                                        slash_count += 1;
+                                        if slash_count == 3 {
+                                            split_idx = Some(i + 1);
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if let Some(idx) = split_idx {
+                                    pg.draw_text(45, y, &alloc::format!(" {}: {}", dev.name, &path[..idx]), color);
+                                    y += 18;
+                                    pg.draw_text(65, y, &path[idx..], 0x888888);
+                                    y += 22;
+                                } else {
+                                    pg.draw_text(45, y, &alloc::format!(" {}: {}", dev.name, dev.path), color);
+                                    y += 20;
+                                }
+
                                 current_idx += 1;
                                 if y > height - 60 { break; }
                             }
                         }
                         if y > height - 60 { break; }
+                    }
+
+                    // Device Details Panel
+                    let detail_x = width / 2;
+                    let detail_y = 130;
+                    let detail_w = (width / 2) - 20;
+                    let detail_h = height - 200;
+                    pg.draw_rect_outline(detail_x, detail_y, detail_w, detail_h, 0x888888);
+                    pg.draw_text_bg(detail_x + 10, detail_y - 4, "Device Properties", 0x00FF00, 0x222222);
+
+                    let mut current_search_idx = 0;
+                    let mut selected_device = None;
+                    for cat in &self.categories {
+                        if current_search_idx == self.selected_device_idx {
+                            // Category selected, not a device
+                            break;
+                        }
+                        current_search_idx += 1;
+                        if cat.expanded {
+                            for dev in &cat.devices {
+                                if current_search_idx == self.selected_device_idx {
+                                    selected_device = Some((dev, &cat.name));
+                                    break;
+                                }
+                                current_search_idx += 1;
+                            }
+                        }
+                        if selected_device.is_some() { break; }
+                    }
+
+                    if let Some((dev, cat_name)) = selected_device {
+                        let mut dy = detail_y + 10;
+                        pg.draw_text(detail_x + 10, dy, &alloc::format!("Name: {}", dev.name), 0xFFFFFF);
+                        dy += 20;
+                        pg.draw_text(detail_x + 10, dy, &alloc::format!("Category: {}", cat_name), 0xCCCCCC);
+                        dy += 20;
+                        pg.draw_text(detail_x + 10, dy, "UEFI Path:", 0xAAAAAA);
+                        dy += 15;
+                        
+                        // Shorten, wrap and indent path after the third '/'
+                        let path = &dev.path;
+                        let mut parts = alloc::vec::Vec::new();
+                        
+                        let mut slash_count = 0;
+                        let mut last_split = 0;
+                        for (i, c) in path.char_indices() {
+                            if c == '/' {
+                                slash_count += 1;
+                                if slash_count == 3 {
+                                    parts.push(&path[..i+1]);
+                                    last_split = i + 1;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if last_split > 0 {
+                            parts.push(&path[last_split..]);
+                        } else {
+                            parts.push(path);
+                        }
+
+                        let chunk_size = (detail_w - 30) / 8; // slightly smaller to account for indentation
+                        if chunk_size > 0 {
+                            for (i, part) in parts.iter().enumerate() {
+                                let indent = if i > 0 { 20 } else { 0 };
+                                let current_chunk_size = if i > 0 { chunk_size.saturating_sub(3) } else { chunk_size };
+                                
+                                if part.len() <= current_chunk_size {
+                                    pg.draw_text(detail_x + 10 + indent, dy, part, 0x888888);
+                                    dy += 15;
+                                } else {
+                                    for chunk in part.as_bytes().chunks(current_chunk_size) {
+                                        if let Ok(s) = core::str::from_utf8(chunk) {
+                                            pg.draw_text(detail_x + 10 + indent, dy, s, 0x888888);
+                                            dy += 15;
+                                        }
+                                        if dy > detail_y + detail_h - 20 { break; }
+                                    }
+                                }
+                                if dy > detail_y + detail_h - 20 { break; }
+                            }
+                        }
+
+                        dy += 20;
+                        if cat_name.contains("PCI") {
+                            pg.draw_text(detail_x + 10, dy, "PCI Information:", 0x00FFFF);
+                            dy += 20;
+                            // Attempt to extract Vendor/Device ID if present in path (e.g. Pci(0x1,0x0))
+                            pg.draw_text(detail_x + 10, dy, "Scanning for PCI Vendor/Device IDs...", 0x666666);
+                        }
+                    } else {
+                        pg.draw_text(detail_x + 10, detail_y + 10, "Select a device to view properties", 0x888888);
                     }
                 }
                 DashboardTab::Storage => {
@@ -1095,15 +1265,16 @@ impl DashboardUI {
                 }
                 DashboardTab::Settings => {
 
-                    pg.draw_text(5, page_y - 15, "Settings", 0x00FF00);
+                    pg.draw_text(10, page_y - 15, "SYSTEM SETTINGS", 0x00FF00);
 
 
                     let left_x = 10;
                     let left_y = page_y + 2;
-                    let left_w = (width/3)-10;
-                    let left_h = (height*2)/3;
-                    pg.draw_rect_outline(left_x, left_y, left_w, left_h, 0xFFFFFF);
-                    pg.draw_text(left_x + 10, left_y + 10, "Categories", 0xFFFFFF);
+                    let left_w = (width/3)-20;
+                    let left_h = height - left_y - 20;
+                    pg.draw_rect_outline(left_x, left_y, left_w, left_h, 0x444444);
+                    pg.fill_rect(left_x + 1, left_y + 1, left_w - 2, 28, 0x222222);
+                    pg.draw_text(left_x + 10, left_y + 8, "Categories", 0xAAAAAA);
 
                     let categories = [
                         ("General", "Runtime defaults and global behavior"),
@@ -1120,58 +1291,73 @@ impl DashboardUI {
 
                     let mut left_row_y = left_y + 38;
                     for (idx, (name, summary)) in categories.iter().enumerate() {
-                        if left_row_y + 30 > left_y + left_h - 8 { break; }
+                        if left_row_y + 35 > left_y + left_h - 8 { break; }
                         let selected = idx == self.selected_settings_category_idx;
                         if selected {
-                            pg.fill_rect(left_x + 6, left_row_y - 4, left_w - 12, 30, 0x334433);
-                            pg.draw_rect_outline(left_x + 6, left_row_y - 4, left_w - 12, 30, 0x00AA00);
+                            pg.fill_rect(left_x + 4, left_row_y - 4, left_w - 8, 32, 0x334433);
+                            pg.draw_rect_outline(left_x + 4, left_row_y - 4, left_w - 8, 32, 0x00AA00);
                         }
-                        pg.draw_text(left_x + 16, left_row_y, name, if selected { 0xFFFF00 } else { 0xFFFFFF });
-                        pg.draw_text(left_x + 16, left_row_y + 12, summary, 0x888888);
-                        left_row_y += 34;
+                        pg.draw_text(left_x + 12, left_row_y, name, if selected { 0xFFFF00 } else { 0xFFFFFF });
+                        pg.draw_text(left_x + 12, left_row_y + 14, summary, 0x666666);
+                        left_row_y += 38;
                     }
 
-                    pg.draw_rect_outline_adv((width/3) + 10, page_y + 2, (width/3) - 10, (height*2)/3, 0x777777, 1, 0x3FFFFF);
-                    let mut x = (width/3) + 20;
-                    let mut y = page_y + 10;
-
+                    let right_x = (width/3) + 5;
+                    let right_y = page_y + 2;
+                    let right_w = (width*2/3) - 15;
+                    let right_h = height - right_y - 20;
+                    
+                    pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x444444);
+                    pg.fill_rect(right_x + 1, right_y + 1, right_w - 2, 28, 0x222222);
 
                     let selected_category = categories
                         .get(self.selected_settings_category_idx)
                         .map(|(name, _)| *name)
                         .unwrap_or("General");
-                    pg.draw_text(x, y, selected_category, 0xFFFFFF);
-                    y += 25;
+                    pg.draw_text(right_x + 15, right_y + 8, selected_category, 0xFFFFFF);
+                    
+                    let mut x = right_x + 20;
+                    let mut y = right_y + 45;
 
                     let settings = self.settings_rows();
                     for (idx, (label, value, blocked, disabled)) in settings.iter().enumerate() {
                         if idx == self.selected_settings_idx {
-                            pg.fill_rect(x - 4, y - 2, 390, 18, 0x333333);
+                            pg.fill_rect(right_x + 5, y - 4, right_w - 10, 24, 0x333333);
                         }
+                        
+                        let label_color = if *disabled { 0x555555 } else if idx == self.selected_settings_idx { 0xFFFF00 } else { 0xDDDDDD };
+                        
                         if value.as_str() == "on" || value.as_str() == "off" {
                             pg.draw_checkbox(x, y, value.as_str() == "on", *blocked, *disabled, label);
                         } else {
-                            pg.draw_text(x, y, label, if *disabled { 0x777777 } else { 0xFFFFFF });
-                            pg.draw_text(x + 190, y, value, if *blocked { 0xFF7777 } else { 0x00FFFF });
+                            pg.draw_text(x, y, label, label_color);
+                            let val_color = if *blocked { 0xAA5555 } else { 0x00DCDC };
+                            pg.draw_text(right_x + (right_w/2), y, value, val_color);
                         }
-                        y += 20;
-                    }
-                    y += 20;
-                    pg.draw_text(x, y, "LEFT/RIGHT changes category, UP/DOWN selects, ENTER cycles/toggles", 0x888888);
-                    y += 20;
-                    pg.draw_text(x, y, &self.status_line, 0xFFFF00);
-                    y += 25;
-                    pg.draw_text(x, y, "Environment", 0xAAAAAA);
-                    y += 20;
-                    for (key, value) in crate::env::global_vars_snapshot().iter().rev().take(5) {
-                        pg.draw_text(x, y, &format!("{}={}", key, value), 0x888888);
-                        y += 16;
+                        y += 28;
                     }
 
+                    // Bottom info bar
+                    let info_y = right_y + right_h - 140;
+                    pg.draw_rect_outline(right_x + 10, info_y, right_w - 20, 100, 0x333333);
+                    
+                    pg.draw_text(right_x + 20, info_y + 10, "NAVIGATION", 0x888888);
+                    pg.draw_text(right_x + 20, info_y + 30, "UP/DOWN: Select setting   LEFT/RIGHT: Change category", 0x666666);
+                    pg.draw_text(right_x + 20, info_y + 50, "ENTER:   Toggle or cycle through options", 0x666666);
+                    
+                    if !self.status_line.is_empty() {
+                        pg.draw_text(right_x + 20, info_y + 75, &format!("STATUS: {}", self.status_line), 0x00AAAA);
+                    }
 
-
-
-
+                    if selected_category == "About" {
+                        let env_y = right_y + 180;
+                        pg.draw_text(right_x + 20, env_y, "ENVIRONMENT SNAPSHOT", 0xAAAAAA);
+                        let mut ey = env_y + 25;
+                        for (key, value) in crate::env::global_vars_snapshot().iter().rev().take(8) {
+                            pg.draw_text(right_x + 30, ey, &format!("{:<20} = {}", key, value), 0x777777);
+                            ey += 18;
+                        }
+                    }
                 }
                 DashboardTab::Packages => {
                     pg.draw_text(20, 100, "Packages", 0x00FF00);
@@ -1193,7 +1379,7 @@ impl DashboardUI {
                             pg.fill_rect(list_x + 2, y - 2, list_w - 4, 16, 0x444400);
                         }
                         pg.draw_text(list_x + 8, y, &format!("{:<28} {:?}", pkg.name, pkg.package_type), if idx == self.selected_package_idx { 0xFFFF00 } else { 0xFFFFFF });
-                        pg.draw_package_icon(list_x + list_w - 30, y - 1, pkg.has_compilation_issues);
+                        pg.draw_package_icon(list_x + list_w - 24, y - 1, true);
                         y += 18;
                     }
 
@@ -1526,6 +1712,7 @@ impl DashboardUI {
                 (String::from("HPVMX_PROFILE"), Self::option_value(&["balanced", "diagnostic", "performance"], self.settings.general_profile), false, false),
                 (String::from("Extra Debug Info"), if self.settings.extra_debug_info { "on" } else { "off" }.to_string(), false, false),
                 (String::from("HPVMX_USER"), String::from("operator"), false, false),
+                (String::from("Experimental Mem Comp"), if self.settings.experimental_mem_comp { "on" } else { "off" }.to_string(), false, false),
             ],
             1 => alloc::vec![
                 (String::from("HPVMX_BOOT_TARGET"), Self::option_value(&["dashboard", "shell", "last-vm"], self.settings.boot_target), false, false),
@@ -1534,6 +1721,7 @@ impl DashboardUI {
             ],
             2 => alloc::vec![
                 (String::from("HPVMX_UI_DENSITY"), Self::option_value(&["normal", "compact", "wide"], self.settings.interface_density), false, false),
+                (String::from("HPVMX_UI_SCALING"), Self::option_value(&["50%", "100%", "150%", "200%"], self.settings.ui_scaling), false, false),
                 (String::from("Extended Symbol Library"), if self.settings.extended_symbol_library { "on" } else { "off" }.to_string(), false, false),
                 (String::from("PG VShaders"), if self.settings.pg_vshaders { "on" } else { "off" }.to_string(), false, false),
             ],
@@ -1550,7 +1738,8 @@ impl DashboardUI {
             5 => alloc::vec![
                 (String::from("HPVMX_STORAGE_POLICY"), Self::option_value(&["preserve", "confirm-delete", "developer"], self.settings.storage_policy), false, false),
                 (String::from("Folder Absolute Sizes"), if self.settings.folder_absolute_sizes { "on" } else { "off" }.to_string(), false, false),
-                (String::from("HPVMX_CLIPBOARD"), String::from("path-only"), false, false),
+                (String::from("Auto-refresh Storage"), if self.settings.auto_refresh_storage { "on" } else { "off" }.to_string(), false, false),
+                (String::from("Show Hidden Files"), if self.settings.show_hidden_files { "on" } else { "off" }.to_string(), false, false),
             ],
             6 => alloc::vec![
                 (String::from("HPVMX_PM_VERIFY"), Self::option_value(&["standard", "quick", "full"], self.settings.package_policy), false, false),
@@ -1559,6 +1748,7 @@ impl DashboardUI {
             ],
             7 => alloc::vec![
                 (String::from("HPVMX_DEV_LEVEL"), Self::option_value(&["normal", "verbose", "toolchain"], self.settings.developer_level), false, false),
+                (String::from("Terminal Font"), Self::option_value(&["8x16", "dualscale (experimental)"], self.settings.terminal_font), false, false),
                 (String::from("ControlLang Support"), if self.settings.controllang_support { "on" } else { "off" }.to_string(), false, true),
                 (String::from("HPVMX_MICRO_C_TARGET"), String::from("x86_64"), false, false),
             ],
@@ -1571,6 +1761,7 @@ impl DashboardUI {
                 (String::from("HPVMX_VERSION"), env!("CARGO_PKG_VERSION").to_string(), false, true),
                 (String::from("HPVMX_BUILD"), String::from("dev"), false, true),
                 (String::from("HPVMX_ENV_COUNT"), format!("{}", crate::env::global_vars_snapshot().len()), false, true),
+                (String::from("UEFI_VERSION"), String::from("2.10"), false, true),
             ],
         }
     }
@@ -1663,11 +1854,13 @@ impl DashboardUI {
         match (self.selected_settings_category_idx, self.selected_settings_idx) {
             (0, 0) => cycle(&mut self.settings.general_profile, 3),
             (0, 1) => self.settings.extra_debug_info = !self.settings.extra_debug_info,
+            (0, 3) => self.settings.experimental_mem_comp = !self.settings.experimental_mem_comp,
             (1, 0) => cycle(&mut self.settings.boot_target, 3),
             (1, 1) => self.settings.state_save_restore = !self.settings.state_save_restore,
             (2, 0) => cycle(&mut self.settings.interface_density, 3),
-            (2, 1) => self.settings.extended_symbol_library = !self.settings.extended_symbol_library,
-            (2, 2) => self.settings.pg_vshaders = !self.settings.pg_vshaders,
+            (2, 1) => cycle(&mut self.settings.ui_scaling, 4),
+            (2, 2) => self.settings.extended_symbol_library = !self.settings.extended_symbol_library,
+            (2, 3) => self.settings.pg_vshaders = !self.settings.pg_vshaders,
             (3, 0) => cycle(&mut self.settings.vm_safety_policy, 3),
             (3, 1) => {
                 self.new_vm_memory_mb = match self.new_vm_memory_mb {
@@ -1690,9 +1883,12 @@ impl DashboardUI {
             }
             (5, 0) => cycle(&mut self.settings.storage_policy, 3),
             (5, 1) => self.settings.folder_absolute_sizes = !self.settings.folder_absolute_sizes,
+            (5, 2) => self.settings.auto_refresh_storage = !self.settings.auto_refresh_storage,
+            (5, 3) => self.settings.show_hidden_files = !self.settings.show_hidden_files,
             (6, 0) => cycle(&mut self.settings.package_policy, 3),
             (7, 0) => cycle(&mut self.settings.developer_level, 3),
-            (7, 1) => {
+            (7, 1) => cycle(&mut self.settings.terminal_font, 3),
+            (7, 2) => {
                 if !self.settings.controllang_support {
                     self.status_line = String::from("ControlLang support is disabled in this build");
                     self.publish_selected_setting();
@@ -2322,8 +2518,7 @@ impl DashboardUI {
                         '/' => {
                             match self.selected_tab {
                                 DashboardTab::Overview => unsafe {
-                                    let stat = crate::state::KernelState::new(0, 0x0);
-                                    crate::state::SAVE();
+                                    crate::state::SAVE(Some(self));
                                 }
                                 _ => {}
                             }

@@ -235,11 +235,6 @@ fn main() -> Status {
     let mouse_handles = boot::find_handles::<SimplePointer>().unwrap_or_default();
     hpvm_info!("mouse", "Now found {} pointer handles", mouse_handles.len());
 
-
-
-
-
-
     unsafe {
         init_mouse_deep_scan();
     }
@@ -257,18 +252,35 @@ fn main() -> Status {
     hpvm_info!("CPU", "tsc cyc/us {}", TSC_PER_US);
     let _ = boot::set_watchdog_timer(0, 0, None);
 
+
+
     hpvm_info!("HPVMx", "ready");
     hpvm_warn!("HPVMx", "within spinloop");
     //Graphics::get_graphics_info();
 
-    const icon_ascii: &str = "\n
+    const icon_ascii: &str = "\n\n
        __ _____ _   ____  ___
       / // / _ \\ | / /  |/  /_ __
      / _  / ___/ |/ / /|_/ /\\ \\ /
     /_//_/_/   |___/_/  /_//_\\_\\      \n\n";
 
     message!("", "{}", icon_ascii);
-    hpvm_info!("HPVMx", "HPVMx Shell v0.1.0");
+
+
+    // Check for onstart="dashboard" in \config.cfg
+    FileSystem::cd("/");
+    if let Ok(config_data) = FileSystem::read_file_to_string("config.cfg") {
+        if config_data.contains("onstart=\"dashboard\"") {
+            hpvm_info!("HPVMx", "Auto-starting dashboard from config.cfg");
+            unsafe {
+                terminal::show_dashboard_ui(&PACKAGE_MANAGER);
+            }
+        }
+    } else {
+        hpvm_warn!("autostart", "could not read config data");
+    }
+
+    hpvm_info!("HPVMx", "HPVMx Shell v1.3.2");
     hpvm_info!("HPVMx", "Type 'help' for commands.");
 
     let mut input_buffer = String::new();

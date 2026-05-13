@@ -38,11 +38,11 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
     match command.as_slice()[0] {
         "help" => {
             if parts.len() < 2 {
-                message!("\n", "commands sets available: \n\nhelp fs - FileSystem Help\nhelp vm - VM Help\nhelp hv - Hypervisor Help\nhelp net - Network Help\nhelp misc - Misc. Help\nhelp prog [command] - Command-Specific Help\n\n")
+                message!("\n", "commands sets available: \n\nhelp fs - FileSystem Help\nhelp vm - VM Help\nhelp hv - Hypervisor Help\nhelp net - Network Help\nhelp pm - Package Manager Help\nhelp micro-c - Micro-C Help\nhelp misc - Misc. Help\nhelp prog [command] - Command-Specific Help\n\n")
             } else {
                 match parts[1] {
                     "fs" => {
-                        message!("\n", "\nFileSystem:\n \n  clear - clear screen\n  ls - list files\n  cd [dir] - change directory*\n  pwd - print working directory\n  mkdir [dir] - make directory\n  touch [file] - create file\n  cpy [src] [dst] - copy file\n  mov [src] [dst] - move file\n  rm [file] - remove file\n  cat [file] - show file contents\n  clon [src] [dst] - clone directory\n  write [file] [data] [mode] - write to file\n")
+                        message!("\n", "\nFileSystem:\n \n  clear - clear screen\n  ls - list files\n  cd [dir] - change directory\n  pwd - print working directory\n  mkdir [dir] - make directory\n  touch [file] - create file\n  cpy [src] [dst] - copy file\n  mov [src] [dst] - move file\n  rm [file] - remove file\n  cat [file] - show file contents\n  clon [src] [dst] - clone directory\n  write [file] [data] [mode] - write to file\n")
                     }
                     "vm" => {
                         message!("\n", "\nVM Management:\n  vm create [name] [memory_mb] [vcpus] - create VM\n  vm list - list all VMs\n  vm start [vm_id] - start VM\n  vm stop [vm_id] - stop VM\n  vm delete [vm_id] - delete VM\n  vm boot [vm_id] [iso|efi|img] - boot VM with media\n  boot vm [vm_id] [iso|efi|img] - boot VM with media\n  console [vm_id] - attach to VM console\n")
@@ -51,10 +51,16 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                         message!("\n", "\nHypervisor:\n  vmm info - show hypervisor stats\n  vmm info-adv - show advanced stats\n\n")
                     }
                     "net" => {
-                        message!("\n", "\nNetworking:\n  net status - show NIC status (SNP)\n  net up - initialize NIC via UEFI SNP\n  ping [ip] - test reachability (placeholder)\n  lanscan [x.y.z.] - scan /24 network (placeholder)\n  httpd start [port] - start HTTP management server (placeholder)\n  httpd stop - stop HTTP server\n\n")
+                        message!("\n", "\nNetworking:\n  net status - show NIC status (SNP)\n  net up - initialize NIC via UEFI SNP\n  ping [ip] - test reachability\n  lanscan [x.y.z.] - scan /24 network\n  httpd start [port] - start HTTP management server\n  httpd stop - stop HTTP server\n\n")
+                    }
+                    "pm" => {
+                        message!("\n", "\nPackage Manager:\n  pm list - list all registered packages\n  pm reload - reload package registry from disk\n  pm verify [name] - verify package dependencies\n  pm version - show package manager version\n")
+                    }
+                    "micro-c" => {
+                        message!("\n", "\nMicro-C Toolchain:\n  micro-c compile [file.micro] - compile source to .asm\n")
                     }
                     "misc" => {
-                        message!("\n", "\n Misc\nOther:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel*\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\nrun-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard")
+                        message!("\n", "\n Misc / Other:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n")
                     }
                     "prog" => {
                         message!("\n", "no help for '{}' (yet)", parts[2])
@@ -338,7 +344,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                     FileSystem::write_to_file(&*newpath, &*data, 'w');
                 }
             } else {
-                message!("\n", "Usage micro-c [args]")
+                message!("\n", "Usage: micro-c compile [file.micro]")
             }
         }
 
@@ -736,8 +742,14 @@ fn run_efi_application(efi_path: &str, args: &[&str]) {
 
 #[allow(static_mut_refs)]
 /// Display the dashboard UI
-unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
+pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
     let mut dashboard = DashboardUI::new(package_manager.clone());
+    
+    // Attempt to restore state if available
+    unsafe {
+        crate::state::RESTORE(Some(&mut dashboard));
+    }
+
     LOGGING_SILENCED = true;
     dashboard.refresh_storage();
     dashboard.refresh_devices();

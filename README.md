@@ -1,62 +1,70 @@
 # HPVMx
 
-A bare-metal (+BIOS&EFI) hardware provisioning and virtualization manager written in rust.
+A bare-metal (+BIOS & EFI) hardware provisioning and virtualization manager written in Rust. HPVMx provides a complete environment for managing virtual machines, exploring storage, and developing software on bare metal.
 
+## Key Features
 
-It *might* run DOOM.
+- **Hypervisor Dashboard**: Full VM lifecycle management with save/restore capabilities.
+- **Storage Explorer**: Comprehensive file system management (create, rename, copy, move, delete).
+- **Network Stack**: SNP-based networking with ping, LAN scanning, and an integrated HTTP management listener.
+- **Package Manager**: Registry-based package management with dependency verification and updates.
+- **Micro-C Toolchain**: A built-in C-to-Assembly compiler and IDE (`MicroIDE`) for bare-metal development.
+- **Settings Registry**: Dynamic environment configuration through a structured settings UI.
 
-## Current Surface
+## Getting Started
 
-- Hypervisor dashboard with VM lifecycle controls and VM metadata save/restore.
-- Storage explorer with properties, create file/folder, rename, copy, move, and delete confirmation.
-- Network dashboard actions for SNP init, status, ping, LAN scan, and HTTP management listener.
-- Package manager UI for registry refresh, dependency verification, uninstall, and update marking.
-- Settings categories that publish runtime environment values such as `HPVMX_PROFILE`, `HPVMX_BOOT_TARGET`, and `HPVMX_NET_PROFILE`.
-- Micro-C developer toolchain app (`MicroIDE`) with source editing, architecture target selection, and assembly output.
+### Prerequisites
 
-## Running
+- Rust toolchain (nightly recommended)
+- QEMU (for emulation)
+- OVMF/UEFI firmware (included as `code.fd` and `vars.fd`)
 
-Build with Cargo, then boot the generated EFI payload in the project QEMU/UEFI environment.
+### Building and Running
 
-```powershell
-cargo build
-.\qemu-start.ps1
-```
+1. Build the project using Cargo:
+   ```powershell
+   cargo build
+   ```
 
-Inside HPVMx, run:
+2. Launch HPVMx in QEMU:
+   ```powershell
+   .\qemu-start.ps1
+   ```
 
+### First Steps
+
+Once HPVMx boots into the shell:
+- Type `help` to see available commands.
+- Type `dashboard` to enter the graphical management console.
+- Use `O, V, R, S, N, D, C, Z, P, A` keys to navigate dashboard tabs.
+
+## Developer Tools
+
+### Micro-C Compiler
+Compile C source files directly from the shell:
 ```text
-dashboard
+micro-c compile /path/to/source.micro
 ```
 
-## Micro-C
+### MicroIDE
+Launch `MicroIDE` from the **Apps** tab in the dashboard.
+- **F5**: Compile source
+- **F6**: Cycle target architecture (x86_64, win64, arm64)
+- **F7**: Clear output
+- **UP/DOWN**: Scroll source code
 
-The Micro-C compiler can be used from the shell:
+## Documentation
 
-```text
-micro-c compile /path/source.micro
-```
+- [Operator Manual](doc/manual.md): Detailed usage instructions for the dashboard and shell.
+- [Project Architecture](hpvmx.md): Deep dive into the internal design of HPVMx.
 
-Or launch `MicroIDE` from the Apps tab:
+## Gallery
 
-```text
-F5       compile source
-F6       cycle target architecture
-F7       clear output
-UP/DOWN  scroll source
-```
+![Hypervisor Dashboard](/doc/img/dash01.png)
+*VM Management Interface*
 
-See [doc/manual.md](doc/manual.md) for the in-system operator manual.
+![Terminal](/doc/img/term01.png)
+*Interactive Shell*
 
-![image](/src/hpvmx_image.png)
-
-![](/doc/img/term01.png)
-![](/doc/img/dash01.png)
-![](/doc/img/dash02.png)
-![](/doc/img/dash03.png)
-![](/doc/img/dash04.png)
-
-
-[//]: # (Theoretical Final Flowchart &#40;what the finished/mostly complete product will be like&#41;)
-
+[//]: # (Theoretical Final Flowchart)
 [//]: # (![]&#40;img_7.png&#41;)

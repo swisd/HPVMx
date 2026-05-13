@@ -58,15 +58,18 @@ pub unsafe fn get_log_buffer() -> &'static Option<Vec<LogEntry>> {
     }
 }
 
-impl Persistable for &'static Option<Vec<LogEntry>> {
+impl Persistable for Vec<LogEntry> {
     fn magic() -> u32 { 0x474F4C48 } // "HLOG" in hex
 
-    fn get_heap_bytes(&self) -> Vec<u8> {
+    fn serialize(&self) -> Vec<u8> {
         let mut data = Vec::new();
-        let size = size_of::<Option<Vec<LogEntry>>>();
-        let ptr = &self as *const _ as *const u8;
-        unsafe {
-            data.extend_from_slice(core::slice::from_raw_parts(ptr, size));
+        data.extend_from_slice(&(self.len() as u32).to_le_bytes());
+        for entry in self {
+            data.push(entry.level as u8);
+            data.extend_from_slice(&(entry.tag.len() as u32).to_le_bytes());
+            data.extend_from_slice(entry.tag.as_bytes());
+            data.extend_from_slice(&(entry.message.len() as u32).to_le_bytes());
+            data.extend_from_slice(entry.message.as_bytes());
         }
         data
     }

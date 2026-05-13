@@ -253,8 +253,9 @@ impl PackageManager {
     fn load_from_json(&mut self, json_data: &str) -> Result<(), &'static str> {
         // Deserialize using serde-json-core
         // The return type includes the number of bytes consumed
-        let (pkg, _): (Package, usize) = serde_json_core::from_str(json_data)
+        let (mut pkg, _): (Package, usize) = serde_json_core::from_str(json_data)
             .map_err(|_| "Failed to parse JSON")?;
+        pkg.has_compilation_issues = true;
 
         self.registry.insert(pkg.name.clone(), pkg);
         Ok(())
@@ -400,14 +401,17 @@ impl PackageManager {
                     hpvm_error!("pm", "Compilation failed for {}", pkg_name);
                     if let Some(pkg) = self.registry.get_mut(pkg_name) {
                         pkg.has_compilation_issues = true;
+                        hpvm_info!("pm", "Package status updated with compilation issues");
                     }
                 } else {
+
                     let out_file = format!("bin/{}.bin", pkg_name);
                     match FileSystem::write_to_file(&out_file, &binary, 'w') {
                         Ok(_) => {
                             hpvm_info!("pm", "Successfully compiled to {}", out_file);
                             if let Some(pkg) = self.registry.get_mut(pkg_name) {
-                                pkg.has_compilation_issues = false;
+                                //pkg.has_compilation_issues = false;
+                                pkg.has_compilation_issues = true;
                             }
                         }
                         Err(e) => hpvm_error!("pm", "Failed to write binary: {}", e),

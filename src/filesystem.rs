@@ -35,15 +35,29 @@ pub struct State {
 }
 
 
-impl Persistable for &mut State {
+impl Persistable for State {
     fn magic() -> u32 { 0x54535346 } // "FSST" in hex
 
-    fn get_heap_bytes(&self) -> Vec<u8> {
+    fn serialize(&self) -> Vec<u8> {
         let mut data = Vec::new();
-        let size = size_of::<State>();
-        let ptr = &self as *const _ as *const u8;
-        unsafe {
-            data.extend_from_slice(core::slice::from_raw_parts(ptr, size));
+        // Serialize cwd
+        data.extend_from_slice(&(self.cwd.len() as u32).to_le_bytes());
+        data.extend_from_slice(self.cwd.as_bytes());
+
+        // Serialize device_map
+        data.extend_from_slice(&(self.device_map.len() as u32).to_le_bytes());
+        for (k, v) in &self.device_map {
+            data.extend_from_slice(&(k.len() as u32).to_le_bytes());
+            data.extend_from_slice(k.as_bytes());
+            data.extend_from_slice(&(v.len() as u32).to_le_bytes());
+            data.extend_from_slice(v.as_bytes());
+        }
+
+        // Serialize drive_handles (only alias, handle cannot be easily persisted/restored)
+        data.extend_from_slice(&(self.drive_handles.len() as u32).to_le_bytes());
+        for (alias, _) in &self.drive_handles {
+            data.extend_from_slice(&(alias.len() as u32).to_le_bytes());
+            data.extend_from_slice(alias.as_bytes());
         }
         data
     }
@@ -86,6 +100,16 @@ impl FileSystem {
         let state = Self::get_state();
         state.root_handle = Some(handle.expect("Could not set root fs handle"));
     }
+}
+
+impl State {
+    pub fn set_cwd(&mut self, path: &str) {
+        self.cwd = path.to_string();
+    }
+}
+
+#[allow(dead_code)]
+impl FileSystem {
 
     /// Resolves path based on Aliases (dev0:), Root-relative (/), or CWD
     fn resolve_path(path: &str) -> String {
