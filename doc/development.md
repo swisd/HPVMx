@@ -17,13 +17,18 @@ Micro-C is the built-in language for HPVMx. It is a simplified subset of C with 
 
 ### Language Basics
 
-- **Variables**: Declared with `let`.
+- **Variables**: Declared with `let`. Supports basic types and pointers.
   ```c
   let x = 10;
   let p: ptr = alloc_struct(MyStruct);
   ```
-- **Functions**: Declared with `fn`. Use `fn main()` for the entry point.
+- **Functions**: Declared with `fn`. Use `export fn main()` for the entry point.
   ```c
+  export fn main() {
+      let z = add(10, 5);
+      return z;
+  }
+
   fn add(a, b) {
       return a + b;
   }
@@ -32,7 +37,11 @@ Micro-C is the built-in language for HPVMx. It is a simplified subset of C with 
   ```c
   loop {
       if (i == 10) {
-            break;
+          break;
+      }
+      if (i == 5) {
+          i = i + 1;
+          continue;
       }
       i = i + 1;
   }
@@ -44,12 +53,27 @@ Micro-C is the built-in language for HPVMx. It is a simplified subset of C with 
       y: i64;
   }
   ```
+- **Arrays**:
+  ```c
+  let arr = [1, 2, 3, 4, 5];
+  let val = arr[2];
+  arr[0] = 10;
+  ```
 
-### Built-in Functions
+### Memory and Pointers
 
-- `peek(address)`: Read a 64-bit value from a memory address.
-- `poke(address, value)`: Write a 64-bit value to a memory address.
-- `alloc_struct(StructName)`: Allocate memory for a structure.
+Micro-C allows direct memory manipulation:
+
+- `peek(address)`: Read a 64-bit value from a memory address (Expression).
+- `poke(address, value)`: Write a 64-bit value to a memory address (Statement).
+- `alloc_struct(StructName)`: Allocate memory for a structure. Returns a `ptr`.
+
+### Modularity
+
+Micro-C supports basic modularity:
+
+- `#include <file.micro>`: Include another source file.
+- `#export name.*`: Export symbols for use by other modules.
 
 ### Compilation
 
@@ -94,6 +118,31 @@ impl Runnable for MyApp {
 }
 ```
 
+### PixelGraphics API
+
+The `PixelGraphics` entity provided in the `draw` method offers various primitives:
+
+#### Basic Drawing
+- `draw_pixel(x, y, color)`: Draw a single pixel.
+- `fill_rect(x, y, w, h, color)`: Fill a rectangular area.
+- `draw_rect_outline(x, y, w, h, color)`: Draw a rectangle border.
+- `draw_line(x1, y1, x2, y2, color)`: Draw a line.
+
+#### Text and UI
+- `draw_text(x, y, text, color)`: Render text.
+- `draw_text_adv(x, y, text, color, scale)`: Render scaled text.
+- `draw_button(x, y, w, h, text, is_focused)`: Draw a standard UI button.
+- `draw_checkbox(x, y, checked, blocked, disabled, text)`: Draw a checkbox.
+- `draw_progress_bar(x, y, w, h, value, max, color)`: Draw a progress bar.
+
+#### Advanced
+- `draw_icon(x, y, w, h, data)`: Render raw pixel data (e.g., icons).
+- `draw_bmp(x, y, path)`: Load and draw a BMP file from storage.
+- `apply_glitch()`: Apply a visual glitch effect to the buffer.
+- `apply_scanlines()`: Apply a CRT-style scanline effect.
+
+### App Registration
+
 Register your app in `src/apps/mod.rs` to make it appear in the Dashboard.
 
 Sample Registration:
@@ -114,27 +163,35 @@ HPVMx uses a registry-based package manager located in `/packages`.
 
 ### Package Registry (`registry.json`)
 
-Packages are defined by their type and metadata:
-- **Library**: Shared code.
-- **Executable**: Compiled binaries or scripts.
-- **Driver**: Hardware interfaces.
-- **Extension**: Dashboard enhancements.
+Packages are defined by their type and metadata in a JSON registry.
+
+#### Package Types
+- **Library**: Shared code used by other packages.
+- **Executable**: Compiled binaries, scripts, or apps.
+- **Extension**: Dashboard enhancements or shell extensions.
+- **Driver**: Low-level hardware interfaces.
+- **ResourcePack**: Assets like icons, fonts, or localized text.
+- **PShader**: Programmable visual effects or shaders.
 
 Example entry:
 ```json
 {
-  "name": "test-pkg",
-  "version": "1.0.0",
+  "name": "network-util",
+  "version": "1.2.0",
   "type": "Executable",
-  "dependencies": ["core-lib"]
+  "author": "HPVMx Team",
+  "deps": ["core-lib", "net-lib"],
+  "entry_point": "/bin/netutil.asm",
+  "description": "Advanced network diagnostic tools."
 }
 ```
 
 ### Management Commands
 
-- `pm list`: List all registered packages.
-- `pm reload`: Refresh registry from disk.
-- `pm verify [name]`: Check if dependencies are met.
+- `pm list`: List all registered packages and their types.
+- `pm reload`: Refresh the registry from `/packages/registry.json`.
+- `pm verify [name]`: Perform a dependency check for the specified package.
+- `pm version`: Show the current version of the Package Manager.
 
 ---
 
