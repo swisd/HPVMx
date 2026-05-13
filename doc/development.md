@@ -84,6 +84,8 @@ micro-c compile /path/to/source.micro
 This generates a `.asm` file. You can also use **MicroIDE** from the Dashboard (**Apps** tab) for an interactive experience.
 
 ---
+> You can find advanced techniqes at the [Micro-C Repository](https://github.com/swisd/Micro-C)
+---
 
 ## 2. Native Rust Applications
 
