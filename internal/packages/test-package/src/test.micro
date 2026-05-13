@@ -27,7 +27,7 @@ fn mul(a, b) {
 /*
     sum an array of size n
 */
-fn sum_array(ptr, n) {
+fn sum_array(point, n) {
     let i = 0;
     let total = 0;
 
@@ -36,7 +36,7 @@ fn sum_array(ptr, n) {
             break;
         }
 
-        total = total + ptr[i];
+        total = total + point[i];
         i = i + 1;
     }
 

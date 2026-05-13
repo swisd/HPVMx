@@ -21,9 +21,14 @@ A bare-metal (+BIOS & EFI) hardware provisioning and virtualization manager writ
 
 ### Building and Running
 
+0. Navigate to project directory
+   ```powershell
+   cd /path/to/HPVMx/
+   ```
+
 1. Build the project using Cargo:
    ```powershell
-   cargo build
+   .\install.ps1
    ```
 
 2. Launch HPVMx in QEMU:
@@ -56,6 +61,7 @@ Launch `MicroIDE` from the **Apps** tab in the dashboard.
 ## Documentation
 
 - [Operator Manual](doc/manual.md): Detailed usage instructions for the dashboard and shell.
+- [Development Manual](doc/development.md): Guide for creating apps and extensions for HPVMx.
 - [Project Architecture](hpvmx.md): Deep dive into the internal design of HPVMx.
 
 ## Gallery

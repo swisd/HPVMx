@@ -90,3 +90,8 @@ This generates a corresponding `.asm` file in the same directory.
 - **No Network**: Ensure `net up` has been run and a compatible NIC is detected.
 - **VM Fails to Start**: Check available memory in the **Resources** tab.
 - **File System Errors**: Use `help fs` in the shell to verify correct command syntax.
+
+## Further Reading
+
+- [Development Manual](development.md): Learn how to build your own apps and tools for HPVMx.
+- [Project Architecture](../hpvmx.md): Detailed internal documentation.
