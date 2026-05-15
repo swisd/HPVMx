@@ -21,12 +21,19 @@ A bare-metal (+BIOS & EFI) hardware provisioning and virtualization manager writ
 
 ### Building and Running
 
+
+#### Virtual Hardware
 0. Navigate to project directory
    ```powershell
    cd /path/to/HPVMx/
    ```
 
-1. Build the project using Cargo:
+1. Create A VHD:
+   1. Use Disk management to create a VHD of size `256MB`, labeled boot.vhd and placed in the project directory.
+   2. Create a new volume on the entire size of the disk, formatted in `FAT32`, and label it with drive letter `X:`
+
+
+2. Build the project using Cargo:
    ```powershell
    .\install.ps1
    ```
@@ -35,6 +42,28 @@ A bare-metal (+BIOS & EFI) hardware provisioning and virtualization manager writ
    ```powershell
    .\qemu-start.ps1
    ```
+   
+2. Using another hypervisor
+   - For virtualbox, add the vhd as the only drive in the storage section, and enable uefi.
+
+#### Physical Hardware
+0. Format a USB drive (>256MB) with FAT32, and label the volume X: in Disk Management if not already.
+
+0. Navigate to project directory
+   ```powershell
+   cd /path/to/HPVMx/
+   ```
+
+2. Build the project using Cargo:
+   ```powershell
+   .\install-phy.ps1
+   ```
+   
+3. On Target Device: 
+   - Disable Secure Boot
+   - Set USB to top of boot order
+   - Insert USB
+   - Start/Restart Computer
 
 ### First Steps
 
@@ -66,11 +95,23 @@ Launch `MicroIDE` from the **Apps** tab in the dashboard.
 
 ## Gallery
 
-![Hypervisor Dashboard](/doc/img/dash01.png)
-*VM Management Interface*
+![Storage-Old](/doc/img/dash01.png)
+*Storage Interface* **(OLD)[0.9.13]**
 
 ![Terminal](/doc/img/term01.png)
-*Interactive Shell*
+*Interactive Shell* **[1.3.12]**
+
+![Terminal](/doc/img/img.png)
+*Resource Monitor* **[1.9.8]**
+
+![Terminal](/doc/img/img_1.png)
+*Storage UI* **[1.9.8]**
+
+![Terminal](/doc/img/img_2.png)
+*Network UI* **[1.9.8]**
+
+![Terminal](/doc/img/img_3.png)
+*Package UI* **[1.9.8]**
 
 [//]: # (Theoretical Final Flowchart)
 [//]: # (![]&#40;img_7.png&#41;)
