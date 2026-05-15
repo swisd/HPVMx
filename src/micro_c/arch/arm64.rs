@@ -1,9 +1,14 @@
+//! ARM64 (AArch64) backend.
+//!
+//! This backend generates basic AArch64 assembly.
+
 use alloc::{format, vec};
 use alloc::string::String;
 use crate::ir::IRInst;
 use crate::regalloc::RegisterAllocator;
 use crate::arch::Architecture;
 
+/// Backend for generating ARM64 assembly.
 pub struct ARM64Backend {
     regs: RegisterAllocator,
 }

@@ -37,6 +37,7 @@ mod apps;
 mod input;
 mod page;
 mod modules;
+mod c_stems;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;

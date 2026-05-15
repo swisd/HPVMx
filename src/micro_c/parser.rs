@@ -1,3 +1,8 @@
+//! Parser for the Micro-C language.
+//!
+//! This module contains a recursive descent [`Parser`] that converts
+//! a stream of tokens into an Abstract Syntax Tree (AST).
+
 use alloc::boxed::Box;
 use alloc::{format, vec};
 use alloc::string::{String, ToString};
@@ -9,6 +14,7 @@ use crate::error::{error};
 use crate::fs::open_file_or_lib;
 use crate::lexer::{Lexer, Token};
 
+/// Recursive descent parser state.
 pub struct Parser {
     lexer: Lexer,
     current: Token,
@@ -18,6 +24,7 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// Creates a new Parser from the given Lexer.
     pub fn new(mut lexer: Lexer) -> Self {
         let current = lexer.next_token();
         let next = lexer.next_token();
@@ -40,6 +47,7 @@ impl Parser {
         }
     }
 
+    /// Parses the entire program into a list of statements.
     pub fn parse_program(&mut self) -> Vec<Stmt> {
         let mut stmts = vec![];
 

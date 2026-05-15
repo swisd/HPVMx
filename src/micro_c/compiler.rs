@@ -1,3 +1,8 @@
+//! Top-level compiler interface.
+//!
+//! This module provides the high-level [`compile`] function which orchestrates
+//! the entire compilation pipeline from source code to assembly.
+
 use alloc::string::{String, ToString};
 use crate::arch::Architecture;
 use crate::arch::win64::WIN64Backend;
@@ -8,6 +13,11 @@ use crate::error::error;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 
+/// Compiles the given Micro-C source code for the specified architecture.
+///
+/// Supported architectures: "win64", "arm64", "x86_64".
+///
+/// Returns the generated assembly code as a String.
 pub fn compile(source: &str, arch: &str) -> String {
     let lexer = Lexer::new(source);
     let mut parser = Parser::new(lexer);

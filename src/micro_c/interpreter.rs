@@ -1,3 +1,9 @@
+//! AST interpreter for Micro-C.
+//!
+//! This module provides an interpreter that can execute Micro-C programs
+//! directly from their Abstract Syntax Tree (AST), useful for testing and
+//! constant folding.
+
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
@@ -13,6 +19,7 @@ enum Control {
     Continue,
 }
 
+/// State for the Micro-C AST interpreter.
 pub struct Interpreter {
     scopes: Vec<HashMap<String, i64>>,
     types: HashMap<String, Type>,
@@ -23,6 +30,7 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
+    /// Creates a new Interpreter with a clean state.
     pub fn new() -> Self {
         Self {
             scopes: vec![HashMap::new()],
@@ -300,6 +308,7 @@ impl Interpreter {
         }
     }
 
+    /// Executes a list of statements and returns the exit code of the `main` function.
     pub fn run(&mut self, stmts: &[Stmt]) -> i64 {
         for s in stmts {
             match s {

@@ -914,6 +914,93 @@ impl PixelGraphics {
         }
     }
 
+    pub fn draw_heatmap(&mut self, x: usize, y: usize, width: usize, height: usize, rows: usize, cols: usize, data: &[f32]) {
+        let cell_w = width / cols;
+        let cell_h = height / rows;
+
+        for r in 0..rows {
+            for c in 0..cols {
+                let val = data[r * cols + c];
+                // Color mapping: Blue (0.0) -> Green (0.5) -> Red (1.0)
+                let color = if val < 0.5 {
+                    let intensity = (val * 2.0 * 255.0) as u32;
+                    ((255 - intensity) << 0) | (intensity << 8) // Blue to Green
+                } else {
+                    let intensity = ((val - 0.5) * 2.0 * 255.0) as u32;
+                    ((255 - intensity) << 8) | (intensity << 16) // Green to Red
+                };
+                self.fill_rect(x + c * cell_w, y + r * cell_h, cell_w - 1, cell_h - 1, color);
+            }
+        }
+    }
+
+    pub fn draw_log_viewer(&mut self, x: usize, y: usize, width: usize, height: usize, logs: &[(uefi::proto::console::text::Color, String, String)]) {
+        self.fill_rect(x, y, width, height, 0x1A1A1A);
+        self.draw_rect_outline(x, y, width, height, 0x444444);
+
+        let line_h = 16;
+        let max_lines = (height - 10) / line_h;
+        
+        // First, flatten logs into individual lines to handle newlines correctly
+        let mut display_lines = alloc::vec::Vec::new();
+        for (level, tag, msg) in logs {
+            let color = match level {
+                uefi::proto::console::text::Color::Red => 0xFF5555,
+                uefi::proto::console::text::Color::Yellow => 0xFFFF55,
+                uefi::proto::console::text::Color::LightCyan => 0x55FFFF,
+                _ => 0xBBBBBB,
+            };
+            
+            let full_msg = if tag.is_empty() {
+                msg.clone()
+            } else {
+                alloc::format!("[{}] {}", tag, msg)
+            };
+
+            for section in full_msg.split('\n') {
+                display_lines.push((color, section.to_string()));
+            }
+        }
+
+        let start_idx = display_lines.len().saturating_sub(max_lines);
+        for (i, (color, line)) in display_lines.iter().skip(start_idx).enumerate() {
+            self.draw_text(x + 5, y + 5 + i * line_h, line, *color);
+        }
+    }
+
+    pub fn draw_toast(&mut self, text: &str, duration_frames: &mut usize, yadj: usize) {
+        if *duration_frames > 0 {
+            let x = self.width - 250;
+            let y = 30 + yadj;
+            self.fill_rect(x, y, 240, 40, 0x333333);
+            self.draw_rect_outline(x, y, 240, 40, 0x00FF00);
+            self.draw_text(x + 10, y + 12, text, 0xFFFFFF);
+            *duration_frames -= 1;
+        }
+    }
+
+    pub fn draw_command_palette(&mut self, query: &str, results: &[&str], selected: usize) {
+        let w = 400;
+        let h = 200;
+        let x = (self.width - w) / 2;
+        let y = 100;
+
+        self.fill_rect(x, y, w, h, 0x222222);
+        self.draw_rect_outline(x, y, w, h, 0x5555FF);
+
+        self.draw_text(x + 10, y + 10, ">", 0x5555FF);
+        self.draw_text(x + 30, y + 10, query, 0xFFFFFF);
+        self.draw_line(x + 10, y + 30, x + w - 10, y + 30, 0x444444);
+
+        for (i, res) in results.iter().enumerate() {
+            let color = if i == selected { 0xFFFF00 } else { 0xAAAAAA };
+            if i == selected {
+                self.fill_rect(x + 5, y + 40 + i * 20, w - 10, 18, 0x444444);
+            }
+            self.draw_text(x + 15, y + 42 + i * 20, res, color);
+        }
+    }
+
 
 
 }

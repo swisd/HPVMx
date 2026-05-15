@@ -1,12 +1,18 @@
+//! Stack frame management for code generation.
+//!
+//! This module helps backends track local variable offsets on the stack.
+
 use alloc::string::{String, ToString};
 use hashbrown::HashMap;
 
+/// Represents the layout of a function's stack frame.
 pub struct StackFrame {
     pub(crate) offsets: HashMap<String, i32>,
     next_offset: i32,
 }
 
 impl StackFrame {
+    /// Creates a new, empty stack frame.
     pub fn new() -> Self {
         Self {
             offsets: HashMap::new(),

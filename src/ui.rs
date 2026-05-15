@@ -110,6 +110,12 @@ pub struct DashboardUI {
     pub status_line: String,
     pub command_history: Vec<String>,
     pub history_idx: Option<usize>,
+
+    // New functional UI features
+    pub notifications: Vec<(String, usize)>, // (message, duration_frames)
+    pub command_palette_active: bool,
+    pub command_palette_query: String,
+    pub command_palette_selected: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -135,6 +141,10 @@ pub struct UiSettings {
     pub security_policy: usize,
     pub ui_scaling: usize,
     pub terminal_font: usize,
+    pub pg_scanlines: bool,
+    pub pg_dither: bool,
+    pub pg_glitch: bool,
+    pub pg_aberration: usize, // 0: off, 1: low, 2: mid, 3: high
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -312,10 +322,18 @@ impl DashboardUI {
                 security_policy: 0,
                 ui_scaling: 1, // 100%
                 terminal_font: 0,
+                pg_scanlines: false,
+                pg_dither: false,
+                pg_glitch: false,
+                pg_aberration: 0,
             },
             status_line: String::from("Ready"),
             command_history: Vec::new(),
             history_idx: None,
+            notifications: Vec::new(),
+            command_palette_active: false,
+            command_palette_query: String::new(),
+            command_palette_selected: 0,
         }
     }
 
@@ -688,6 +706,15 @@ impl DashboardUI {
                     pg.draw_text_bg(right_x + 10, right_y + 400, "Frame MS History:", 0xFFFFFF, 0x222222);
                     pg.draw_line_graph(right_x + 10, right_y + 400, right_w - 20, 80, &self.resources.ft_ms_history, 750, 0xFFAAFF, 60);
 
+                    // Heatmap for CPU Core usage
+                    let hm_y = right_y + 500;
+                    pg.draw_text(right_x + 10, hm_y, "CPU Heatmap (Real-time Core Stress):", 0xFFFFFF);
+                    let mut hm_data = [0.0f32; 16];
+                    for i in 0..core::cmp::min(self.resources.cpu_core_usage.len(), 16) {
+                        hm_data[i] = self.resources.cpu_core_usage[i] as f32 / 100.0;
+                    }
+                    pg.draw_heatmap(right_x + 10, hm_y + 20, right_w - 20, 80, 4, 4, &hm_data);
+
                     // draw u64 le text for all stats
 
                 }
@@ -756,57 +783,12 @@ impl DashboardUI {
 
                 }
                 DashboardTab::Console => {
-                    pg.draw_text(20, 100, "System Log", 0x00FF00);
-                    pg.draw_rect_outline(margin, 130, width - margin * 2, height - 135 - margin * 6, 0x888888);
-                    
-                    let mut y = 140;
+                    pg.draw_text(20, 100, "Hypervisor Real-time Log", 0x00FF00);
                     let logs = crate::hpvmlog::get_logs();
-
-
-                    let max_y = height - (margin * 6) - 20; // Bottom boundary
-                    let available_height = max_y - 140;     // Space between start y (140) and boundary
-                    let mut total_lines_needed = 0;
-                    let mut start_idx = logs.len();
-
-                    // Iterate backwards to find how many logs (and their newlines) actually fit
-                    for i in (0..logs.len()).rev() {
-                        let (_, tag, msg) = &logs[i];
-                        // Count 1 line + any additional newlines in the message
-                        let lines_in_this_log = if tag.is_empty() {
-                            msg.split('\n').count()
-                        } else {
-                            // Tagged logs usually follow "[tag] msg" format
-                            alloc::format!("[{}] {}", tag, msg).split('\n').count()
-                        };
-
-                        if (total_lines_needed + lines_in_this_log) * (line_h-4) > available_height {
-                            break; // This log won't fit entirely
-                        }
-
-                        total_lines_needed += lines_in_this_log;
-                        start_idx = i;
-                    }
-
-
-                    // // Show last N logs that fit on screen
-                    // let max_visible = (height - 130 - (margin * 6) - 20) / line_h;
-                    // let start_idx = logs.len().saturating_sub(max_visible);
+                    pg.draw_log_viewer(margin, 130, width - margin * 2, height - 135 - margin * 8, &logs);
                     
-                    for i in start_idx..logs.len() {
-                        let (color, tag, msg) = &logs[i];
-                        let color_hex = match color {
-                            Color::Red => 0xFF0000,
-                            Color::Yellow => 0xFFFF00,
-                            Color::LightCyan => 0x00FFFF,
-                            _ => 0xFFFFFF,
-                        };
-                        let log_line = if tag.is_empty() { msg.clone() } else { alloc::format!("[{}] {}", tag, msg) };
-                        for section in log_line.split("\n") {
-                            pg.draw_text(margin + 10, y, section, color_hex);
-                            y += (line_h-4);
-                        }
-                        if y + (line_h-4) > height - margin * 6 { break; }
-                    }
+                    let y_msg = height - margin * 6;
+                    pg.draw_text(margin, y_msg, "Use PgUp/PgDn to scroll, C to clear", 0x888888);
 
                     pg.draw_rect_outline(margin, height-95, width - margin * 8, 35, 0x999999);
                     if self.term_selected {
@@ -1437,10 +1419,16 @@ impl DashboardUI {
             // apply settings to these items
             //pg.app_context_border("");
 
-            //pg.apply_scanlines();
-            //pg.apply_dither();
-            //pg.apply_glitch();
-            //pg.apply_edge_aberration(0.5);
+            if self.settings.pg_scanlines { pg.apply_scanlines(); }
+            if self.settings.pg_dither { pg.apply_dither(); }
+            if self.settings.pg_glitch { pg.apply_glitch(); }
+
+            match self.settings.pg_aberration {
+                1 => pg.apply_edge_aberration(0.2),
+                2 => pg.apply_edge_aberration(0.5),
+                3 => pg.apply_edge_aberration(0.8),
+                _ => {}
+            }
 
 
 
@@ -1499,6 +1487,26 @@ impl DashboardUI {
             }
 
             pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
+
+            // Draw functional UI layers
+            let mut ypos = 0;
+            for (msg, duration) in &mut self.notifications {
+                pg.draw_toast(msg, duration, ypos);
+                ypos += 50;
+            }
+            self.notifications.retain(|(_, d)| *d > 0);
+
+            if self.command_palette_active {
+                let results = ["VM Start", "VM Stop", "VM Reset", "Refresh Storage", "Clear Logs", "Reboot Host", "Shutdown"];
+                let filtered: Vec<&str> = results.iter()
+                    .filter(|r| r.to_lowercase().contains(&self.command_palette_query.to_lowercase()))
+                    .cloned()
+                    .collect();
+                pg.draw_command_palette(&self.command_palette_query, &filtered, self.command_palette_selected);
+            }
+
+
+
             pg.flip();
 
         } else {
@@ -1724,6 +1732,10 @@ impl DashboardUI {
                 (String::from("HPVMX_UI_SCALING"), Self::option_value(&["50%", "100%", "150%", "200%"], self.settings.ui_scaling), false, false),
                 (String::from("Extended Symbol Library"), if self.settings.extended_symbol_library { "on" } else { "off" }.to_string(), false, false),
                 (String::from("PG VShaders"), if self.settings.pg_vshaders { "on" } else { "off" }.to_string(), false, false),
+                (String::from("PG Scanlines"), if self.settings.pg_scanlines { "on" } else { "off" }.to_string(), false, false),
+                (String::from("PG Dither"), if self.settings.pg_dither { "on" } else { "off" }.to_string(), false, false),
+                (String::from("PG Glitch"), if self.settings.pg_glitch { "on" } else { "off" }.to_string(), false, false),
+                (String::from("PG Aberration"), Self::option_value(&["off", "low", "mid", "high"], self.settings.pg_aberration), false, false),
             ],
             3 => alloc::vec![
                 (String::from("HPVMX_VM_SAFETY"), Self::option_value(&["prompt", "auto-save", "strict"], self.settings.vm_safety_policy), false, false),
@@ -1861,6 +1873,10 @@ impl DashboardUI {
             (2, 1) => cycle(&mut self.settings.ui_scaling, 4),
             (2, 2) => self.settings.extended_symbol_library = !self.settings.extended_symbol_library,
             (2, 3) => self.settings.pg_vshaders = !self.settings.pg_vshaders,
+            (2, 4) => self.settings.pg_scanlines = !self.settings.pg_scanlines,
+            (2, 5) => self.settings.pg_dither = !self.settings.pg_dither,
+            (2, 6) => self.settings.pg_glitch = !self.settings.pg_glitch,
+            (2, 7) => cycle(&mut self.settings.pg_aberration, 4),
             (3, 0) => cycle(&mut self.settings.vm_safety_policy, 3),
             (3, 1) => {
                 self.new_vm_memory_mb = match self.new_vm_memory_mb {
@@ -1941,6 +1957,50 @@ impl DashboardUI {
 
     pub fn handle_input(&mut self, key: Key) {
         use uefi::proto::console::text::ScanCode;
+
+        // Command Palette handling
+        if self.command_palette_active {
+            match key {
+                Key::Printable(c) => {
+                    let ch = char::from(c);
+                    if ch == '\r' || ch == '\n' {
+                        let query = self.command_palette_query.to_lowercase();
+                        let results = ["VM Start", "VM Stop", "VM Reset", "Refresh Storage", "Clear Logs", "Reboot Host", "Shutdown"];
+                        let filtered: Vec<&str> = results.iter()
+                            .filter(|r| r.to_lowercase().contains(&query))
+                            .cloned()
+                            .collect();
+                        
+                        if let Some(cmd) = filtered.get(self.command_palette_selected) {
+                            self.status_line = alloc::format!("Executing: {}", cmd);
+                            self.notifications.push((alloc::format!("Command: {}", cmd), 120));
+                            // Here you would trigger the actual command logic
+                        }
+                        self.command_palette_active = false;
+                        self.command_palette_query.clear();
+                    } else if ch == '\u{08}' {
+                        self.command_palette_query.pop();
+                        self.command_palette_selected = 0;
+                    } else if !ch.is_control() {
+                        self.command_palette_query.push(ch);
+                        self.command_palette_selected = 0;
+                    }
+                }
+                Key::Special(ScanCode::ESCAPE) => {
+                    self.command_palette_active = false;
+                    self.command_palette_query.clear();
+                }
+                Key::Special(ScanCode::UP) => {
+                    if self.command_palette_selected > 0 { self.command_palette_selected -= 1; }
+                }
+                Key::Special(ScanCode::DOWN) => {
+                    self.command_palette_selected += 1;
+                }
+                _ => {}
+            }
+            return;
+        }
+
 
         match self.selected_tab {
             DashboardTab::CreateVM => {
@@ -2532,6 +2592,9 @@ impl DashboardUI {
                         }
                         'q' => {
                             self.exit_requested = true
+                        }
+                        'k' => {
+                            self.command_palette_active = true
                         }
 
 

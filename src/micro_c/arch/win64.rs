@@ -1,3 +1,7 @@
+//! Windows x64 backend.
+//!
+//! This backend generates x86_64 assembly following the Windows x64 Calling Convention.
+
 use alloc::string::{String, ToString};
 use alloc::{format, vec};
 use alloc::vec::Vec;
@@ -8,6 +12,7 @@ use crate::ir::IRInst;
 use crate::regalloc::RegisterAllocator;
 use crate::stackframe::StackFrame;
 
+/// Backend for generating Windows-compatible x64 assembly.
 pub struct WIN64Backend {
     regs: RegisterAllocator,
     function_params: HashMap<String, Vec<String>>,

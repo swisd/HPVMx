@@ -1,9 +1,15 @@
+//! Lexical analyzer for the Micro-C language.
+//!
+//! This module contains the [`Lexer`] which converts a raw string of source code
+//! into a stream of [`Token`]s.
+
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 use crate::error::error;
 
+/// Represents a single unit of the Micro-C language.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Let, Fn, Return,
@@ -87,12 +93,14 @@ impl fmt::Display for Token {
     }
 }
 
+/// Lexer state for converting source code into tokens.
 pub struct Lexer {
     pub input: Vec<char>,
     pos: usize,
 }
 
 impl Lexer {
+    /// Creates a new Lexer from the given source string.
     pub fn new(input: &str) -> Self {
         Self { input: input.chars().collect(), pos: 0 }
     }
@@ -169,6 +177,7 @@ impl Lexer {
         Token::Number(s.parse().unwrap())
     }
 
+    /// Scans and returns the next token from the input.
     pub fn next_token(&mut self) -> Token {
         self.skip_ws();
 
