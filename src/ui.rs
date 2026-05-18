@@ -11,6 +11,7 @@ use crate::{hpvm_error, hpvm_info, hpvm_log, TSC_PER_US};
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec;
 use alloc::vec::Vec;
 use core::any::Any;
 use core::char;
@@ -116,6 +117,11 @@ pub struct DashboardUI {
     pub command_palette_active: bool,
     pub command_palette_query: String,
     pub command_palette_selected: usize,
+    pub command_palette_scroll_offset: usize,
+
+
+
+    pub glitch_y: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -164,6 +170,147 @@ pub enum DashboardTab {
     Packages,
     Apps,
 }
+
+const COMMAND_PALETTE_VISIBLE_COUNT: usize = 10;
+
+const TERMINAL_PALETTE_COMMANDS: &[&str] = &[
+    "help - Show command help",
+    "help fs - FileSystem help",
+    "help vm - VM help",
+    "help hv - Hypervisor help",
+    "help net - Network help",
+    "help pm - Package manager help",
+    "help micro-c - Micro-C help",
+    "help misc - Miscellaneous help",
+    "help prog <command> - Command-specific help",
+    "clear - Clear screen",
+    "ls - List files",
+    "cd <dir> - Change directory",
+    "pwd - Print working directory",
+    "mkdir <dir> - Make directory",
+    "touch <file> - Create file",
+    "cpy <src> <dst> - Copy file",
+    "mov <src> <dst> - Move file",
+    "rm <file> - Remove file",
+    "cat <file> - Show file contents",
+    "clon <src> <dst> - Clone directory",
+    "write <file> <data> <mode> - Write to file",
+    "devs - List drives",
+    "info - Show system info",
+    "sysinfo - Show detailed system information",
+    "start <kernel> - Load kernel",
+    "shutdown s - Shutdown host",
+    "shutdown r - Reboot host",
+    "BIOS - Exit to BIOS",
+    "mouse-debug - Debug mouse",
+    "run-efi <path> [args...] - Run EFI application",
+    "dashboard - Show dashboard",
+    "console <vm_id> - Attach to VM console",
+    "boot <vm_id> <media> - Boot VM with media",
+    "load-into <path> - Load and jump to EFI path",
+    "vm create <name> <mem> <vcpus> - Create VM",
+    "vm list - List VMs",
+    "vm start <id> - Start VM",
+    "vm stop <id> - Stop VM",
+    "vm delete <id> - Delete VM",
+    "vm boot <id> <media> - Boot VM with media",
+    "vm simulate-violation <id> <code> - Simulate violation",
+    "vmm info - Show VMM stats",
+    "vmm info-adv - Show advanced VMM stats",
+    "ping <ip> - Ping host",
+    "lanscan <network> - Scan network",
+    "httpd start <port> - Start HTTP server",
+    "httpd stop - Stop HTTP server",
+    "net status - Show NIC status",
+    "net up - Initialize NIC",
+    "logiclang - Open LogicLang prompt",
+    "pm list - List packages",
+    "pm reload - Reload registry",
+    "pm verify <name> - Verify package",
+    "pm version - Show PM version",
+    "micro-c compile <file> - Compile Micro-C",
+    "micro-c run <file> - Run Micro-C binary",
+    "run-app <name> - Run application (deprecated)",
+];
+
+const UI_PALETTE_COMMANDS: &[&str] = &[
+    "Overview: Show System Summary",
+    "Overview: Refresh Resources",
+    "VM: List Virtual Machines",
+    "VM: Create New VM",
+    "VM: Start Selected VM",
+    "VM: Stop Selected VM",
+    "VM: Delete Selected VM",
+    "VM: Boot with Media",
+    "VM: Simulate Violation",
+    "VM: Refresh List",
+    "Resources: View CPU/Memory",
+    "Storage: Browse Files",
+    "Storage: Refresh Drives",
+    "Storage: New File",
+    "Storage: New Folder",
+    "Storage: Rename Selected",
+    "Storage: Copy Selected",
+    "Storage: Move Selected",
+    "Storage: Delete Selected",
+    "Storage: Toggle Hidden Files",
+    "Storage: Toggle Auto Refresh",
+    "Network: View Connections",
+    "Network: Show NIC Status",
+    "Network: Initialize SNP",
+    "Network: Ping Target",
+    "Network: LAN Scan",
+    "Network: Start HTTP Server",
+    "Network: Stop HTTP Server",
+    "Console: Attach to VM",
+    "Devices: Manage Hardware",
+    "Devices: List Drives",
+    "Devices: Refresh Hardware",
+    "Apps: Run Applications",
+    "Packages: Software Manager",
+    "Packages: Reload Registry",
+    "Packages: Verify Dependencies",
+    "Packages: Show Version",
+    "Settings: UI Configuration",
+    "Settings: Toggle Extra Debug Info",
+    "Settings: Toggle State Save/Restore",
+    "Settings: Toggle Scanlines",
+    "Settings: Toggle Dither",
+    "Settings: Toggle Glitch",
+    "Settings: Cycle Aberration",
+    "Settings: Cycle Interface Density",
+    "Settings: Cycle UI Scaling",
+    "Settings: Cycle General Profile",
+    "Settings: Cycle Boot Target",
+    "Settings: Cycle VM Safety",
+    "Settings: Cycle Network Profile",
+    "Settings: Cycle Storage Policy",
+    "Settings: Cycle Package Policy",
+    "Settings: Cycle Developer Level",
+    "Settings: Cycle Security Policy",
+    "Test: Run Diagnostics",
+    "Editor: Text Editor",
+    "Editor: New Buffer",
+    "VMM: Show Statistics",
+    "VMM: Advanced Stats",
+    "System: Refresh Storage",
+    "System: Refresh Devices",
+    "System: Refresh All",
+    "System: Clear Logs",
+    "System: System Information",
+    "System: BIOS (Exit)",
+    "System: Reboot Host",
+    "System: Shutdown",
+    "System: Mouse Debugging",
+    "Help: Command Palette Shortcuts",
+    "Help: FileSystem Help",
+    "Help: VM Help",
+    "Help: Hypervisor Help",
+    "Help: Network Help",
+    "Help: Package Manager Help",
+    "Help: Micro-C Help",
+    "Help: Misc Help",
+];
 
 #[derive(PartialEq)]
 pub enum EditorMode {
@@ -334,11 +481,82 @@ impl DashboardUI {
             command_palette_active: false,
             command_palette_query: String::new(),
             command_palette_selected: 0,
+            command_palette_scroll_offset: 0,
+            glitch_y: 0,
         }
     }
 
     pub fn add_vm(&mut self, vm: VmDisplayInfo) {
         self.vms.push(vm);
+    }
+
+    fn command_palette_items(&self) -> &'static [&'static str] {
+        if self.command_palette_query.starts_with('$') {
+            TERMINAL_PALETTE_COMMANDS
+        } else {
+            UI_PALETTE_COMMANDS
+        }
+    }
+
+    fn command_palette_filter_text(&self) -> String {
+        if self.command_palette_query.starts_with('$') {
+            self.command_palette_query[1..].to_lowercase()
+        } else {
+            self.command_palette_query.to_lowercase()
+        }
+    }
+
+    fn filtered_command_palette_items(&self) -> Vec<&'static str> {
+        let query = self.command_palette_filter_text();
+        self.command_palette_items()
+            .iter()
+            .filter(|item| item.to_lowercase().contains(&query))
+            .copied()
+            .collect()
+    }
+
+    fn command_palette_filtered_count(&self) -> usize {
+        let query = self.command_palette_filter_text();
+        self.command_palette_items()
+            .iter()
+            .filter(|item| item.to_lowercase().contains(&query))
+            .count()
+    }
+
+    fn close_command_palette(&mut self) {
+        self.command_palette_active = false;
+        self.command_palette_query.clear();
+        self.command_palette_selected = 0;
+        self.command_palette_scroll_offset = 0;
+    }
+
+    fn command_core(command: &str) -> &str {
+        if let Some(idx) = command.find(" - ") {
+            &command[..idx]
+        } else if let Some(idx) = command.find(':') {
+            command[idx + 1..].trim()
+        } else {
+            command
+        }
+    }
+
+    fn run_terminal_command_string(&mut self, command: &str) {
+        let command_parts = command.split_whitespace().collect::<Vec<&str>>();
+        if command_parts.is_empty() {
+            return;
+        }
+
+        let parts = command_parts.clone();
+        let body = command_parts.clone();
+        terminal::cmd(command_parts, &parts, body, &mut self.package_manager);
+        self.command_history.push(command.to_string());
+        self.history_idx = None;
+        self.term_buf.clear();
+        self.notifications.push((alloc::format!("Terminal: {}", command), 120));
+    }
+
+    fn cycle_palette_setting(idx: &mut usize, max: usize) {
+        *idx = (*idx + 1) % max;
     }
 
     pub fn set_resources(&mut self, resources: SystemResources) {
@@ -1419,16 +1637,7 @@ impl DashboardUI {
             // apply settings to these items
             //pg.app_context_border("");
 
-            if self.settings.pg_scanlines { pg.apply_scanlines(); }
-            if self.settings.pg_dither { pg.apply_dither(); }
-            if self.settings.pg_glitch { pg.apply_glitch(); }
 
-            match self.settings.pg_aberration {
-                1 => pg.apply_edge_aberration(0.2),
-                2 => pg.apply_edge_aberration(0.5),
-                3 => pg.apply_edge_aberration(0.8),
-                _ => {}
-            }
 
 
 
@@ -1497,15 +1706,22 @@ impl DashboardUI {
             self.notifications.retain(|(_, d)| *d > 0);
 
             if self.command_palette_active {
-                let results = ["VM Start", "VM Stop", "VM Reset", "Refresh Storage", "Clear Logs", "Reboot Host", "Shutdown"];
-                let filtered: Vec<&str> = results.iter()
-                    .filter(|r| r.to_lowercase().contains(&self.command_palette_query.to_lowercase()))
-                    .cloned()
-                    .collect();
-                pg.draw_command_palette(&self.command_palette_query, &filtered, self.command_palette_selected);
+                let filtered = self.filtered_command_palette_items();
+                pg.draw_command_palette(&self.command_palette_query, &filtered, self.command_palette_selected, self.command_palette_scroll_offset);
             }
 
+            if self.settings.pg_scanlines { pg.apply_scanlines(); }
+            if self.settings.pg_dither { pg.apply_dither(); }
+            if self.settings.pg_glitch { self.glitch_y = pg.apply_glitch(self.glitch_y); }
 
+            match self.settings.pg_aberration {
+                1 => pg.apply_edge_aberration(0.2),
+                2 => pg.apply_edge_aberration(0.5),
+                3 => pg.apply_edge_aberration(0.8),
+                4 => pg.apply_edge_aberration(1.6),
+                5 => pg.apply_edge_aberration(3.0),
+                _ => {}
+            }
 
             pg.flip();
 
@@ -1735,7 +1951,7 @@ impl DashboardUI {
                 (String::from("PG Scanlines"), if self.settings.pg_scanlines { "on" } else { "off" }.to_string(), false, false),
                 (String::from("PG Dither"), if self.settings.pg_dither { "on" } else { "off" }.to_string(), false, false),
                 (String::from("PG Glitch"), if self.settings.pg_glitch { "on" } else { "off" }.to_string(), false, false),
-                (String::from("PG Aberration"), Self::option_value(&["off", "low", "mid", "high"], self.settings.pg_aberration), false, false),
+                (String::from("PG Aberration"), Self::option_value(&["off", "low", "mid", "high", "super", "extreme"], self.settings.pg_aberration), false, false),
             ],
             3 => alloc::vec![
                 (String::from("HPVMX_VM_SAFETY"), Self::option_value(&["prompt", "auto-save", "strict"], self.settings.vm_safety_policy), false, false),
@@ -1876,7 +2092,7 @@ impl DashboardUI {
             (2, 4) => self.settings.pg_scanlines = !self.settings.pg_scanlines,
             (2, 5) => self.settings.pg_dither = !self.settings.pg_dither,
             (2, 6) => self.settings.pg_glitch = !self.settings.pg_glitch,
-            (2, 7) => cycle(&mut self.settings.pg_aberration, 4),
+            (2, 7) => cycle(&mut self.settings.pg_aberration, 6),
             (3, 0) => cycle(&mut self.settings.vm_safety_policy, 3),
             (3, 1) => {
                 self.new_vm_memory_mb = match self.new_vm_memory_mb {
@@ -1955,6 +2171,200 @@ impl DashboardUI {
         self.selected_tab
     }
 
+    fn execute_palette_command(&mut self, cmd: &str) {
+        let run_help = |topic: &'static str, package_manager: &mut PackageManager| {
+            let command = vec!["help", topic];
+            let parts = command.clone();
+            let body = command.clone();
+            terminal::cmd(command, &parts, body, package_manager);
+        };
+
+        let run_simple = |command: Vec<&'static str>, package_manager: &mut PackageManager| {
+            let parts = command.clone();
+            let body = command.clone();
+            terminal::cmd(command, &parts, body, package_manager);
+        };
+
+        let selected_vm_id = self.get_selected_vm_id().map(|id| id.to_string());
+        let select_setting = |ui: &mut Self, category: usize, row: usize| {
+            ui.selected_settings_category_idx = category;
+            ui.selected_settings_idx = row;
+            ui.selected_tab = DashboardTab::Settings;
+            ui.toggle_selected_setting();
+        };
+
+        match cmd {
+            "Overview: Show System Summary" => self.selected_tab = DashboardTab::Overview,
+            "Overview: Refresh Resources" => {
+                self.selected_tab = DashboardTab::Overview;
+                self.status_line = String::from("Resource snapshot is live");
+            }
+            "VM: List Virtual Machines" | "VM: Refresh List" => {
+                self.selected_tab = DashboardTab::VirtualMachines;
+                run_simple(vec!["vm", "list"], &mut self.package_manager);
+            }
+            "VM: Create New VM" => self.selected_tab = DashboardTab::CreateVM,
+            "VM: Start Selected VM" => {
+                if let Some(id) = selected_vm_id.as_deref() {
+                    crate::handle_vm_command(&["vm", "start", id]);
+                } else {
+                    self.ui_error_with_detail(1, Some("No VM selected"));
+                }
+            }
+            "VM: Stop Selected VM" => {
+                if let Some(id) = selected_vm_id.as_deref() {
+                    crate::handle_vm_command(&["vm", "stop", id]);
+                } else {
+                    self.ui_error_with_detail(1, Some("No VM selected"));
+                }
+            }
+            "VM: Delete Selected VM" => {
+                if let Some(id) = selected_vm_id.as_deref() {
+                    crate::handle_vm_command(&["vm", "delete", id]);
+                } else {
+                    self.ui_error_with_detail(1, Some("No VM selected"));
+                }
+            }
+            "VM: Boot with Media" => {
+                if self.get_selected_vm_id().is_some() {
+                    crate::handle_vm_command(&["vm", "boot"]);
+                } else {
+                    self.ui_error_with_detail(1, Some("No VM selected"));
+                }
+            }
+            "VM: Simulate Violation" => crate::handle_vm_command(&["vm", "simulate-violation"]),
+            "Resources: View CPU/Memory" => self.selected_tab = DashboardTab::Resources,
+            "Storage: Browse Files" => self.selected_tab = DashboardTab::Storage,
+            "Storage: Refresh Drives" | "System: Refresh Storage" => {
+                self.refresh_storage();
+                self.notifications.push(("Storage refreshed".to_string(), 60));
+            }
+            "Storage: New File" => {
+                let sep = if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" };
+                let new_file = format!("{}{}new_file_{}.txt", self.current_path, sep, self.filesys_new_counter);
+                match crate::FileSystem::touch(&new_file) {
+                    Ok(_) => {
+                        self.filesys_new_counter += 1;
+                        self.status_line = format!("Created {}", new_file);
+                        self.refresh_storage();
+                    }
+                    Err(e) => self.status_line = format!("Create failed: {}", e),
+                }
+            }
+            "Storage: New Folder" => {
+                let sep = if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" };
+                let new_dir = format!("{}{}new_folder_{}", self.current_path, sep, self.filesys_new_counter);
+                match crate::FileSystem::mkdir(&new_dir) {
+                    Ok(_) => {
+                        self.filesys_new_counter += 1;
+                        self.status_line = format!("Created {}", new_dir);
+                        self.refresh_storage();
+                    }
+                    Err(e) => self.status_line = format!("Create folder failed: {}", e),
+                }
+            }
+            "Storage: Rename Selected" => {
+                self.filesys_pending_action = Some(FilePendingAction::Rename);
+                self.selected_tab = DashboardTab::Storage;
+                self.status_line = String::from("Confirm rename in Storage with End");
+            }
+            "Storage: Copy Selected" => {
+                self.filesys_pending_action = Some(FilePendingAction::Copy);
+                self.selected_tab = DashboardTab::Storage;
+                self.status_line = String::from("Confirm copy in Storage with End");
+            }
+            "Storage: Move Selected" => {
+                self.filesys_pending_action = Some(FilePendingAction::Move);
+                self.selected_tab = DashboardTab::Storage;
+                self.status_line = String::from("Confirm move in Storage with End");
+            }
+            "Storage: Delete Selected" => {
+                self.filesys_pending_action = Some(FilePendingAction::Delete);
+                self.selected_tab = DashboardTab::Storage;
+                self.status_line = String::from("Confirm delete in Storage with End");
+            }
+            "Storage: Toggle Hidden Files" => {
+                self.settings.show_hidden_files = !self.settings.show_hidden_files;
+                self.refresh_storage();
+                self.status_line = format!("Show hidden files: {}", if self.settings.show_hidden_files { "on" } else { "off" });
+            }
+            "Storage: Toggle Auto Refresh" => {
+                self.settings.auto_refresh_storage = !self.settings.auto_refresh_storage;
+                self.status_line = format!("Auto-refresh storage: {}", if self.settings.auto_refresh_storage { "on" } else { "off" });
+            }
+            "Network: View Connections" => self.selected_tab = DashboardTab::Network,
+            "Network: Show NIC Status" => self.execute_network_action_with_index(1),
+            "Network: Initialize SNP" => self.execute_network_action_with_index(0),
+            "Network: Ping Target" => self.execute_network_action_with_index(2),
+            "Network: LAN Scan" => self.execute_network_action_with_index(3),
+            "Network: Start HTTP Server" => self.execute_network_action_with_index(4),
+            "Network: Stop HTTP Server" => self.execute_network_action_with_index(5),
+            "Console: Attach to VM" => self.selected_tab = DashboardTab::Console,
+            "Devices: Manage Hardware" => self.selected_tab = DashboardTab::Devices,
+            "Devices: List Drives" => run_simple(vec!["devs"], &mut self.package_manager),
+            "Devices: Refresh Hardware" | "System: Refresh Devices" => {
+                self.refresh_devices();
+                self.notifications.push(("Devices refreshed".to_string(), 60));
+            }
+            "Apps: Run Applications" => self.selected_tab = DashboardTab::Apps,
+            "Packages: Software Manager" => self.selected_tab = DashboardTab::Packages,
+            "Packages: Reload Registry" => run_simple(vec!["pm", "reload"], &mut self.package_manager),
+            "Packages: Verify Dependencies" => run_simple(vec!["pm", "verify"], &mut self.package_manager),
+            "Packages: Show Version" => run_simple(vec!["pm", "version"], &mut self.package_manager),
+            "Settings: UI Configuration" => self.selected_tab = DashboardTab::Settings,
+            "Settings: Toggle Extra Debug Info" => select_setting(self, 0, 1),
+            "Settings: Toggle State Save/Restore" => select_setting(self, 1, 1),
+            "Settings: Toggle Scanlines" => select_setting(self, 2, 4),
+            "Settings: Toggle Dither" => select_setting(self, 2, 5),
+            "Settings: Toggle Glitch" => select_setting(self, 2, 6),
+            "Settings: Cycle Aberration" => select_setting(self, 2, 7),
+            "Settings: Cycle Interface Density" => select_setting(self, 2, 0),
+            "Settings: Cycle UI Scaling" => select_setting(self, 2, 1),
+            "Settings: Cycle General Profile" => select_setting(self, 0, 0),
+            "Settings: Cycle Boot Target" => select_setting(self, 1, 0),
+            "Settings: Cycle VM Safety" => select_setting(self, 3, 0),
+            "Settings: Cycle Network Profile" => select_setting(self, 4, 0),
+            "Settings: Cycle Storage Policy" => select_setting(self, 5, 0),
+            "Settings: Cycle Package Policy" => select_setting(self, 6, 0),
+            "Settings: Cycle Developer Level" => select_setting(self, 7, 0),
+            "Settings: Cycle Security Policy" => select_setting(self, 8, 0),
+            "Test: Run Diagnostics" => self.selected_tab = DashboardTab::Test,
+            "Editor: Text Editor" => self.selected_tab = DashboardTab::Editor,
+            "Editor: New Buffer" => {
+                self.editor = Some(TextEditor::new(String::from("untitled.txt"), Vec::new()));
+                self.selected_tab = DashboardTab::Editor;
+            }
+            "VMM: Show Statistics" => crate::handle_vmm_command(&["vmm", "info"]),
+            "VMM: Advanced Stats" => crate::handle_vmm_command(&["vmm", "info-adv"]),
+            "System: Refresh All" => {
+                self.refresh_storage();
+                self.refresh_devices();
+                self.package_manager.load_registry();
+                self.notifications.push(("System refreshed".to_string(), 60));
+            }
+            "System: Clear Logs" => self.notifications.push(("Logs cleared (UI only)".to_string(), 60)),
+            "System: System Information" => run_simple(vec!["sysinfo"], &mut self.package_manager),
+            "System: BIOS (Exit)" => run_simple(vec!["BIOS"], &mut self.package_manager),
+            "System: Reboot Host" => runtime::reset(ResetType::SHUTDOWN, Status::SUCCESS, Some(&[255])),
+            "System: Shutdown" => runtime::reset(ResetType::SHUTDOWN, Status::SUCCESS, Some(&[0])),
+            "System: Mouse Debugging" => run_simple(vec!["mouse-debug"], &mut self.package_manager),
+            "Help: Command Palette Shortcuts" => self.ui_error_with_detail(0, Some("UP/DOWN/TAB: Navigate, ENTER: Execute, ESC: Close, $: Terminal command mode")),
+            "Help: FileSystem Help" => run_help("fs", &mut self.package_manager),
+            "Help: VM Help" => run_help("vm", &mut self.package_manager),
+            "Help: Hypervisor Help" => run_help("hv", &mut self.package_manager),
+            "Help: Network Help" => run_help("net", &mut self.package_manager),
+            "Help: Package Manager Help" => run_help("pm", &mut self.package_manager),
+            "Help: Micro-C Help" => run_help("micro-c", &mut self.package_manager),
+            "Help: Misc Help" => run_help("misc", &mut self.package_manager),
+            _ => {}
+        }
+    }
+
+    fn execute_network_action_with_index(&mut self, idx: usize) {
+        self.selected_network_action_idx = idx;
+        self.execute_network_action();
+    }
+
     pub fn handle_input(&mut self, key: Key) {
         use uefi::proto::console::text::ScanCode;
 
@@ -1963,38 +2373,69 @@ impl DashboardUI {
             match key {
                 Key::Printable(c) => {
                     let ch = char::from(c);
+
                     if ch == '\r' || ch == '\n' {
-                        let query = self.command_palette_query.to_lowercase();
-                        let results = ["VM Start", "VM Stop", "VM Reset", "Refresh Storage", "Clear Logs", "Reboot Host", "Shutdown"];
-                        let filtered: Vec<&str> = results.iter()
-                            .filter(|r| r.to_lowercase().contains(&query))
-                            .cloned()
-                            .collect();
-                        
-                        if let Some(cmd) = filtered.get(self.command_palette_selected) {
-                            self.status_line = alloc::format!("Executing: {}", cmd);
-                            self.notifications.push((alloc::format!("Command: {}", cmd), 120));
-                            // Here you would trigger the actual command logic
+                        if self.command_palette_query.starts_with('$') {
+                            let command_str = self.command_palette_query[1..].trim().to_string();
+                            let filtered = self.filtered_command_palette_items();
+                            let selected_command = filtered
+                                .get(self.command_palette_selected)
+                                .map(|cmd| Self::command_core(cmd).to_string());
+
+                            if let Some(cmd) = selected_command {
+                                self.run_terminal_command_string(&cmd);
+                            } else if !command_str.is_empty() {
+                                self.run_terminal_command_string(&command_str);
+                            }
+
+                            self.close_command_palette();
+                        } else {
+                            let filtered = self.filtered_command_palette_items();
+                            if let Some(cmd) = filtered.get(self.command_palette_selected) {
+                                let cmd_core = Self::command_core(cmd).to_string();
+                                self.status_line = alloc::format!("Executing: {}", cmd_core);
+                                self.notifications.push((alloc::format!("Command: {}", cmd_core), 120));
+                                self.execute_palette_command(cmd);
+                            }
+                            self.close_command_palette();
                         }
-                        self.command_palette_active = false;
-                        self.command_palette_query.clear();
                     } else if ch == '\u{08}' {
                         self.command_palette_query.pop();
                         self.command_palette_selected = 0;
+                        self.command_palette_scroll_offset = 0;
+                    } else if ch == '\t' {
+                        let filtered_count = self.command_palette_filtered_count();
+                        if filtered_count > 0 {
+                            self.command_palette_selected = (self.command_palette_selected + 1) % filtered_count;
+                            if self.command_palette_selected < self.command_palette_scroll_offset {
+                                self.command_palette_scroll_offset = self.command_palette_selected;
+                            } else if self.command_palette_selected >= self.command_palette_scroll_offset + COMMAND_PALETTE_VISIBLE_COUNT {
+                                self.command_palette_scroll_offset = self.command_palette_selected - COMMAND_PALETTE_VISIBLE_COUNT + 1;
+                            }
+                        }
                     } else if !ch.is_control() {
                         self.command_palette_query.push(ch);
                         self.command_palette_selected = 0;
+                        self.command_palette_scroll_offset = 0;
                     }
                 }
-                Key::Special(ScanCode::ESCAPE) => {
-                    self.command_palette_active = false;
-                    self.command_palette_query.clear();
-                }
+                Key::Special(ScanCode::ESCAPE) => self.close_command_palette(),
                 Key::Special(ScanCode::UP) => {
-                    if self.command_palette_selected > 0 { self.command_palette_selected -= 1; }
+                    if self.command_palette_selected > 0 {
+                        self.command_palette_selected -= 1;
+                        if self.command_palette_selected < self.command_palette_scroll_offset {
+                            self.command_palette_scroll_offset = self.command_palette_selected;
+                        }
+                    }
                 }
                 Key::Special(ScanCode::DOWN) => {
-                    self.command_palette_selected += 1;
+                    let filtered_count = self.command_palette_filtered_count();
+                    if filtered_count > 0 && self.command_palette_selected < filtered_count - 1 {
+                        self.command_palette_selected += 1;
+                        if self.command_palette_selected >= self.command_palette_scroll_offset + COMMAND_PALETTE_VISIBLE_COUNT {
+                            self.command_palette_scroll_offset = self.command_palette_selected - COMMAND_PALETTE_VISIBLE_COUNT + 1;
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -2288,14 +2729,15 @@ impl DashboardUI {
                         self.selected_settings_idx = 0;
                     }
                     Key::Special(ScanCode::RIGHT) => {
-                        self.selected_settings_category_idx = (self.selected_settings_category_idx + 1).min(9);
+                        self.selected_settings_category_idx = (self.selected_settings_category_idx + 1).min(8);
                         self.selected_settings_idx = 0;
                     }
                     Key::Special(ScanCode::UP) => {
                         self.selected_settings_idx = self.selected_settings_idx.saturating_sub(1);
                     }
                     Key::Special(ScanCode::DOWN) => {
-                        self.selected_settings_idx = (self.selected_settings_idx + 1).min(6);
+                        let rows_count = self.settings_rows().len();
+                        self.selected_settings_idx = (self.selected_settings_idx + 1).min(rows_count.saturating_sub(1));
                     }
                     _ => {}
                 }

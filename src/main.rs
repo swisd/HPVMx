@@ -11,6 +11,8 @@ extern crate alloc;
 
 mod ui;
 mod kernel;
+mod pe;
+mod binary_loader;
 mod filesystem;
 mod graphics;
 mod interrupts;
@@ -663,6 +665,30 @@ fn handle_vm_command(command: &[&str]) {
     }
 }
 
+/// Run a micro-c compiled binary
+fn run_asm_application(asm_path: &str) {
+    hpvm_info!("ASM", "loading micro-c binary from '{}'", asm_path);
+
+    match load_boot_media(asm_path) {
+        Ok(asm_data) => {
+            hpvm_info!("ASM", "loaded {} bytes", asm_data.len());
+
+            // By default, raw x86_64 binaries from micro-c use ORG 0x100000
+            match binary_loader::BinaryLoader::load_and_run(&asm_data, 0x100000) {
+                Ok(_) => {
+                    hpvm_info!("ASM", "execution finished");
+                }
+                Err(e) => {
+                    hpvm_error!("ASM", "failed to load/run ASM: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            hpvm_error!("ASM", "failed to load binary file: {}", e);
+        }
+    }
+}
+
 #[allow(static_mut_refs)]
 fn handle_vmm_command(command: &[&str]) {
     unsafe {
@@ -752,29 +778,18 @@ fn run_efi_application(efi_path: &str, args: &[&str]) {
         Ok(efi_data) => {
             hpvm_info!("EFI", "loaded {} bytes", efi_data.len());
 
-            // Parse EFI header
-            if efi_data.len() < 64 {
-                hpvm_error!("EFI", "invalid EFI file: too small");
-                return;
+            match pe::PeLoader::load_pe(&efi_data) {
+                Ok(entry_point) => {
+                    hpvm_info!("EFI", "executing application at 0x{:x} with {} arguments", entry_point, args.len());
+                    
+                    unsafe {
+                        kernel::KernelLoader::execute_kernel(&efi_data, entry_point);
+                    }
+                }
+                Err(e) => {
+                    hpvm_error!("EFI", "failed to load PE: {}", e);
+                }
             }
-
-            // Check for MZ signature (EFI is PE format)
-            if efi_data[0] != 0x4D || efi_data[1] != 0x5A {
-                hpvm_warn!("EFI", "file doesn't start with MZ signature");
-            }
-
-            hpvm_info!("EFI", "executing application with {} arguments", args.len());
-
-            // In a real implementation, you would:
-            // 1. Set up page tables and memory mapping
-            // 2. Load sections from the EFI file
-            // 3. Call the entry point
-            // For now, we'll just log the arguments
-            for (i, arg) in args.iter().enumerate() {
-                hpvm_info!("EFI", "  arg[{}]: {}", i, arg);
-            }
-
-            hpvm_warn!("EFI", "EFI execution not fully implemented in this build");
         }
         Err(e) => {
             hpvm_error!("EFI", "failed to load EFI file: {}", e);

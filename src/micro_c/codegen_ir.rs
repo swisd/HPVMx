@@ -129,6 +129,13 @@ impl IRGenerator {
                 }
             }
 
+            Stmt::ExternFunction { name, params } => {
+                self.function_params.insert(name.clone(), params);
+                self.code.push(IRInst::Extern(name));
+            }
+
+            Stmt::Import { .. } => {}
+
             _ => {error(&format!("{:#X} Stmt {:?}", self.position, stmt));}
         }
     }

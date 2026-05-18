@@ -42,7 +42,17 @@ impl Architecture for WIN64Backend {
         let arg_regs = ["rcx", "rdx", "r8", "r9"];
 
         out.push_str("global main\n");
-        out.push_str("extern printf\n");
+        let mut externs = vec!["printf".to_string()];
+        for inst in ir {
+            if let IRInst::Extern(name) = inst {
+                if !externs.iter().any(|existing| existing == name) {
+                    externs.push(name.clone());
+                }
+            }
+        }
+        for name in externs {
+            out.push_str(&format!("extern {}\n", name));
+        }
 
         out.push_str("section .data\n");
         out.push_str("fmt: db \"%lld\", 10, 0\n");
@@ -85,6 +95,7 @@ impl Architecture for WIN64Backend {
         // emit instructions
         for inst in ir {
             match inst {
+                IRInst::Extern(_) => {}
 
 
                 // func label

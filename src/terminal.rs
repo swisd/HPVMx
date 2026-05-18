@@ -57,7 +57,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                         message!("\n", "\nPackage Manager:\n  pm list - list all registered packages\n  pm reload - reload package registry from disk\n  pm verify [name] - verify package dependencies\n  pm version - show package manager version\n")
                     }
                     "micro-c" => {
-                        message!("\n", "\nMicro-C Toolchain:\n  micro-c compile [file.micro] - compile source to .asm\n")
+                        message!("\n", "\nMicro-C Toolchain:\n  micro-c compile [file.micro] - compile source to .asm\n  micro-c run [file.bin] - run compiled binary\n")
                     }
                     "misc" => {
                         message!("\n", "\n Misc / Other:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n")
@@ -342,9 +342,11 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                     let newpath = parts[2].split(".").next().unwrap().to_owned() + ".asm";
                     FileSystem::touch(&*newpath);
                     FileSystem::write_to_file(&*newpath, &*data, 'w');
+                } else if parts[1] == "run" {
+                    crate::run_asm_application(parts[2]);
                 }
             } else {
-                message!("\n", "Usage: micro-c compile [file.micro]")
+                message!("\n", "Usage: micro-c [compile|run] [file]")
             }
         }
 

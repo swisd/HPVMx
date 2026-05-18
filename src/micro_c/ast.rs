@@ -30,7 +30,6 @@ pub enum Expr {
     Index(Box<Expr>, Box<Expr>),
 
     Field(Box<Expr>, String),
-    Include(String, String)
 }
 
 /// Represents a statement that performs an action.
@@ -83,6 +82,10 @@ pub enum Stmt {
         params: Vec<String>,
         body: Vec<Stmt>,
         export: bool,
+    },
+    ExternFunction {
+        name: String,
+        params: Vec<String>,
     },
     Import {
         name: String,

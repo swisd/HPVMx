@@ -5,10 +5,8 @@
 
 use alloc::boxed::Box;
 use alloc::{format, vec};
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
-use core::fmt::{Debug, Formatter};
-use core::iter::once;
 use crate::ast::*;
 use crate::error::{error};
 use crate::fs::open_file_or_lib;
@@ -52,7 +50,11 @@ impl Parser {
         let mut stmts = vec![];
 
         while self.current != Token::EOF {
-            stmts.push(self.parse_stmt());
+            match self.current.clone() {
+                Token::Include(path) => stmts.extend(self.parse_import(path)),
+                Token::Import => stmts.extend(self.parse_import_stmt()),
+                _ => stmts.push(self.parse_stmt()),
+            }
         }
 
         stmts
@@ -62,10 +64,16 @@ impl Parser {
         match self.current {
             Token::Let => self.parse_let(),
             Token::Struct => self.parse_struct(),
+            Token::Extern => self.parse_extern_fn(),
             Token::Fn | Token::Export => self.parse_fn(),
             Token::If => self.parse_if(),
             Token::Loop => self.parse_loop(),
             Token::Return => self.parse_return(),
+            Token::Include(_) | Token::Import => {
+                error("imports are only supported at the top level");
+                self.advance();
+                Stmt::None
+            }
 
             Token::Break => {
                 self.advance();
@@ -185,6 +193,37 @@ impl Parser {
         Stmt::Assign(name, value)
     }
 
+    fn parse_import(&mut self, path: String) -> Vec<Stmt> {
+        self.advance();
+
+        let source = open_file_or_lib(&path);
+        let mut parser = Parser::new(Lexer::new(&source));
+        let mut stmts = parser.parse_program();
+        stmts.insert(0, Stmt::Import { name: path });
+        stmts
+    }
+
+    fn parse_import_stmt(&mut self) -> Vec<Stmt> {
+        self.advance();
+
+        let path = match self.current.clone() {
+            Token::Ident(s) => s,
+            _ => {
+                error("Expected import name");
+                self.advance();
+                return vec![Stmt::None]
+            }
+        };
+        self.advance();
+        self.expect(Token::Semicolon);
+
+        let source = open_file_or_lib(&path);
+        let mut parser = Parser::new(Lexer::new(&source));
+        let mut stmts = parser.parse_program();
+        stmts.insert(0, Stmt::Import { name: path });
+        stmts
+    }
+
     fn parse_struct(&mut self) -> Stmt {
         self.advance();
 
@@ -259,12 +298,51 @@ impl Parser {
 
         self.expect(Token::LParen);
 
+        let params = self.parse_params();
+
+        self.expect(Token::RParen);
+
+        let body = self.parse_block();
+
+        Stmt::Function { name, params, body, export }
+    }
+
+    fn parse_extern_fn(&mut self) -> Stmt {
+        self.advance();
+        self.expect(Token::Fn);
+
+        let name = match self.current.clone() {
+            Token::Ident(s) => s,
+            _ => {
+                error("Expected extern function name");
+                self.advance();
+                return Stmt::None
+            },
+        };
+        self.advance();
+
+        self.expect(Token::LParen);
+        let params = self.parse_params();
+        self.expect(Token::RParen);
+        self.expect(Token::Semicolon);
+
+        Stmt::ExternFunction { name, params }
+    }
+
+    fn parse_params(&mut self) -> Vec<String> {
         let mut params = vec![];
 
         while self.current != Token::RParen {
-            if let Token::Ident(s) = self.current.clone() {
-                params.push(s);
-                self.advance();
+            match self.current.clone() {
+                Token::Ident(s) => {
+                    params.push(s);
+                    self.advance();
+                }
+                _ => {
+                    error("Expected parameter name");
+                    self.advance();
+                    break;
+                }
             }
 
             if self.current == Token::Comma {
@@ -272,11 +350,7 @@ impl Parser {
             }
         }
 
-        self.expect(Token::RParen);
-
-        let body = self.parse_block();
-
-        Stmt::Function { name, params, body, export }
+        params
     }
 
     fn parse_block(&mut self) -> Vec<Stmt> {
@@ -494,16 +568,6 @@ impl Parser {
                 let expr = self.parse_expr();
                 self.expect(Token::RParen);
                 expr
-            }
-
-            Token::Include(p) => {
-                self.advance();
-                // todo: need to add function for library lookup/install
-                let file = open_file_or_lib(&*p);
-                self.lexer.input.extend(file.chars());
-                let path = p.clone();
-                let name: String = if p.contains('.') { p.split('.').last().unwrap().parse().unwrap() } else { p };
-                Expr::Include(path, name)
             }
 
             _ => {

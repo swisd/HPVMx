@@ -42,6 +42,8 @@ impl X86_64RawBackend {
 
         for inst in ir {
             match inst {
+                IRInst::Extern(_) => {}
+
                 IRInst::Label(name) => {
                     if let Some(prev) = current_name.take() {
                         funcs.push((prev, current_body));
@@ -371,6 +373,7 @@ impl X86_64RawBackend {
             // Ignore labels here
 
             IRInst::Label(_) => {}
+            IRInst::Extern(_) => {}
 
             _ => {}
         }
@@ -388,6 +391,13 @@ impl Architecture for X86_64RawBackend {
 
         out.push_str("BITS 64\n");
         out.push_str("ORG 0x100000\n\n");
+
+        for inst in ir {
+            if let IRInst::Extern(name) = inst {
+                out.push_str(&format!("extern {}\n", name));
+            }
+        }
+        out.push('\n');
 
         // x86_64 bare metal entrypoint
         out.push_str("_start:\n");

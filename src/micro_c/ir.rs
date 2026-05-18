@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 /// A single instruction in the Intermediate Representation.
 #[derive(Debug, Clone)]
 pub enum IRInst {
+    Extern(String),
     /// Loads a constant integer into a temporary.
     LoadConst(String, i64),
     /// Loads a variable's value into a temporary.

@@ -3,7 +3,7 @@ use uefi::boot;
 use core::ptr;
 use alloc::string::{String, ToString};
 use embedded_graphics::Pixel;
-use libm::{cos, floor, pow, sin, sqrt};
+use libm::{cos, floor, sin, sqrt, sqrtf};
 use tinybmp::Bmp;
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
 use uefi::table::system_table_raw;
@@ -809,12 +809,12 @@ impl PixelGraphics {
     }
 
     /// "Moving-Glitch" shader, does not work at this time
-    pub fn apply_glitch(&mut self) {
+    pub fn apply_glitch(&mut self, mut gy: usize) -> usize {
         let stride = self.stride;
         let height = self.height;
         let width = self.width;
         let glitch_height = 5; // Thickness of the glitch line
-        let glitch_y = self.glitch_y;
+        let glitch_y = gy; //self.glitch_y;
         if let Some(buffer) = self.backbuffer_slice_mut() {
             // Apply effect only to rows within the glitch band
             for y_offset in 0..glitch_height {
@@ -836,42 +836,77 @@ impl PixelGraphics {
         }
 
         // Move the line down for the next frame
-        self.glitch_y = if self.glitch_y < height + 20 { self.glitch_y + 2 } else { 0 }
+        //self.glitch_y = if self.glitch_y < height + 20 { self.glitch_y + 2 } else { 0 }
+        gy = if gy < height + 20 { gy + 2 } else { 0 };
+        gy
     }
 
-    /// Chromatic Aberration edge shader, requires a lot of cpu, resource intensive. Unused but not deprecated
+    /// Chromatic Aberration edge shader, optimized.
     pub fn apply_edge_aberration(&mut self, max_strength: f32) {
         let (width, height, stride) = (self.width, self.height, self.stride);
-        let center_x = (width / 2) as f32;
-        let center_y = (height / 2) as f32;
-        let max_dist = sqrt(pow(center_x as f64, 2.0) + pow(center_y as f64, 2.0));
+        if max_strength <= 0.0 { return; }
+
+        let center_x = width as f32 * 0.5;
+        let center_y = height as f32 * 0.5;
+        let max_dist_sq = center_x * center_x + center_y * center_y;
+        let max_dist = sqrtf(max_dist_sq);
+        let k = max_strength / max_dist;
+
+        // Threshold for offset >= 1: dist * k >= 1.0 => dist >= 1.0/k => dist^2 >= (1.0/k)^2
+        let threshold_sq = (1.0 / k) * (1.0 / k);
 
         if let Some(buffer) = self.backbuffer_slice_mut() {
-            // We iterate backwards to avoid using a second temporary buffer,
-            // though for a true "perfect" effect, a temporary copy is safer.
+            let mut row_copy = alloc::vec![0u32; width];
+
             for y in 0..height {
-                let dy = pow((y as f32 - center_y) as f64, 2.0);
-                for x in 0..width {
-                    let dx = pow((x as f32 - center_x) as f64, 2.0);
+                let row_start = y * stride;
+                let dy = y as f32 - center_y;
+                let dy2 = dy * dy;
 
-                    // Calculate normalized distance from center (0.0 to 1.0)
-                    let dist = sqrt(dx + dy) / max_dist;
+                // Optimization: if dy2 >= threshold_sq, the entire row needs processing.
+                // Otherwise, only x where (x - center_x)^2 + dy2 >= threshold_sq need processing.
+                // (x - center_x)^2 >= threshold_sq - dy2
+                // |x - center_x| >= sqrt(threshold_sq - dy2)
+                let skip_half_width = if dy2 < threshold_sq {
+                    sqrtf(threshold_sq - dy2)
+                } else {
+                    0.0
+                };
 
-                    // Intensity scales with distance (stronger at edges)
-                    let offset = (dist * max_strength as f64) as usize;
-                    if offset == 0 { continue; }
+                let skip_left = (center_x - skip_half_width).max(0.0) as usize;
+                let skip_right = (center_x + skip_half_width).min(width as f32) as usize;
 
-                    let idx = y * stride + x;
+                // Copy current row to avoid in-place corruption
+                row_copy.copy_from_slice(&buffer[row_start..row_start + width]);
 
-                    // Sample Red from the left and Blue from the right
-                    let r_idx = y * stride + x.saturating_sub(offset);
-                    let b_idx = y * stride + core::cmp::min(x + offset, width - 1);
+                // Process left segment
+                for x in 0..skip_left {
+                    let dx = x as f32 - center_x;
+                    let dist_sq = dx * dx + dy2;
+                    // dist_sq is always >= threshold_sq here, so offset >= 1
+                    let dist = sqrtf(dist_sq);
+                    let offset = (dist * k) as usize;
 
-                    let r = (buffer[r_idx] >> 16) & 0xFF;
-                    let g = (buffer[idx] >> 8) & 0xFF;
-                    let b = buffer[b_idx] & 0xFF;
+                    let left_x = x.saturating_sub(offset);
+                    let right_x = core::cmp::min(x + offset, width - 1);
+                    let color_l = row_copy[left_x];
+                    let color_r = row_copy[right_x];
+                    buffer[row_start + x] = (color_l & 0xFFFF00) | (color_r & 0x0000FF);
+                }
 
-                    buffer[idx] = (r << 16) | (g << 8) | b;
+                // Process right segment
+                for x in skip_right..width {
+                    let dx = x as f32 - center_x;
+                    let dist_sq = dx * dx + dy2;
+                    // dist_sq is always >= threshold_sq here, so offset >= 1
+                    let dist = sqrtf(dist_sq);
+                    let offset = (dist * k) as usize;
+
+                    let left_x = x.saturating_sub(offset);
+                    let right_x = core::cmp::min(x + offset, width - 1);
+                    let color_l = row_copy[left_x];
+                    let color_r = row_copy[right_x];
+                    buffer[row_start + x] = (color_l & 0xFFFF00) | (color_r & 0x0000FF);
                 }
             }
         }
@@ -979,26 +1014,50 @@ impl PixelGraphics {
         }
     }
 
-    pub fn draw_command_palette(&mut self, query: &str, results: &[&str], selected: usize) {
-        let w = 400;
-        let h = 200;
+    pub fn draw_command_palette(&mut self, query: &str, results: &[&str], selected: usize, scroll_offset: usize) {
+        let w = if self.width > 700 { 640 } else { self.width.saturating_sub(40).max(320) };
+        let h = 270;
         let x = (self.width - w) / 2;
-        let y = 100;
+        let y = 70;
 
-        self.fill_rect(x, y, w, h, 0x222222);
+        self.fill_rect(x, y, w, h, 0x181818);
         self.draw_rect_outline(x, y, w, h, 0x5555FF);
+        self.fill_rect(x, y, w, 34, 0x202038);
 
         self.draw_text(x + 10, y + 10, ">", 0x5555FF);
         self.draw_text(x + 30, y + 10, query, 0xFFFFFF);
-        self.draw_line(x + 10, y + 30, x + w - 10, y + 30, 0x444444);
+        self.draw_line(x + 10, y + 34, x + w - 10, y + 34, 0x444444);
 
-        for (i, res) in results.iter().enumerate() {
-            let color = if i == selected { 0xFFFF00 } else { 0xAAAAAA };
-            if i == selected {
-                self.fill_rect(x + 5, y + 40 + i * 20, w - 10, 18, 0x444444);
+        let visible_count = 10;
+        for i in 0..visible_count {
+            let idx = i + scroll_offset;
+            if idx >= results.len() { break; }
+
+            let res = results[idx];
+            let color = if idx == selected { 0xFFFF00 } else { 0xAAAAAA };
+            if idx == selected {
+                self.fill_rect(x + 5, y + 42 + i * 20, w - 10, 18, 0x303048);
             }
-            self.draw_text(x + 15, y + 42 + i * 20, res, color);
+            self.draw_text(x + 15, y + 44 + i * 20, res, color);
         }
+
+        if results.is_empty() {
+            self.draw_text(x + 15, y + 60, "No matching commands", 0x777777);
+        }
+
+        if results.len() > visible_count {
+            // Draw scroll indicator
+            let scroll_bar_h = visible_count * 20;
+            let bar_y = y + 42;
+            let thumb_h = (scroll_bar_h as f32 * (visible_count as f32 / results.len() as f32)) as usize;
+            let thumb_y = bar_y + (scroll_bar_h - thumb_h) * scroll_offset / (results.len() - visible_count);
+            
+            self.fill_rect(x + w - 8, bar_y, 4, scroll_bar_h, 0x333333);
+            self.fill_rect(x + w - 8, thumb_y, 4, thumb_h, 0x5555FF);
+        }
+
+        self.draw_line(x + 10, y + h - 28, x + w - 10, y + h - 28, 0x333333);
+        self.draw_text(x + 15, y + h - 20, "Enter execute  Esc close  $ terminal mode", 0x777777);
     }
 
 

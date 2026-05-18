@@ -31,7 +31,15 @@ impl Architecture for ARM64Backend {
         let mut out = String::new();
 
         for inst in ir {
+            if let IRInst::Extern(name) = inst {
+                out.push_str(&format!(".extern {}\n", name));
+            }
+        }
+
+        for inst in ir {
             match inst {
+                IRInst::Extern(_) => {}
+
                 IRInst::Label(name) => {
                     out.push_str(&format!("{}:\n", name));
                 }

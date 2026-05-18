@@ -141,8 +141,7 @@ impl Interpreter {
                 let offset = self.field_offset(&struct_name, &field);
 
                 *self.memory.get(&(addr + offset)).unwrap_or(&0)
-            },
-            Expr::Include(_, _) => todo!()
+            }
         }
     }
 

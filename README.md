@@ -2,6 +2,9 @@
 
 A bare-metal (+BIOS & EFI) hardware provisioning and virtualization manager written in Rust. HPVMx provides a complete environment for managing virtual machines, exploring storage, and developing software on bare metal.
 
+![](https://img.shields.io/badge/latest_version-1.9.8-blue)
+
+
 ## Key Features
 
 - **Hypervisor Dashboard**: Full VM lifecycle management with save/restore capabilities.

@@ -49,3 +49,43 @@ pub fn compile(source: &str, arch: &str) -> String {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::compile;
+
+    #[test]
+    fn emits_extern_function_declaration_and_call() {
+        let asm = compile(
+            r#"
+extern fn host_add(a, b);
+
+export fn main() {
+    return host_add(2, 3);
+}
+"#,
+            "x86_64",
+        );
+
+        assert!(asm.contains("extern host_add"));
+        assert!(asm.contains("call host_add"));
+    }
+
+    #[test]
+    fn imports_builtin_sys_declarations() {
+        let asm = compile(
+            r#"
+import Sys;
+
+export fn main() {
+    return malloc(8);
+}
+"#,
+            "x86_64",
+        );
+
+        assert!(asm.contains("extern malloc"));
+        assert!(asm.contains("extern free"));
+        assert!(asm.contains("call malloc"));
+    }
+}
