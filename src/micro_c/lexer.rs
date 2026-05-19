@@ -13,7 +13,6 @@ use crate::error::error;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Let, Fn, Return,
-    Import,
     If, Elif, Else,
     Loop, Break, Continue,
     Export, Extern,
@@ -48,7 +47,6 @@ impl fmt::Display for Token {
             Token::Let => write!(f, "let"),
             Token::Fn => write!(f, "fn"),
             Token::Return => write!(f, "return"),
-            Token::Import => write!(f, "import"),
             Token::If => write!(f, "if"),
             Token::Elif => write!(f, "elif"),
             Token::Else => write!(f, "else"),
@@ -134,7 +132,6 @@ impl Lexer {
             "let" => Token::Let,
             "fn" => Token::Fn,
             "return" => Token::Return,
-            "import" => Token::Import,
             "if" => Token::If,
             "elif" => Token::Elif,
             "else" => Token::Else,

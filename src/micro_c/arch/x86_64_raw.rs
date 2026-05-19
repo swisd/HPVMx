@@ -35,7 +35,7 @@ impl X86_64RawBackend {
         }
     }
 
-    fn split_functions(ir: &[IRInst]) -> Vec<(String, Vec<IRInst>)> {
+    fn split_functions(&self, ir: &[IRInst]) -> Vec<(String, Vec<IRInst>)> {
         let mut funcs = Vec::new();
         let mut current_name: Option<String> = None;
         let mut current_body = Vec::new();
@@ -44,13 +44,15 @@ impl X86_64RawBackend {
             match inst {
                 IRInst::Extern(_) => {}
 
-                IRInst::Label(name) => {
+                IRInst::Label(name) if self.function_params.contains_key(name) => {
                     if let Some(prev) = current_name.take() {
                         funcs.push((prev, current_body));
                         current_body = Vec::new();
                     }
                     current_name = Some(name.clone());
                 }
+
+                IRInst::Label(_) if current_name.is_none() => {}
 
                 _ => current_body.push(inst.clone()),
             }
@@ -192,6 +194,28 @@ impl X86_64RawBackend {
                 ));
             }
 
+            IRInst::StackAlloc(dst, size) => {
+                let rd = self.regs.alloc(dst);
+                let size = if *size <= 0 { 8 } else { *size };
+
+                out.push_str(&format!("    sub rsp, {}\n", size));
+                out.push_str(&format!("    mov {}, rsp\n", rd));
+            }
+
+            IRInst::LoadMem(dst, addr) => {
+                let rd = self.regs.alloc(dst);
+                let ra = self.regs.alloc(addr);
+
+                out.push_str(&format!("    mov {}, [{}]\n", rd, ra));
+            }
+
+            IRInst::StoreMem(addr, src) => {
+                let ra = self.regs.alloc(addr);
+                let rs = self.regs.alloc(src);
+
+                out.push_str(&format!("    mov [{}], {}\n", ra, rs));
+            }
+
             IRInst::Add(dst, a, b) => {
                 let rd = self.regs.alloc(dst);
                 let ra = self.regs.alloc(a);
@@ -224,6 +248,26 @@ impl X86_64RawBackend {
                     rd,
                     rb
                 ));
+            }
+
+            IRInst::Mul(dst, a, b) => {
+                let rd = self.regs.alloc(dst);
+                let ra = self.regs.alloc(a);
+                let rb = self.regs.alloc(b);
+
+                out.push_str(&format!("    mov {}, {}\n", rd, ra));
+                out.push_str(&format!("    imul {}, {}\n", rd, rb));
+            }
+
+            IRInst::Div(dst, a, b) => {
+                let rd = self.regs.alloc(dst);
+                let ra = self.regs.alloc(a);
+                let rb = self.regs.alloc(b);
+
+                out.push_str(&format!("    mov rax, {}\n", ra));
+                out.push_str("    cqo\n");
+                out.push_str(&format!("    idiv {}\n", rb));
+                out.push_str(&format!("    mov {}, rax\n", rd));
             }
 
 
@@ -345,6 +389,28 @@ impl X86_64RawBackend {
                 ));
             }
 
+            IRInst::LtEq(dst, a, b) => {
+                let rd = self.regs.alloc(dst);
+                let ra = self.regs.alloc(a);
+                let rb = self.regs.alloc(b);
+
+                out.push_str(&format!("    cmp {}, {}\n", ra, rb));
+                out.push_str("    setle al\n");
+                out.push_str("    movzx rax, al\n");
+                out.push_str(&format!("    mov {}, rax\n", rd));
+            }
+
+            IRInst::GtEq(dst, a, b) => {
+                let rd = self.regs.alloc(dst);
+                let ra = self.regs.alloc(a);
+                let rb = self.regs.alloc(b);
+
+                out.push_str(&format!("    cmp {}, {}\n", ra, rb));
+                out.push_str("    setge al\n");
+                out.push_str("    movzx rax, al\n");
+                out.push_str(&format!("    mov {}, rax\n", rd));
+            }
+
             
 
             IRInst::JumpIfZero(cond, label) => {
@@ -370,12 +436,10 @@ impl X86_64RawBackend {
             }
 
 
-            // Ignore labels here
-
-            IRInst::Label(_) => {}
+            IRInst::Label(name) => {
+                out.push_str(&format!("{}:\n", name));
+            }
             IRInst::Extern(_) => {}
-
-            _ => {}
         }
     }
 }
@@ -406,7 +470,7 @@ impl Architecture for X86_64RawBackend {
         out.push_str("    hlt\n");
         out.push_str("    jmp .halt\n\n");
 
-        let funcs = Self::split_functions(ir);
+        let funcs = self.split_functions(ir);
 
         for (name, body) in funcs {
             self.emit_function(&mut out, &name, &body);

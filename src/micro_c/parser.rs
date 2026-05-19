@@ -52,7 +52,6 @@ impl Parser {
         while self.current != Token::EOF {
             match self.current.clone() {
                 Token::Include(path) => stmts.extend(self.parse_import(path)),
-                Token::Import => stmts.extend(self.parse_import_stmt()),
                 _ => stmts.push(self.parse_stmt()),
             }
         }
@@ -69,8 +68,8 @@ impl Parser {
             Token::If => self.parse_if(),
             Token::Loop => self.parse_loop(),
             Token::Return => self.parse_return(),
-            Token::Include(_) | Token::Import => {
-                error("imports are only supported at the top level");
+            Token::Include(_) => {
+                error("#include is only supported at the top level");
                 self.advance();
                 Stmt::None
             }
@@ -195,27 +194,6 @@ impl Parser {
 
     fn parse_import(&mut self, path: String) -> Vec<Stmt> {
         self.advance();
-
-        let source = open_file_or_lib(&path);
-        let mut parser = Parser::new(Lexer::new(&source));
-        let mut stmts = parser.parse_program();
-        stmts.insert(0, Stmt::Import { name: path });
-        stmts
-    }
-
-    fn parse_import_stmt(&mut self) -> Vec<Stmt> {
-        self.advance();
-
-        let path = match self.current.clone() {
-            Token::Ident(s) => s,
-            _ => {
-                error("Expected import name");
-                self.advance();
-                return vec![Stmt::None]
-            }
-        };
-        self.advance();
-        self.expect(Token::Semicolon);
 
         let source = open_file_or_lib(&path);
         let mut parser = Parser::new(Lexer::new(&source));

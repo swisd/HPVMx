@@ -100,6 +100,11 @@ impl Architecture for WIN64Backend {
 
                 // func label
                 IRInst::Label(name) => {
+                    if !self.function_params.contains_key(name) {
+                        out.push_str(&format!("{}:\n", name));
+                        continue;
+                    }
+
                     let actual = if name == "main" {
                         "micro_main"
                     } else {
@@ -161,6 +166,28 @@ impl Architecture for WIN64Backend {
                     ));
                 }
 
+                IRInst::StackAlloc(dst, size) => {
+                    let rd = self.regs.alloc(dst);
+                    let size = if *size <= 0 { 8 } else { *size };
+
+                    out.push_str(&format!("    sub rsp, {}\n", size));
+                    out.push_str(&format!("    mov {}, rsp\n", rd));
+                }
+
+                IRInst::LoadMem(dst, addr) => {
+                    let rd = self.regs.alloc(dst);
+                    let ra = self.regs.alloc(addr);
+
+                    out.push_str(&format!("    mov {}, [{}]\n", rd, ra));
+                }
+
+                IRInst::StoreMem(addr, src) => {
+                    let ra = self.regs.alloc(addr);
+                    let rs = self.regs.alloc(src);
+
+                    out.push_str(&format!("    mov [{}], {}\n", ra, rs));
+                }
+
                 IRInst::Add(dst, a, b) => {
                     let rd = self.regs.alloc(dst);
                     let ra = self.regs.alloc(a);
@@ -177,6 +204,26 @@ impl Architecture for WIN64Backend {
 
                     out.push_str(&format!("    mov {}, {}\n", rd, ra));
                     out.push_str(&format!("    sub {}, {}\n", rd, rb));
+                }
+
+                IRInst::Mul(dst, a, b) => {
+                    let rd = self.regs.alloc(dst);
+                    let ra = self.regs.alloc(a);
+                    let rb = self.regs.alloc(b);
+
+                    out.push_str(&format!("    mov {}, {}\n", rd, ra));
+                    out.push_str(&format!("    imul {}, {}\n", rd, rb));
+                }
+
+                IRInst::Div(dst, a, b) => {
+                    let rd = self.regs.alloc(dst);
+                    let ra = self.regs.alloc(a);
+                    let rb = self.regs.alloc(b);
+
+                    out.push_str(&format!("    mov rax, {}\n", ra));
+                    out.push_str("    cqo\n");
+                    out.push_str(&format!("    idiv {}\n", rb));
+                    out.push_str(&format!("    mov {}, rax\n", rd));
                 }
 
                 IRInst::Call(dst, func, args) => {
@@ -252,6 +299,28 @@ impl Architecture for WIN64Backend {
                     out.push_str(&format!("    mov {}, rax\n", rd));
                 }
 
+                IRInst::LtEq(dst, a, b) => {
+                    let rd = self.regs.alloc(dst);
+                    let ra = self.regs.alloc(a);
+                    let rb = self.regs.alloc(b);
+
+                    out.push_str(&format!("    cmp {}, {}\n", ra, rb));
+                    out.push_str("    setle al\n");
+                    out.push_str("    movzx rax, al\n");
+                    out.push_str(&format!("    mov {}, rax\n", rd));
+                }
+
+                IRInst::GtEq(dst, a, b) => {
+                    let rd = self.regs.alloc(dst);
+                    let ra = self.regs.alloc(a);
+                    let rb = self.regs.alloc(b);
+
+                    out.push_str(&format!("    cmp {}, {}\n", ra, rb));
+                    out.push_str("    setge al\n");
+                    out.push_str("    movzx rax, al\n");
+                    out.push_str(&format!("    mov {}, rax\n", rd));
+                }
+
                 IRInst::JumpIfZero(cond, label) => {
                     let rc = self.regs.alloc(cond);
 
@@ -262,8 +331,6 @@ impl Architecture for WIN64Backend {
                 IRInst::Jump(label) => {
                     out.push_str(&format!("    jmp {}\n", label));
                 }
-
-                _ => {}
             }
         }
 

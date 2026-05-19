@@ -75,7 +75,7 @@ export fn main() {
     fn imports_builtin_sys_declarations() {
         let asm = compile(
             r#"
-import Sys;
+#include <Sys>
 
 export fn main() {
     return malloc(8);
@@ -87,5 +87,66 @@ export fn main() {
         assert!(asm.contains("extern malloc"));
         assert!(asm.contains("extern free"));
         assert!(asm.contains("call malloc"));
+    }
+
+    #[test]
+    fn compiles_memory_and_index_operations() {
+        let asm = compile(
+            r#"
+export fn main() {
+    let ptr = 0x1000;
+    ptr[1] = 7;
+    poke(ptr, 42);
+    return peek(ptr) + ptr[1];
+}
+"#,
+            "x86_64",
+        );
+
+        assert!(asm.contains("mov ["));
+        assert!(asm.contains("mov "));
+    }
+
+    #[test]
+    fn compiles_struct_field_operations() {
+        let asm = compile(
+            r#"
+struct Point {
+    x: i64;
+    y: i64;
+}
+
+export fn main() {
+    let p = alloc_struct(Point);
+    p.x = 10;
+    p.y = 20;
+    return p.x + p.y;
+}
+"#,
+            "x86_64",
+        );
+
+        assert!(asm.contains("sub rsp, 16"));
+        assert!(asm.contains("mov ["));
+    }
+
+    #[test]
+    fn compiles_loop_break_and_continue() {
+        let asm = compile(
+            r#"
+export fn main() {
+    loop {
+        continue;
+        break;
+    }
+
+    return 0;
+}
+"#,
+            "x86_64",
+        );
+
+        assert!(asm.contains("jmp L"));
+        assert!(asm.contains("L"));
     }
 }
