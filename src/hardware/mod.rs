@@ -1,6 +1,7 @@
 //! Hardware abstraction layer with virtualization support
 
 pub mod cpu;
+pub mod pci;
 //mod vmx;
 
 #[cfg(target_arch = "x86_64")]

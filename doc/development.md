@@ -161,7 +161,8 @@ Sample Registration:
 
 ## 3. Package System
 
-HPVMx uses a registry-based package manager located in `/packages`.
+HPVMx uses a registry-based package manager located in `/packages`. THis package manager only
+supports micro-c since it can be downloaded and compiled natively on HPVMx.
 
 ### Package Registry (`registry.json`)
 
@@ -183,7 +184,7 @@ Example entry:
   "type": "Executable",
   "author": "HPVMx Team",
   "deps": ["core-lib", "net-lib"],
-  "entry_point": "/bin/netutil.asm",
+  "entry_point": "main",
   "description": "Advanced network diagnostic tools."
 }
 ```
@@ -200,6 +201,14 @@ Example entry:
 ## 4. EFI Applications
 
 Since HPVMx runs on UEFI, you can execute standard `.efi` binaries.
+
+> [!WARNING]  
+> This feature is deprecated and soon to be removed. `.efi` binaries will be loaded into an EfiVirtualizedContext and then ran, 
+> allowing HPVMx to continue running in the backgorund and monitor the efi behavior.
+
+> [!CAUTION]
+> Running an efi using run-efi locks out the os 
+> and can result in majot security vulnerabilities.
 
 ### Execution
 

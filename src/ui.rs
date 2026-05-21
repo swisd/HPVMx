@@ -77,6 +77,7 @@ pub struct DashboardUI {
     pub selected_file_idx: usize,
     pub categories: Vec<DeviceCategory>,
     pub selected_device_idx: usize,
+    pub device_action_idx: usize,
     exit_requested: bool,
 
     // Fields for Create VM UI
@@ -122,6 +123,7 @@ pub struct DashboardUI {
 
 
     pub glitch_y: usize,
+    pub pci_devices: Vec<crate::hardware::pci::PciDeviceInfo>,
 }
 
 #[derive(Clone, Debug)]
@@ -418,6 +420,7 @@ impl DashboardUI {
             selected_file_idx: 0,
             categories: Vec::new(),
             selected_device_idx: 0,
+            device_action_idx: 0,
             exit_requested: false,
             new_vm_name: String::from("NewVM"),
             new_vm_memory_mb: 256,
@@ -483,6 +486,7 @@ impl DashboardUI {
             command_palette_selected: 0,
             command_palette_scroll_offset: 0,
             glitch_y: 0,
+            pci_devices: Vec::new(),
         }
     }
 
@@ -611,6 +615,7 @@ impl DashboardUI {
             self.iter += 1;
             let mut pg = pg.with_backbuffer();
             let (width, height) = pg.resolution();
+            pg.fontid = self.settings.terminal_font as u8;
             
             // Draw background
             pg.clear(0x222222);
@@ -1150,11 +1155,41 @@ impl DashboardUI {
                         if cat_name.contains("PCI") {
                             pg.draw_text(detail_x + 10, dy, "PCI Information:", 0x00FFFF);
                             dy += 20;
-                            // Attempt to extract Vendor/Device ID if present in path (e.g. Pci(0x1,0x0))
-                            pg.draw_text(detail_x + 10, dy, "Scanning for PCI Vendor/Device IDs...", 0x666666);
+                            // Search for more detailed info in self.pci_devices
+                            if let Some(pci) = self.pci_devices.iter().find(|p| {
+                                format!("{:02X}:{:02X}.{}", p.bus, p.device, p.function) == dev.name
+                            }) {
+                                pg.draw_text(detail_x + 10, dy, &format!("Vendor:   {}", pci.vendor_name()), 0xFFFFFF);
+                                dy += 16;
+                                pg.draw_text(detail_x + 10, dy, &format!("Device:   0x{:04X}", pci.device_id), 0xFFFFFF);
+                                dy += 16;
+                                pg.draw_text(detail_x + 10, dy, &format!("Class:    {}", pci.class_name()), 0xFFFFFF);
+                                dy += 16;
+                                pg.draw_text(detail_x + 10, dy, &format!("Revision: 0x{:02X}", pci.revision_id), 0xCCCCCC);
+                                dy += 16;
+                                pg.draw_text(detail_x + 10, dy, &format!("Interface: 0x{:02X}", pci.interface_id), 0xCCCCCC);
+                                dy += 20;
+                                pg.draw_text(detail_x + 10, dy, "Hardware Status: Online", 0x55FF55);
+                            } else {
+                                pg.draw_text(detail_x + 10, dy, "Scanning for PCI Vendor/Device IDs...", 0x666666);
+                            }
                         }
                     } else {
                         pg.draw_text(detail_x + 10, detail_y + 10, "Select a device to view properties", 0x888888);
+                    }
+
+                    // Device Actions
+                    let action_y = detail_y + detail_h + 20;
+                    let actions = ["Refresh List", "Scan PCI Bus", "Diagnostics", "Toggle Expanded"];
+                    let mut ax = 20;
+                    for (idx, action) in actions.iter().enumerate() {
+                        let is_focused = idx == self.device_action_idx && !self.term_selected;
+                        pg.fill_rect(ax, action_y, 140, 26, if is_focused { 0x00AA00 } else { 0x444444 });
+                        pg.draw_text(ax + 8, action_y + 5, action, 0xFFFFFF);
+                        ax += 150;
+                    }
+                    if self.device_action_idx == 1 {
+                        pg.draw_text(20, action_y + 35, "Scans the PCI bus using Port IO (0xCF8/0xCFC) to detect hardware", 0x00AAAA);
                     }
                 }
                 DashboardTab::Storage => {
@@ -1584,16 +1619,64 @@ impl DashboardUI {
                     }
 
                     let detail_x = list_x + list_w + 30;
-                    pg.draw_rect_outline(detail_x, list_y, 520, 220, 0x888888);
-                    pg.draw_text(detail_x + 10, list_y + 10, "Selected Package", 0x00FF00);
+                    let detail_w = 520;
+                    pg.draw_rect_outline(detail_x, list_y, detail_w, 420, 0x888888);
+                    pg.fill_rect(detail_x + 1, list_y + 1, detail_w - 2, 18, 0x333333);
+                    pg.draw_text(detail_x + 8, list_y + 4, "PACKAGE DETAILS", 0x00FF00);
+                    
                     if let Some(name) = self.selected_package_name() {
                         if let Some(pkg) = self.package_manager.registry.get(&name) {
-                            pg.draw_text(detail_x + 10, list_y + 40, &format!("Name: {}", pkg.name), 0xFFFFFF);
-                            pg.draw_text(detail_x + 10, list_y + 60, &format!("Version: {}", pkg.version), 0xFFFFFF);
-                            pg.draw_text(detail_x + 10, list_y + 80, &format!("Type: {:?}", pkg.package_type), 0xFFFFFF);
-                            pg.draw_text(detail_x + 10, list_y + 100, &format!("Author: {}", pkg.author), 0xFFFFFF);
-                            pg.draw_text(detail_x + 10, list_y + 120, &format!("Deps: {}", if pkg.deps.is_empty() { String::from("none") } else { pkg.deps.join(", ") }), 0xCCCCCC);
-                            pg.draw_text(detail_x + 10, list_y + 145, &pkg.description, 0xAAAAAA);
+                            let mut dy = list_y + 30;
+                            pg.draw_text(detail_x + 10, dy, &format!("Name:      {}", pkg.name), 0xFFFFFF);
+                            dy += 20;
+                            pg.draw_text(detail_x + 10, dy, &format!("Version:   {}", pkg.version), 0x00FFFF);
+                            dy += 20;
+                            pg.draw_text(detail_x + 10, dy, &format!("Type:      {:?}", pkg.package_type), 0xAAAAAA);
+                            dy += 20;
+                            pg.draw_text(detail_x + 10, dy, &format!("Author:    {}", pkg.author), 0xFFFFFF);
+                            dy += 20;
+                            
+                            if let Some(ref url) = pkg.repo_url {
+                                pg.draw_text(detail_x + 10, dy, &format!("Repo:      {}", url), 0x5555FF);
+                                dy += 20;
+                            }
+
+                            let status_color = if pkg.has_compilation_issues { 0xFF5555 } else { 0x55FF55 };
+                            let status_text = if pkg.has_compilation_issues { "FAILED / ISSUES" } else { "READY / OK" };
+                            pg.draw_text(detail_x + 10, dy, &format!("Status:    {}", status_text), status_color);
+                            dy += 30;
+
+                            pg.draw_text(detail_x + 10, dy, "Dependencies:", 0x00FF00);
+                            dy += 20;
+                            if pkg.deps.is_empty() {
+                                pg.draw_text(detail_x + 20, dy, "none", 0x888888);
+                                dy += 20;
+                            } else {
+                                for dep in &pkg.deps {
+                                    pg.draw_text(detail_x + 20, dy, &format!("- {}", dep), 0xCCCCCC);
+                                    dy += 16;
+                                }
+                            }
+                            dy += 10;
+                            
+                            pg.draw_text(detail_x + 10, dy, "Description:", 0x00FF00);
+                            dy += 20;
+                            // Basic wrapping for description
+                            let desc = &pkg.description;
+                            let words: Vec<&str> = desc.split_whitespace().collect();
+                            let mut line = String::new();
+                            for word in words {
+                                if line.len() + word.len() > 60 {
+                                    pg.draw_text(detail_x + 20, dy, &line, 0xAAAAAA);
+                                    dy += 16;
+                                    line.clear();
+                                }
+                                if !line.is_empty() { line.push(' '); }
+                                line.push_str(word);
+                            }
+                            if !line.is_empty() {
+                                pg.draw_text(detail_x + 20, dy, &line, 0xAAAAAA);
+                            }
                         }
                     } else {
                         pg.draw_text(detail_x + 10, list_y + 40, "No packages loaded", 0xAAAAAA);
@@ -1603,9 +1686,13 @@ impl DashboardUI {
                     let mut action_x = 40;
                     let action_y = list_y + list_h + 24;
                     for (idx, action) in actions.iter().enumerate() {
-                        pg.fill_rect(action_x, action_y, 110, 26, if idx == self.package_action_idx { 0x00AA00 } else { 0x444444 });
+                        let is_focused = idx == self.package_action_idx;
+                        pg.fill_rect(action_x, action_y, 110, 26, if is_focused { 0x00AA00 } else { 0x444444 });
                         pg.draw_text(action_x + 8, action_y + 5, action, 0xFFFFFF);
                         action_x += 120;
+                    }
+                    if self.package_action_idx == 1 {
+                        pg.draw_text(40, action_y + 30, "Verifies package dependencies and integrity", 0x00AAAA);
                     }
                     pg.draw_text(40, action_y + 40, "UP/DOWN selects package, LEFT/RIGHT chooses action, ENTER runs it", 0x888888);
                     pg.draw_text(40, action_y + 60, &self.status_line, 0xFFFF00);
@@ -1752,6 +1839,7 @@ impl DashboardUI {
     }
 
     pub fn refresh_devices(&mut self) {
+        self.pci_devices = crate::hardware::pci::scan_bus();
         let device_map = &crate::filesystem::FileSystem::get_state().device_map;
         
         // Group devices by categories
@@ -1811,10 +1899,17 @@ impl DashboardUI {
                 icon: String::from("[C] "),
             });
         }
-        if !pcis.is_empty() {
+        if !pcis.is_empty() || !self.pci_devices.is_empty() {
+            let mut pci_entries = pcis;
+            for pci in &self.pci_devices {
+                pci_entries.push(DeviceEntry {
+                    name: format!("{:02X}:{:02X}.{}", pci.bus, pci.device, pci.function),
+                    path: format!("{} [0x{:04X}:0x{:04X}]", pci.class_name(), pci.vendor_id, pci.device_id),
+                });
+            }
             self.categories.push(DeviceCategory {
                 name: String::from("PCI Devices"),
-                devices: pcis,
+                devices: pci_entries,
                 expanded: *expanded_map.get("PCI Devices").unwrap_or(&false),
                 icon: String::from("[P] "),
             });
@@ -2356,6 +2451,10 @@ impl DashboardUI {
             "Help: Package Manager Help" => run_help("pm", &mut self.package_manager),
             "Help: Micro-C Help" => run_help("micro-c", &mut self.package_manager),
             "Help: Misc Help" => run_help("misc", &mut self.package_manager),
+            "System: Scan PCI Bus" => {
+                self.pci_devices = crate::hardware::pci::scan_bus();
+                self.notifications.push((format!("PCI Scan: {} devices found", self.pci_devices.len()), 120));
+            }
             _ => {}
         }
     }

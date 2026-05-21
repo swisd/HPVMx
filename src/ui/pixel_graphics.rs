@@ -24,6 +24,7 @@ pub struct PixelGraphics {
     stride: usize,
     backbuffer: Option<alloc::vec::Vec<u32>>,
     pub glitch_y: usize,
+    pub fontid: u8,
 }
 
 
@@ -41,6 +42,7 @@ impl PixelGraphics {
         max_val: u64,
         color: u32,
         len: usize // This is our visible "window" size
+
     ) {
         if data.len() < 2 { return; }
 
@@ -100,6 +102,7 @@ impl PixelGraphics {
             stride,
             backbuffer: None,
             glitch_y: 0,
+            fontid: 0,
         })
     }
 
@@ -244,7 +247,7 @@ impl PixelGraphics {
     }
 
     pub fn draw_char(&mut self, x: usize, y: usize, c: char, color: u32) {
-        let font_data = get_font_data(c);
+        let font_data = get_font_data(c, self.fontid);
         for row in 0..16 {
             for col in 0..8 {
                 if (font_data[row] & (1 << (7 - col))) != 0 {
@@ -255,7 +258,7 @@ impl PixelGraphics {
     }
 
     pub fn draw_char_adv(&mut self, x: usize, y: usize, c: char, color: u32, scale: usize) {
-        let font_data = get_font_data(c);
+        let font_data = get_font_data(c, self.fontid);
         for row in 0..16 {
             for col in 0..8 {
                 if (font_data[row] & (1 << (7 - col))) != 0 {
@@ -296,7 +299,7 @@ impl PixelGraphics {
     }
 
     pub fn draw_char_bg(&mut self, x: usize, y: usize, c: char, color: u32, bg: u32) {
-        let font_data = get_font_data(c);
+        let font_data = get_font_data(c, self.fontid);
         for row in 0..16 {
             for col in 0..8 {
                 if (font_data[row] & (1 << (7 - col))) != 0 {
@@ -1065,14 +1068,73 @@ impl PixelGraphics {
 }
 
 /// Simple 8x16 font data
-fn get_font_data(c: char) -> [u8; 16] {
+fn get_font_data(c: char, id: u8) -> [u8; 16] {
     let code = c as usize;
     if code < 256 {
-        BASIC_FONT[code]
+        match id {
+            0 => BASIC_FONT[code],
+            1 => bold_char(&BASIC_FONT[code]),
+            _ => [0x00, 0x00, 0x00, 0x00, 0x10, 0x28, 0x08, 0x10, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        }
     } else {
         [0x00, 0x00, 0x00, 0x00, 0x10, 0x28, 0x08, 0x10, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
     }
 }
+
+pub fn make_bold_font(base: &[[u8; 16]; 256]) -> [[u8; 16]; 256] {
+    let mut bold = [[0u8; 16]; 256];
+
+    for ch in 0..256 {
+        for y in 0..16 {
+            let row = base[ch][y];
+
+            // Horizontal thickening
+            let thick =
+                row |
+                    (row << 1) |
+                    (row >> 1);
+
+            // Optional vertical smoothing
+            let mut final_row = thick;
+
+            if y > 0 {
+                final_row |= base[ch][y - 1];
+            }
+
+            if y < 15 {
+                final_row |= base[ch][y + 1];
+            }
+
+            bold[ch][y] = final_row;
+        }
+    }
+
+    bold
+}
+
+fn bold_char(ch: &[u8;16]) -> [u8;16] {
+    let mut bold = [0u8;16];
+
+    for y in 0..16 {
+        let row = ch[y];
+
+        // Horizontal thickening (1 pixel left, 1 pixel right)
+        let thick = row | /*(row << 1) |*/ (row >> 1);
+
+        // Vertical thickening (1 pixel top, 1 pixel bottom)
+        let mut final_row = thick;
+        if y > 0 {
+            // final_row |= ch[y - 1]; // Previous row
+        }
+        if y < 15 {
+            final_row |= ch[y + 1]; // Next row
+        }
+
+        bold[y] = final_row;
+    }
+    bold
+}
+
 
 fn get_sym_data(s: u16) -> [u8; 16] { // max 65535
     let code = s as usize;
@@ -1226,6 +1288,7 @@ const BASIC_FONT: [[u8; 16]; 256] = {
 
     font
 };
+
 
 const SYMBOL_LIB: [[u8; 16]; 256] = {
     let mut library = [[0u8; 16]; 256];

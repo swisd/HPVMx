@@ -1,0 +1,11 @@
+[package]
+name = "PGUI-EDIT"
+version = "0.1.0"
+edition = "2024"
+
+
+[dependencies]
+winit = "0.30.13"
+pixels = "0.17.1"
+font8x8 = "0.3"
+# Include your custom pixel_graphics crate modules if needed, or embed the logic
