@@ -96,6 +96,30 @@ Launch `MicroIDE` from the **Apps** tab in the dashboard.
 - [Development Manual](doc/development.md): Guide for creating apps and extensions for HPVMx.
 - [Project Architecture](hpvmx.md): Deep dive into the internal design of HPVMx.
 
+## Planned Additions and Removals
+
+### Upcoming Additions
+
+
+- `EfiVirtualizedContext`
+- `VirtualizedRuntime`
+- vm iso loading
+- vm `WindowedDisplay`
+- vm terminal connection
+- micro-c jit compiler
+- micro-c live code
+- `SteppedApplicationContext` improvements
+
+### Deprecations
+
+
+- `ApplicationContext`
+- command `run-efi`
+- command `load-into`
+- command `start`
+- command `run-app`
+
+
 ## Gallery
 
 ![Storage-Old](/doc/img/dash01.png)

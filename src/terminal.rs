@@ -181,11 +181,12 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
             }
         }
         "start" => {
-            if command.len() < 2 {
-                message!("\n", "Usage: start [kernel_path]");
-            } else {
-                start_kernel(command[1]);
-            }
+            // if command.len() < 2 {
+            //     message!("\n", "Usage: start [kernel_path]");
+            // } else {
+            //     start_kernel(command[1]);
+            // }
+            message!("\n", "start is deprecated.")
         }
         "enter" => {
             enter(body.as_slice()[1])
@@ -224,11 +225,12 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
 
         // New: Run EFI applications
         "run-efi" => {
-            if command.len() < 2 {
-                message!("\n", "Usage: run-efi [efi_path] [args...]");
-            } else {
-                run_efi_application(command[1], &command[2..]);
-            }
+            // if command.len() < 2 {
+            //     message!("\n", "Usage: run-efi [efi_path] [args...]");
+            // } else {
+            //     run_efi_application(command[1], &command[2..]);
+            // }
+            message!("\n", "run-efi is deprecated.")
         }
 
         // New: Dashboard UI
@@ -323,11 +325,12 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
             }
         }
         "load-into" => unsafe {
-            if command.len() == 2 {
-                loader::load_and_jump_os(command[1])
-            } else {
-                message!("\n", "Usage: load-into [efi path]")
-            }
+            // if command.len() == 2 {
+            //     loader::load_and_jump_os(command[1])
+            // } else {
+            //     message!("\n", "Usage: load-into [efi path]")
+            // }
+            message!("\n", "load-into is deprecated.")
 
         }
 
