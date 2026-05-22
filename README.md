@@ -2,8 +2,9 @@
 
 A bare-metal (+BIOS & EFI) hardware provisioning and virtualization manager written in Rust. HPVMx provides a complete environment for managing virtual machines, exploring storage, and developing software on bare metal.
 
-![](https://img.shields.io/badge/latest_version-1.9.8-blue)
-
+![](https://img.shields.io/badge/latest_version-1.9.12-blue)\
+![](https://img.shields.io/badge/supported_version*-1.9.8-green)
+> *supported version is the oldest verion that does not have to be updated to the newest version
 
 ## Key Features
 
@@ -19,7 +20,7 @@ A bare-metal (+BIOS & EFI) hardware provisioning and virtualization manager writ
 ### Prerequisites
 
 - Rust toolchain (nightly recommended)
-- QEMU (for emulation)
+- QEMU/VirtualBox (for emulation) or physical machine
 - OVMF/UEFI firmware (included as `code.fd` and `vars.fd`)
 
 ### Building and Running
@@ -109,6 +110,7 @@ Launch `MicroIDE` from the **Apps** tab in the dashboard.
 - micro-c jit compiler
 - micro-c live code
 - `SteppedApplicationContext` improvements
+- xml based ui formatting for micro-c apps and future applications
 
 ### Deprecations
 
