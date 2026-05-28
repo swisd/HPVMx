@@ -1,9 +1,6 @@
 - micro-c
   - jit compilability and live interpreting
 
-
-- improve appcontext
-
-- pm server + misc improvements
+- pm server and misc improvements
 
 - installer

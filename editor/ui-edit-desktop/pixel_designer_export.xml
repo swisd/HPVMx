@@ -1,0 +1,28 @@
+<PixelDesignerLayout>
+  <Canvas x="240" y="50" width="1269" height="1104" grid="20" />
+  <Elements>
+    <Button x="280" y="80" width="120" height="30" text="Click Me" is_focused="false" />
+    <Checkbox x="280" y="120" width="150" height="18" checked="true" blocked="false" disabled="false" text="Option" />
+    <TableView x="420" y="80" width="220" height="180"/>
+    <TableView x="660" y="80" width="220" height="180"/>
+    <TreeView x="380" y="280" width="250" height="220" root="root" />
+    <TreeView x="660" y="280" width="250" height="220" root="root" />
+    <FillRect x="280" y="160" width="100" height="50" color="0x444444" />
+    <FillRect x="380" y="520" width="100" height="50" color="0x444444" />
+    <ProgressBar x="940" y="80" width="200" height="25" value="30" max="100" color="0x00FF00" />
+    <LineGraph x="920" y="120" width="300" height="150" max_val="100" color="0x00FFFF" len="10" />
+    <LCDNumber x="1160" y="80" width="72" height="24" value="0000" />
+    <ListView x="920" y="280" width="220" height="180"/>
+    <TreeViewIcon x="660" y="520" width="250" height="220" root="root" icon="ICON_DATA" />
+    <TristateCheckbox x="280" y="220" width="165" height="18" text="Tristate" color="0xFFFFFF" some="false" checked="false" />
+    <RadioButton x="240" y="460" width="40" height="40" checked="false" />
+    <Slider x="260" y="240" width="150" height="20" value="50" max="100" vertical="false" />
+    <Dial x="260" y="280" width="60" height="60" radius="30" value="25" max="100" />
+    <SpinBox x="240" y="360" width="80" height="24" value="0" label="Label" />
+    <DoubleSpinBox x="240" y="400" width="100" height="24" value="0.0" precision="2" />
+    <Line x="920" y="500" width="280" height="180" x2="1200" y2="680" color="0xFFFFFF" />
+    <RadioButton x="240" y="480" width="18" height="18" checked="false" />
+    <Label x="260" y="460" width="96" height="18" text="RB1/2" color="0xFFFFFF" />
+    <RectOutline x="240" y="440" width="100" height="80" color="0x444444" />
+  </Elements>
+</PixelDesignerLayout>

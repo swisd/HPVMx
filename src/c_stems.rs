@@ -265,7 +265,7 @@ struct Block {
     next: *mut Block,
 }
 
-// Safety: We will manage the heap manually.
+
 struct Heap {
     heap: core::cell::UnsafeCell<[u8; HEAP_SIZE]>,
     free_list: *mut Block,

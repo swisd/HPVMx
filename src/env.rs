@@ -11,8 +11,7 @@ use alloc::vec::Vec;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
-use uefi::proto::console::text::{Key, OutputMode};
-use uefi::system;
+use uefi::proto::console::text::Key;
 use crate::apps;
 use crate::apps::AppConstructor;
 use crate::hpvmlog::LOGGING_SILENCED;
@@ -226,18 +225,72 @@ pub struct SteppedApplicationContext {
     pub global: bool,
     pub metadata: BTreeMap<String, String>,
     pub environment: Environment,
+    pub local_vars: Vec<String>,
+    pub window: WindowState,
     pub exit_requested: bool,
 }
 
 pub enum AppOrBackground {
     App(Application),
-    Background(Application),
+    Background(Background),
 }
 
 pub struct BackgroundSteppedApplicationContext {
     pub parent: Unknown<AppOrBackground>,
+    pub background: Background,
+    pub metadata: BTreeMap<String, String>,
     pub environment: Environment,
+    pub local_vars: Vec<String>,
     pub exit_requested: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct WindowState {
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
+}
+
+impl WindowState {
+    pub const TITLE_BAR_HEIGHT: usize = 20;
+    pub const BORDER: usize = 2;
+    pub const MIN_WIDTH: usize = 120;
+    pub const MIN_HEIGHT: usize = 80;
+
+    pub fn new(x: usize, y: usize, content_width: usize, content_height: usize) -> Self {
+        Self {
+            x,
+            y,
+            width: core::cmp::max(content_width + Self::BORDER, Self::MIN_WIDTH),
+            height: core::cmp::max(content_height + Self::TITLE_BAR_HEIGHT, Self::MIN_HEIGHT),
+        }
+    }
+
+    pub fn content_origin(&self) -> (usize, usize) {
+        (self.x + Self::BORDER, self.y + Self::TITLE_BAR_HEIGHT)
+    }
+
+    pub fn move_by(&mut self, dx: isize, dy: isize, bounds: (usize, usize)) {
+        self.x = offset_clamped(self.x, dx, bounds.0.saturating_sub(self.width));
+        self.y = offset_clamped(self.y, dy, bounds.1.saturating_sub(self.height));
+    }
+
+    pub fn resize_by(&mut self, dw: isize, dh: isize, bounds: (usize, usize)) {
+        let max_width = bounds.0.saturating_sub(self.x).max(Self::MIN_WIDTH);
+        let max_height = bounds.1.saturating_sub(self.y).max(Self::MIN_HEIGHT);
+
+        self.width = offset_clamped(self.width, dw, max_width).max(Self::MIN_WIDTH);
+        self.height = offset_clamped(self.height, dh, max_height).max(Self::MIN_HEIGHT);
+    }
+}
+
+fn offset_clamped(value: usize, delta: isize, max: usize) -> usize {
+    if delta.is_negative() {
+        value.saturating_sub(delta.unsigned_abs()).min(max)
+    } else {
+        value.saturating_add(delta as usize).min(max)
+    }
 }
 
 #[allow(deprecated)]
@@ -336,6 +389,7 @@ impl ApplicationContext {
 
 impl SteppedApplicationContext {
     pub fn new(app: Application, background_tasks: Unknown<Vec<Box<dyn BackgroundTask>>>) -> SteppedApplicationContext {
+        let dimensions = app.dimensions;
         SteppedApplicationContext {
             parent: None,
             application: app,
@@ -343,8 +397,16 @@ impl SteppedApplicationContext {
             global: false,
             metadata: BTreeMap::new(),
             environment: Environment::new(),
+            local_vars: Vec::new(),
+            window: WindowState::new(100, 100, dimensions.0, dimensions.1),
             exit_requested: false,
         }
+    }
+
+    pub fn with_window_position(mut self, x: usize, y: usize) -> Self {
+        self.window.x = x;
+        self.window.y = y;
+        self
     }
 
     /// Performs one 'tick' of the application.
@@ -358,14 +420,11 @@ impl SteppedApplicationContext {
         // 1. Update Environment
         self.application.local_env = self.environment.clone();
 
-        // 2. Run logic and draw
-        // Note: You may want to pass a sub-region/viewport here later
-        let mut app_local_vars = Vec::new();
-        self.application.logic(&mut app_local_vars, &mut self.environment);
-        if let Some(pg) = PixelGraphics::new() {
-            let mut pg = pg.with_backbuffer();
-            self.application.draw(&mut pg, &mut app_local_vars, 200, 200);
+        // 2. Run background work and app logic.
+        if let Some(tasks) = self.background_tasks.as_mut() {
+            tasks.retain_mut(|task| !task.tick(&mut self.local_vars, &mut self.environment));
         }
+        self.application.logic(&mut self.local_vars, &mut self.environment);
 
 
         // 3. Handle forwarded input
@@ -379,6 +438,19 @@ impl SteppedApplicationContext {
         }
 
         !self.exit_requested
+    }
+
+    pub fn draw(&self, graphics_entity: &mut PixelGraphics) {
+        let (x, y) = self.window.content_origin();
+        self.application.draw(graphics_entity, &self.local_vars, x, y);
+    }
+
+    pub fn move_window_by(&mut self, dx: isize, dy: isize, bounds: (usize, usize)) {
+        self.window.move_by(dx, dy, bounds);
+    }
+
+    pub fn resize_window_by(&mut self, dw: isize, dh: isize, bounds: (usize, usize)) {
+        self.window.resize_by(dw, dh, bounds);
     }
     pub fn handle_input(&mut self, key: Key) {
         use uefi::proto::console::text::ScanCode;
@@ -405,7 +477,10 @@ impl SteppedApplicationContext {
         app.name = name.to_string();
         app.dimensions = dims;
 
-        Some(SteppedApplicationContext::new(app, None))
+        let mut ctx = SteppedApplicationContext::new(app, None);
+        ctx.window = WindowState::new(100, 100, dims.0, dims.1);
+
+        Some(ctx)
     }
     pub fn from_name_custom_registry(name: &str, registry: &[(&str, AppConstructor, ICON32, &str)]) -> Option<SteppedApplicationContext> {
         let registry_entry = registry.iter()
@@ -418,12 +493,43 @@ impl SteppedApplicationContext {
         app.name = name.to_string();
         app.dimensions = dims;
 
-        Some(SteppedApplicationContext::new(app, None))
+        let mut ctx = SteppedApplicationContext::new(app, None);
+        ctx.window = WindowState::new(100, 100, dims.0, dims.1);
+
+        Some(ctx)
     }
 }
 
 impl BackgroundSteppedApplicationContext {
+    pub fn new(background: Background) -> Self {
+        Self {
+            parent: None,
+            background,
+            metadata: BTreeMap::new(),
+            environment: Environment::new(),
+            local_vars: Vec::new(),
+            exit_requested: false,
+        }
+    }
 
+    pub fn step(&mut self) -> bool {
+        let start_busy = unsafe { core::arch::x86_64::_rdtsc() };
+        if self.exit_requested {
+            return false;
+        }
+
+        self.background.local_env = Some(self.environment.clone());
+        if self.background.tick(&mut self.local_vars, &mut self.environment) {
+            self.exit_requested = true;
+        }
+
+        let end_busy = unsafe { core::arch::x86_64::_rdtsc() };
+        unsafe {
+            crate::hpvmlog::BUSY_TSC = crate::hpvmlog::BUSY_TSC.saturating_add(end_busy.saturating_sub(start_busy));
+        }
+
+        !self.exit_requested
+    }
 }
 /// Alias of Option\<T\>
 pub type Unknown<T> = Option<T>;

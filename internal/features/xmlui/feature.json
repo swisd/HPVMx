@@ -1,0 +1,8 @@
+{
+  "name": "xmlui",
+  "version": "0.0.1",
+  "description": "Hot-Reloadable XML based UIs",
+  "author": "swisd",
+  "deps": [],
+  "type": "dyn-feature"
+}

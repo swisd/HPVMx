@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<definitions>
+    <functions>
+        <Function name="PixelGraphics::new" args="" ret="Option<PixelGraphics>" />
+        <Function name="PixelGraphics::with_backbuffer" args="" ret="PixelGraphics" />
+        <Function name="PixelGraphics::backbuffer_slice_mut" args="" ret="Option<&amp;mut [u32]>" />
+        <Function name="PixelGraphics::flip" args="" ret="()" />
+        <Function name="PixelGraphics::exit" args="" ret="()" />
+        <Function name="PixelGraphics::draw_pixel" args="x: usize, y: usize, color: u32" ret="()" />
+        <Function name="PixelGraphics::fill_rect" args="x: usize, y: usize, width: usize, height: usize, color: u32" ret="()" />
+        <Function name="PixelGraphics::draw_line" args="x1: usize, y1: usize, x2: usize, y2: usize, color: u32" ret="()" />
+        <Function name="PixelGraphics::draw_line_adv" args="x1: usize, y1: usize, x2: usize, y2: usize, color: u32, thickness: usize, style: u32" ret="()" />
+        <Function name="PixelGraphics::draw_line_styled" args="x1: usize, y1: usize, x2: usize, y2: usize, color: u32, style: u32" ret="()" />
+        <Function name="PixelGraphics::draw_char" args="x: usize, y: usize, c: char, color: u32" ret="()" />
+        <Function name="PixelGraphics::draw_char_adv" args="x: usize, y: usize, c: char, color: u32, scale: usize" ret="()" />
+        <Function name="PixelGraphics::draw_symbol" args="x: usize, y: usize, symbol: u16, color: u32" ret="()" />
+        <Function name="PixelGraphics::draw_u64_le_sym" args="x: usize, y: usize, val: u64, color: u32" ret="()" />
+        <Function name="PixelGraphics::draw_char_bg" args="x: usize, y: usize, c: char, color: u32, bg: u32" ret="()" />
+        <Function name="PixelGraphics::draw_text" args="x: usize, y: usize, text: &amp;str, color: u32" ret="()" />
+        <Function name="PixelGraphics::draw_text_adv" args="x: usize, y: usize, text: &amp;str, color: u32, scale: usize" ret="()" />
+        <Function name="PixelGraphics::draw_text_bg" args="x: usize, y: usize, text: &amp;str, color: u32, bg: u32" ret="()" />
+        <Function name="PixelGraphics::draw_checkbox" args="x: usize, y: usize, checked: bool, blocked: bool, disabled: bool, text: &amp;str" ret="()" />
+        <Function name="PixelGraphics::draw_tristate_checkbox" args="x: usize, y: usize, text: &amp;str, color: u32, some: bool, checked: bool" ret="()" />
+        <Function name="PixelGraphics::draw_radio_button" args="x: usize, y: usize, checked: bool" ret="()" />
+        <Function name="PixelGraphics::draw_rect_outline" args="x: usize, y: usize, width: usize, height: usize, color: u32" ret="()" />
+        <Function name="PixelGraphics::draw_rect_outline_adv" args="x: usize, y: usize, width: usize, height: usize, color: u32, thickness: usize, style: u32" ret="()" />
+        <Function name="PixelGraphics::polygon_outline" args="points: &amp;[(usize, usize)], color: u32" ret="()" />
+        <Function name="PixelGraphics::polygon_fill" args="points: &amp;[(usize, usize)], color: u32" ret="()" />
+        <Function name="PixelGraphics::draw_progress_bar" args="x: usize, y: usize, width: usize, height: usize, value: usize, max: usize, color: u32" ret="()" />
+        <Function name="PixelGraphics::draw_slider" args="x: usize, y: usize, width: usize, value: usize, max: usize, vertical: bool" ret="()" />
+        <Function name="PixelGraphics::draw_lcd_number" args="x: usize, y: usize, value: &amp;str" ret="()" />
+        <Function name="PixelGraphics::clear" args="color: u32" ret="()" />
+        <Function name="PixelGraphics::draw_cursor" args="x: usize, y: usize" ret="()" />
+        <Function name="PixelGraphics::resolution" args="" ret="(usize, usize)" />
+        <Function name="PixelGraphics::draw_button" args="x: usize, y: usize, width: usize, height: usize, text: &amp;str, is_focused: bool" ret="()" />
+        <Function name="PixelGraphics::u64_sym_le" args="value: u64" ret="[u8; 16]" />
+        <Function name="PixelGraphics::draw_list_view" args="x: usize, y: usize, width: usize, height: usize, items: &amp;[&amp;str], selected_idx: Option<usize>" ret="()" />
+        <Function name="PixelGraphics::draw_table_view" args="x: usize, y: usize, width: usize, height: usize, headers: &amp;[&amp;str], rows: &amp;[&amp;[&amp;str]]" ret="()" />
+        <Function name="PixelGraphics::draw_tree_view" args="x: usize, y: usize, width: usize, height: usize, root: &amp;TreeViewNode" ret="()" />
+        <Function name="PixelGraphics::draw_tree_view_icon" args="x: usize, y: usize, width: usize, height: usize, root: &amp;TreeViewNode, icon: &amp;[u32]" ret="()" />
+        <Function name="PixelGraphics::draw_spinbox" args="x: usize, y: usize, width: usize, value: i32, label: &amp;str" ret="()" />
+        <Function name="PixelGraphics::draw_double_spinbox" args="x: usize, y: usize, width: usize, value: f64, precision: usize" ret="()" />
+        <Function name="PixelGraphics::draw_dial" args="x: usize, y: usize, radius: usize, value: usize, max: usize" ret="()" />
+        <Function name="PixelGraphics::draw_octagon_outline" args="x: usize, y: usize, r: usize, color_light: u32, color_dark: u32" ret="()" />
+        <Function name="PixelGraphics::draw_icon" args="x: usize, y: usize, width: usize, height: usize, data: &amp;[u32]" ret="()" />
+        <Function name="PixelGraphics::draw_package_icon" args="x: usize, y: usize, warning: bool" ret="()" />
+        <Function name="PixelGraphics::draw_buffer_at" args="x: usize, y: usize, width: usize, height: usize, buffer_ptr: *const u32" ret="()" />
+        <Function name="PixelGraphics::apply_scanlines" args="" ret="()" />
+        <Function name="PixelGraphics::apply_dither" args="" ret="()" />
+        <Function name="PixelGraphics::apply_glitch" args="gy: usize" ret="usize" />
+        <Function name="PixelGraphics::apply_edge_aberration" args="max_strength: f32" ret="()" />
+        <Function name="PixelGraphics::app_context_border" args="appname: &amp;str" ret="()" />
+        <Function name="PixelGraphics::draw_bmp" args="x: usize, y: usize, path: String" ret="()" />
+        <Function name="PixelGraphics::draw_bmp_bytes" args="x: usize, y: usize, data: &amp;[u8]" ret="()" />
+        <Function name="PixelGraphics::draw_heatmap" args="x: usize, y: usize, width: usize, height: usize, rows: usize, cols: usize, data: &amp;[f32]" ret="()" />
+        <Function name="PixelGraphics::draw_log_viewer" args="x: usize, y: usize, width: usize, height: usize, logs: &amp;[(uefi::proto::console::text::Color, String, String)]" ret="()" />
+        <Function name="PixelGraphics::draw_toast" args="text: &amp;str, duration_frames: &amp;mut usize, yadj: usize" ret="()" />
+        <Function name="PixelGraphics::draw_command_palette" args="query: &amp;str, results: &amp;[&amp;str], selected: usize, scroll_offset: usize" ret="()" />
+        <Function name="make_bold_font" args="base: &amp;[[u8; 16]; 256]" ret="[[u8; 16]; 256]" />
+        <Function name="get_font_data" args="c: char, id: u8" ret="[u8; 16]" />
+        <Function name="bold_char" args="ch: &amp;[u8; 16]" ret="[u8; 16]" />
+        <Function name="get_sym_data" args="s: u16" ret="[u8; 16]" />
+    </functions>
+    <globals>
+        <Global name="GOP_CACHE" type="Option<(*mut u32, usize, usize, usize)>" />
+        <Global name="BASIC_FONT" type="[[u8; 16]; 256]" />
+        <Global name="SYMBOL_LIB" type="[[u8; 16]; 256]" />
+        <Global name="RAM_ICON_DATA" type="[u32; 256]" />
+        <Global name="PCI_GREEN_ICON_DATA" type="[u32; 256]" />
+        <Global name="PCI_BLUE_ICON_DATA" type="[u32; 256]" />
+        <Global name="CPU_ICON_DATA" type="[u32; 256]" />
+        <Global name="HOURGLASS_ICON_DATA" type="[u32; 256]" />
+        <Global name="ETHERNET_ICON_DATA" type="[u32; 256]" />
+        <Global name="HDD_INTERNAL_ICON_DATA" type="[u32; 256]" />
+        <Global name="SETTINGS_ICON_DATA" type="[u32; 256]" />
+        <Global name="GTK_CUBE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="PACKAGE_ICON_DATA" type="[u32; 256]" />
+        <Global name="FOLDER_ICON_DATA" type="[u32; 256]" />
+        <Global name="FILE_ICON_DATA" type="[u32; 256]" />
+        <Global name="JSON_ICON_DATA" type="[u32; 256]" />
+        <Global name="CODE_ICON_DATA" type="[u32; 256]" />
+        <Global name="EXECUTABLE_ICON_DATA" type="[u32; 256]" />
+        <Global name="SERVER_ICON_DATA" type="[u32; 256]" />
+        <Global name="INTEGRATED_CIRCUIT_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="CUBE_WINDOW_RED_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="SCRIPT_BLUE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="SCRIPT_YELLOW_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINDOW_3D_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINDOW_CMD_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="OBJECT_KEY_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="REGEDIT_CUBES_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="GEAR_WINDOW_YELLOW_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="INTEGRATED_CIRCUIT_COMPOUND_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="TRAFFIC_LIGHT_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINOBJ_SEMAPHORE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINOBJ_TIMER_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINOBJ_REGISTRY_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINOBJ_DEVICE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINOBJ_EVENT_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINOBJ_PORT_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINOBJ_SECTION_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINOBJ_JOB_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINOBJ_MUTEX_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WINOBJ_FILTER_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="GEAR_YB_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="LIGHTBULB_ON_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="SPEAKER_ON_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="SPEAKER_OFF_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WARNING_ISSUE_SUB_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="CUBE_TREE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="GEAR_WINDOW_SETTINGS_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="FLOPPY_SAVE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="STEPS_STAIRS_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="REGISTRY_HIVE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="COMPUTE_UNIT_H_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="COMPUTE_UNIT_V_HEALTH_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="MANUAL_BOOK_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="TAPE_WRITE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="COMPUTE_UNIT_V_CLUSTER_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="COMPUTE_UNIT_V_GLOBE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="MANUAL_BOOK_CLOSED_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="DATABASE_CLUSTER_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="TAPE_READ_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="COMPUTE_UNIT_V_SECURE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="COMPUTE_UNIT_V_DATABASE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="COM_PORT_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="CONNECTION_PIPE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="CD_DISK_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="MANUAL_BOOK_TURN_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="MODEM_CLUSTER_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="FLOPPY_DATA_2_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="CHECKLIST_PAGE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="NOTEBOOK_JOURNAL_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="LOCK_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="NETWORK_FOLDER_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="KEYS_KEYCHAIN_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="TERMINAL_LAPTOP_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="DATABASE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="BLADE_NETWORK_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="GRAPHICS_2D_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="CLOCK_RED_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="BLADE_NETWORK_32_LIGHT_ICON_DATA" type="[u32; 1024]" />
+        <Global name="ADD_PLUS_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="SNAKE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="SETUPAPI_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="FILE_DATABASE_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="DOOM_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="ERROR_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="WARNING_32_ICON_DATA" type="[u32; 1024]" />
+        <Global name="ERROR_16_ICON_DATA" type="[u32; 256]" />
+        <Global name="WARNING_16_ICON_DATA" type="[u32; 256]" />
+        <Global name="HPVMX_128_ICON_DATA" type="[u32; 16384]" />
+    </globals>
+    <structures>
+        <Struct name="PixelGraphics" props="[(framebuffer,*mut u32),(width,usize),(height,usize),(stride,usize),(backbuffer,Option<alloc::vec::Vec<u32>>),(glitch_y,usize),(fontid,u8)]" />
+        <Struct name="TreeViewNode" props="[(label,&amp;str),(children,&amp;[TreeViewNode]),(expanded,bool)]" />
+    </structures>
+    <propreties>
+        <Proprety name="glitch_y" type="usize" />
+        <Proprety name="fontid" type="u8" />
+        <Proprety name="label" type="&amp;str" />
+        <Proprety name="children" type="&amp;[TreeViewNode]" />
+        <Proprety name="expanded" type="bool" />
+    </propreties>
+</definitions>

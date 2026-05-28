@@ -110,7 +110,7 @@ Launch `MicroIDE` from the **Apps** tab in the dashboard.
 - micro-c jit compiler
 - micro-c live code
 - `SteppedApplicationContext` improvements
-- xml based ui formatting for micro-c apps and future applications
+- hot-reload xml based ui formatting for micro-c apps and future applications
 
 ### Deprecations
 

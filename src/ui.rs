@@ -30,7 +30,7 @@ use crate::{handle_vm_command, hpvm_warn, message, terminal};
 use crate::pm::{Package, PackageManager, PackageType};
 use pixel_graphics::{PixelGraphics, TreeViewNode};
 use crate::apps::error::ErrorApp;
-use crate::env::{Application, SteppedApplicationContext};
+use crate::env::{Application, SteppedApplicationContext, WindowState};
 use crate::input::ScanCodeV2;
 
 #[derive(Clone, Debug)]
@@ -290,6 +290,10 @@ const UI_PALETTE_COMMANDS: &[&str] = &[
     "Settings: Cycle Package Policy",
     "Settings: Cycle Developer Level",
     "Settings: Cycle Security Policy",
+    "Registry: Save System",
+    "Registry: Load System",
+    "Registry: Save Devices",
+    "Registry: Load Devices",
     "Test: Run Diagnostics",
     "Editor: Text Editor",
     "Editor: New Buffer",
@@ -1735,40 +1739,23 @@ impl DashboardUI {
             for (idx, app_ctx) in self.active_apps.iter_mut().enumerate() {
                 let is_focused = self.focused_process_idx == Some(idx);
                 
-                // For now, let's just step them.
-                // In a real windowing system, we'd only step if they are "active" or always.
-                // We'll pass None for key if not focused, or handle it in handle_input.
-                // Wait, if we want them to be "stepped", we should call step().
-                
-                // Let's draw a window for the app
-                let win_x = self.app_window_position.0 + idx * 60;
-                let win_y = self.app_window_position.1 + idx * 60;
-                let win_w = app_ctx.application.dimensions()[0] + 2;
-                let win_h = app_ctx.application.dimensions()[1] + 20;
+                let win_x = app_ctx.window.x;
+                let win_y = app_ctx.window.y;
+                let win_w = app_ctx.window.width;
+                let win_h = app_ctx.window.height;
                 
                 pg.fill_rect(win_x, win_y, win_w, win_h, 0x111111);
                 pg.draw_rect_outline(win_x, win_y, win_w, win_h, if is_focused { 0x00FFFF } else { 0x888888 });
-                pg.fill_rect(win_x, win_y, win_w, 20, if is_focused { 0x008080 } else { 0x444444 });
-                pg.fill_rect(win_x+win_w-20, win_y, 20, 20, if is_focused { 0xAA0000 } else { 0x440000 });
+                pg.fill_rect(win_x, win_y, win_w, WindowState::TITLE_BAR_HEIGHT, if is_focused { 0x008080 } else { 0x444444 });
+                pg.fill_rect(win_x+win_w-20, win_y, 20, WindowState::TITLE_BAR_HEIGHT, if is_focused { 0xAA0000 } else { 0x440000 });
                 pg.draw_text(win_x+win_w-15, win_y+2, "X", 0xFFFFFF);
                 pg.draw_text(win_x + 5, win_y + 2, &app_ctx.application.name, 0xFFFFFF);
-                
-                // App content - the app's draw() takes x, y.
-                // Note: app_ctx.step() currently draws to a NEW PixelGraphics if it can.
-                // We need to be careful here because SteppedApplicationContext::step() 
-                // creates its own PixelGraphics internally which clears the screen/backbuffer.
-                
-                // If we want it to draw INTO our UI, we might need to modify step() 
-                // or handle drawing here.
-                
-                // For now, let's just run logic.
+
                 if !app_ctx.step(None) {
                     apps_to_remove.push(idx);
                 }
-                
-                // And manually call draw if we want it in a window
-                let mut app_vars = Vec::new();
-                app_ctx.application.draw(&mut pg, &app_vars, win_x + 2, win_y + 20);
+
+                app_ctx.draw(&mut pg);
             }
             
             for idx in apps_to_remove.into_iter().rev() {
@@ -2423,6 +2410,44 @@ impl DashboardUI {
             "Settings: Cycle Package Policy" => select_setting(self, 6, 0),
             "Settings: Cycle Developer Level" => select_setting(self, 7, 0),
             "Settings: Cycle Security Policy" => select_setting(self, 8, 0),
+            "Registry: Save System" => {
+                match crate::registry::save_system_registry(crate::registry::DEFAULT_SYSTEM_REG_PATH, &self.settings) {
+                    Ok(_) => {
+                        self.status_line = format!("Saved {}", crate::registry::DEFAULT_SYSTEM_REG_PATH);
+                        self.notifications.push((self.status_line.clone(), 90));
+                    }
+                    Err(e) => self.status_line = format!("Registry save failed: {}", e),
+                }
+            }
+            "Registry: Load System" => {
+                match crate::registry::load_system_registry(crate::registry::DEFAULT_SYSTEM_REG_PATH, &mut self.settings) {
+                    Ok(_) => {
+                        self.refresh_devices();
+                        self.status_line = format!("Loaded {}", crate::registry::DEFAULT_SYSTEM_REG_PATH);
+                        self.notifications.push((self.status_line.clone(), 90));
+                    }
+                    Err(e) => self.status_line = format!("Registry load failed: {}", e),
+                }
+            }
+            "Registry: Save Devices" => {
+                match crate::registry::save_device_registry(crate::registry::DEFAULT_DEVICE_REG_PATH) {
+                    Ok(_) => {
+                        self.status_line = format!("Saved {}", crate::registry::DEFAULT_DEVICE_REG_PATH);
+                        self.notifications.push((self.status_line.clone(), 90));
+                    }
+                    Err(e) => self.status_line = format!("Device registry save failed: {}", e),
+                }
+            }
+            "Registry: Load Devices" => {
+                match crate::registry::load_device_registry(crate::registry::DEFAULT_DEVICE_REG_PATH) {
+                    Ok(_) => {
+                        self.refresh_devices();
+                        self.status_line = format!("Loaded {}", crate::registry::DEFAULT_DEVICE_REG_PATH);
+                        self.notifications.push((self.status_line.clone(), 90));
+                    }
+                    Err(e) => self.status_line = format!("Device registry load failed: {}", e),
+                }
+            }
             "Test: Run Diagnostics" => self.selected_tab = DashboardTab::Test,
             "Editor: Text Editor" => self.selected_tab = DashboardTab::Editor,
             "Editor: New Buffer" => {
@@ -2462,6 +2487,94 @@ impl DashboardUI {
     fn execute_network_action_with_index(&mut self, idx: usize) {
         self.selected_network_action_idx = idx;
         self.execute_network_action();
+    }
+
+    fn window_bounds(&self) -> (usize, usize) {
+        if let Some(pg) = PixelGraphics::new() {
+            let (width, height) = pg.resolution();
+            (width, height.saturating_sub(48))
+        } else {
+            (1024, 720)
+        }
+    }
+
+    fn next_window_position(&self) -> (usize, usize) {
+        let offset = self.active_apps.len() * 48;
+        let (bounds_w, bounds_h) = self.window_bounds();
+        (
+            (self.app_window_position.0 + offset) % bounds_w.saturating_sub(220).max(1),
+            (self.app_window_position.1 + offset) % bounds_h.saturating_sub(160).max(1),
+        )
+    }
+
+    fn add_app_window(&mut self, app_ctx: SteppedApplicationContext) {
+        let (x, y) = self.next_window_position();
+        self.active_apps.push(app_ctx.with_window_position(x, y));
+        self.focused_process_idx = Some(self.active_apps.len() - 1);
+    }
+
+    fn handle_window_keybind(&mut self, key: Key) -> bool {
+        let focused_idx = match self.focused_process_idx {
+            Some(idx) if idx < self.active_apps.len() => idx,
+            _ => return false,
+        };
+
+        if !self.ctrl_mode {
+            return false;
+        }
+
+        let mut status = if self.alt_mode {
+            String::from("Window resized")
+        } else {
+            String::from("Window moved")
+        };
+
+        match key {
+            Key::Special(ScanCode::UP) if self.alt_mode => {
+                let bounds = self.window_bounds();
+                self.active_apps[focused_idx].resize_window_by(0, -24, bounds);
+            }
+            Key::Special(ScanCode::DOWN) if self.alt_mode => {
+                let bounds = self.window_bounds();
+                self.active_apps[focused_idx].resize_window_by(0, 24, bounds);
+            }
+            Key::Special(ScanCode::LEFT) if self.alt_mode => {
+                let bounds = self.window_bounds();
+                self.active_apps[focused_idx].resize_window_by(-24, 0, bounds);
+            }
+            Key::Special(ScanCode::RIGHT) if self.alt_mode => {
+                let bounds = self.window_bounds();
+                self.active_apps[focused_idx].resize_window_by(24, 0, bounds);
+            }
+            Key::Special(ScanCode::UP) => {
+                let bounds = self.window_bounds();
+                self.active_apps[focused_idx].move_window_by(0, -16, bounds);
+            }
+            Key::Special(ScanCode::DOWN) => {
+                let bounds = self.window_bounds();
+                self.active_apps[focused_idx].move_window_by(0, 16, bounds);
+            }
+            Key::Special(ScanCode::LEFT) => {
+                let bounds = self.window_bounds();
+                self.active_apps[focused_idx].move_window_by(-16, 0, bounds);
+            }
+            Key::Special(ScanCode::RIGHT) => {
+                let bounds = self.window_bounds();
+                self.active_apps[focused_idx].move_window_by(16, 0, bounds);
+            }
+            Key::Special(ScanCode::PAGE_UP) => {
+                self.focused_process_idx = Some(focused_idx.saturating_sub(1));
+                status = String::from("Window focus changed");
+            }
+            Key::Special(ScanCode::PAGE_DOWN) => {
+                self.focused_process_idx = Some((focused_idx + 1).min(self.active_apps.len().saturating_sub(1)));
+                status = String::from("Window focus changed");
+            }
+            _ => return false,
+        }
+
+        self.status_line = status;
+        true
     }
 
     pub fn handle_input(&mut self, key: Key) {
@@ -2538,6 +2651,10 @@ impl DashboardUI {
                 }
                 _ => {}
             }
+            return;
+        }
+
+        if self.handle_window_keybind(key) {
             return;
         }
 
@@ -3067,8 +3184,7 @@ impl DashboardUI {
                             } else if matches!(self.selected_tab, DashboardTab::Apps) {
                                 let (name, _, _, _) = crate::apps::APP_REGISTRY[self.selected_app_idx];
                                 if let Some(app_ctx) = SteppedApplicationContext::from_name(name) {
-                                    self.active_apps.push(app_ctx);
-                                    self.focused_process_idx = Some(self.active_apps.len() - 1);
+                                    self.add_app_window(app_ctx);
                                 }
                             } else if matches!(self.selected_tab, DashboardTab::Devices) {
                                 // Toggle expansion
@@ -3321,7 +3437,6 @@ impl DashboardUI {
         app.name = format!("ERROR {}", typ);
         app.dimensions = dims;
 
-        self.active_apps.push(SteppedApplicationContext::new(app, None));
-        self.focused_process_idx = Some(self.active_apps.len() - 1);
+        self.add_app_window(SteppedApplicationContext::new(app, None));
     }
 }

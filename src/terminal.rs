@@ -38,7 +38,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
     match command.as_slice()[0] {
         "help" => {
             if parts.len() < 2 {
-                message!("\n", "commands sets available: \n\nhelp fs - FileSystem Help\nhelp vm - VM Help\nhelp hv - Hypervisor Help\nhelp net - Network Help\nhelp pm - Package Manager Help\nhelp micro-c - Micro-C Help\nhelp misc - Misc. Help\nhelp prog [command] - Command-Specific Help\n\n")
+                message!("\n", "commands sets available: \n\nhelp fs - FileSystem Help\nhelp vm - VM Help\nhelp hv - Hypervisor Help\nhelp net - Network Help\nhelp pm - Package Manager Help\nhelp reg - Registry Help\nhelp micro-c - Micro-C Help\nhelp misc - Misc. Help\nhelp prog [command] - Command-Specific Help\n\n")
             } else {
                 match parts[1] {
                     "fs" => {
@@ -55,6 +55,9 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                     }
                     "pm" => {
                         message!("\n", "\nPackage Manager:\n  pm list - list all registered packages\n  pm reload - reload package registry from disk\n  pm verify [name] - verify package dependencies\n  pm version - show package manager version\n")
+                    }
+                    "reg" => {
+                        message!("\n", "\nRegistry:\n  reg save-devices [path] - save device map to .reg\n  reg load-devices [path] - load device map from .reg\n  Full settings registry save/load is available from the dashboard command palette.\n")
                     }
                     "micro-c" => {
                         message!("\n", "\nMicro-C Toolchain:\n  micro-c compile [file.micro] - compile source to .asm\n  micro-c run [file.bin] - run compiled binary\n")
@@ -336,6 +339,29 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
 
         "pm" => {
             crate::pm::command(parts, package_manager);
+        }
+
+        "reg" => {
+            match parts.get(1).copied() {
+                Some("save-devices") => {
+                    let path = parts.get(2).copied().unwrap_or(crate::registry::DEFAULT_DEVICE_REG_PATH);
+                    match crate::registry::save_device_registry(path) {
+                        Ok(_) => message!("\n", "saved device registry to {}", path),
+                        Err(e) => hpvm_error!("reg", "failed to save device registry: {}", e),
+                    }
+                }
+                Some("load-devices") => {
+                    let path = parts.get(2).copied().unwrap_or(crate::registry::DEFAULT_DEVICE_REG_PATH);
+                    match crate::registry::load_device_registry(path) {
+                        Ok(_) => message!("\n", "loaded device registry from {}", path),
+                        Err(e) => hpvm_error!("reg", "failed to load device registry: {}", e),
+                    }
+                }
+                Some("save") | Some("load") => {
+                    message!("\n", "Use the dashboard for full settings registry save/load so UI settings can be applied.");
+                }
+                _ => message!("\n", "Usage: reg [save-devices|load-devices] [path]"),
+            }
         }
 
         "micro-c" => {
@@ -754,6 +780,12 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
     unsafe {
         crate::state::RESTORE(Some(&mut dashboard));
     }
+    if crate::FileSystem::read_file(crate::registry::DEFAULT_SYSTEM_REG_PATH).is_ok() {
+        match crate::registry::load_system_registry(crate::registry::DEFAULT_SYSTEM_REG_PATH, &mut dashboard.settings) {
+            Ok(_) => hpvm_info!("reg", "loaded {}", crate::registry::DEFAULT_SYSTEM_REG_PATH),
+            Err(e) => hpvm_warn!("reg", "could not load registry: {}", e),
+        }
+    }
 
     LOGGING_SILENCED = true;
     dashboard.refresh_storage();
@@ -951,8 +983,14 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
         if let Some(key) = key {
             let mut old_tab = dashboard.get_tab();
             // Forward input to focused app if any
+            let dashboard_control_key = matches!(
+                key,
+                Key::Special(uefi::proto::console::text::ScanCode::FUNCTION_2)
+                    | Key::Special(uefi::proto::console::text::ScanCode::FUNCTION_3)
+                    | Key::Special(uefi::proto::console::text::ScanCode::FUNCTION_4)
+            );
             if let Some(focused_idx) = dashboard.focused_process_idx {
-                if (focused_idx < dashboard.active_apps.len()) && (dashboard.ctrl_mode == false) {
+                if (focused_idx < dashboard.active_apps.len()) && (dashboard.ctrl_mode == false) && !dashboard_control_key {
                     let app = &mut dashboard.active_apps[focused_idx];
                     app.handle_input(key);
                     if app.exit_requested {

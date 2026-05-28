@@ -40,6 +40,7 @@ mod input;
 mod page;
 mod modules;
 mod c_stems;
+mod registry;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -98,7 +99,7 @@ use crate::page::{Pagefile, PagefileHeader};
 static ALLOCATOR: LockedHeap<32> = LockedHeap::<32>::empty();
 
 #[allow(dead_code, unused)]
-static mut HEAP_STORAGE: [u8; 2 * 1024 * 1024] = [0; 2 * 1024 * 1024];
+static mut HEAP_STORAGE: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
 
 #[allow(dead_code, unused)]
 static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
