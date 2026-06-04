@@ -12,7 +12,7 @@ Write-Output "Updating docs"
 
 Write-Output "Installing..."
 
-$VHD_PATH = "C:\programming\RS\HPVMx\boot.vhd"
+$VHD_PATH = ".\boot.vhd"
 $MOUNT_LETTER = "X"
 $EFI_PATH = "target\x86_64-unknown-uefi\release\HPVMx.efi"
 
