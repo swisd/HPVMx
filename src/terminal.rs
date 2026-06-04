@@ -45,10 +45,10 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                         message!("\n", "\nFileSystem:\n \n  clear - clear screen\n  ls - list files\n  cd [dir] - change directory\n  pwd - print working directory\n  mkdir [dir] - make directory\n  touch [file] - create file\n  cpy [src] [dst] - copy file\n  mov [src] [dst] - move file\n  rm [file] - remove file\n  cat [file] - show file contents\n  clon [src] [dst] - clone directory\n  write [file] [data] [mode] - write to file\n")
                     }
                     "vm" => {
-                        message!("\n", "\nVM Management:\n  vm create [name] [memory_mb] [vcpus] - create VM\n  vm list - list all VMs\n  vm start [vm_id] - start VM\n  vm stop [vm_id] - stop VM\n  vm delete [vm_id] - delete VM\n  vm boot [vm_id] [iso|efi|img] - boot VM with media\n  boot vm [vm_id] [iso|efi|img] - boot VM with media\n  console [vm_id] - attach to VM console\n")
+                        message!("\n", "\nVM Management:\n  vm create [name] [memory_mb] [vcpus] - create VM\n  vm list - list all VMs\n  vm start [vm_id] - start VM\n  vm stop [vm_id] - stop VM\n  vm delete [vm_id] - delete VM\n  vm boot [vm_id] [iso|efi|img] - boot VM with media\n  vm run-system [name] [iso|disk|efi path] [memory_mb] [vcpus] - create and run a system VM\n  boot vm [vm_id] [iso|efi|img] - boot VM with media\n  console [vm_id] - attach to VM console\n")
                     }
                     "hv" => {
-                        message!("\n", "\nHypervisor:\n  vmm info - show hypervisor stats\n  vmm info-adv - show advanced stats\n\n")
+                        message!("\n", "\nHypervisor:\n  vmm info - show hypervisor stats\n  vmm info-adv - show advanced stats\n  vmm dls-inspect [vm_id] - inspect VM VMBUS and HWBUS\n  vmm dls-stats - show learned software-analysis counters\n  vmm dls-save [path] - save DLS training report\n\n")
                     }
                     "net" => {
                         message!("\n", "\nNetworking:\n  net status - show NIC status (SNP)\n  net up - initialize NIC via UEFI SNP\n  ping [ip] - test reachability\n  lanscan [x.y.z.] - scan /24 network\n  httpd start [port] - start HTTP management server\n  httpd stop - stop HTTP server\n\n")
@@ -619,6 +619,36 @@ fn handle_vm_command(command: &[&str]) {
                             Err(e) => hpvm_error!("Boot", "failed to boot VM: {}", e),
                         }
                     }
+                    Some(&"run-system") => {
+                        if command.len() < 6 {
+                            message!("\n", "Usage: vm run-system [name] [iso|disk|efi path] [memory_mb] [vcpus]");
+                            return;
+                        }
+                        let memory_mb: u32 = match command[4].parse() {
+                            Ok(m) => m,
+                            Err(_) => {
+                                hpvm_error!("VMM", "invalid memory size");
+                                return;
+                            }
+                        };
+                        let vcpus: u32 = match command[5].parse() {
+                            Ok(v) => v,
+                            Err(_) => {
+                                hpvm_error!("VMM", "invalid vCPU count");
+                                return;
+                            }
+                        };
+                        match hv.run_system_in_vm(command[2], command[3], memory_mb, vcpus) {
+                            Ok(system) => hpvm_info!(
+                                "Boot",
+                                "VM {} running {} system from {}",
+                                system.vm_id,
+                                system.media_kind,
+                                system.media_path
+                            ),
+                            Err(e) => hpvm_error!("Boot", "failed to run system in VM: {}", e),
+                        }
+                    }
                     Some(&"simulate-violation") => {
                         if command.len() < 4 {
                             message!("\n", "Usage: vm simulate-violation [vm_id] [error_code]");
@@ -643,7 +673,7 @@ fn handle_vm_command(command: &[&str]) {
                             Err(e) => hpvm_error!("VMM", "failed to trigger response: {}", e),
                         }
                     }
-                    _ => message!("\n", "Usage: vm [create|list|start|stop|delete|boot|simulate-violation]"),
+                    _ => message!("\n", "Usage: vm [create|list|start|stop|delete|boot|run-system|simulate-violation]"),
                 }
             }
             None => hpvm_error!("VMM", "hypervisor not initialized"),
@@ -674,7 +704,31 @@ fn handle_vmm_command(command: &[&str]) {
                         message!("", "Total Memory: {} MB", stats.0.total_memory_mb);
                         message!("\n", "INDIVIDUAL VM STATS\n{}", stats.1)
                     }
-                    _ => message!("\n", "Usage: vmm [info]"),
+                    Some(&"dls-inspect") => {
+                        let vm_id = command.get(2).and_then(|id| id.parse::<u32>().ok()).unwrap_or(0);
+                        match hv.inspect_vm_unit_security(vm_id) {
+                            Ok(_) => hpvm_info!("DLS", "VM {} unit inspection complete", vm_id),
+                            Err(e) => hpvm_error!("DLS", "VM {} unit inspection failed: {}", vm_id, e),
+                        }
+                    }
+                    Some(&"dls-stats") => {
+                        let memory = hv.security_training_memory();
+                        message!("\n", "--- DLS Software Analysis Memory ---");
+                        message!("", "Samples: {}", memory.stats.samples_seen);
+                        message!("", "Benign: {}", memory.stats.benign_samples);
+                        message!("", "Suspicious: {}", memory.stats.suspicious_samples);
+                        message!("", "Malicious: {}", memory.stats.malicious_samples);
+                        message!("", "Last Risk: {}", memory.stats.last_risk_score);
+                        message!("", "Cumulative Risk: {}", memory.stats.cumulative_risk_score);
+                    }
+                    Some(&"dls-save") => {
+                        let path = command.get(2).copied().unwrap_or("/DLS_ANALYSIS.JSON");
+                        match hv.save_security_training_report(path) {
+                            Ok(_) => hpvm_info!("DLS", "saved training report to {}", path),
+                            Err(e) => hpvm_error!("DLS", "failed to save training report: {}", e),
+                        }
+                    }
+                    _ => message!("\n", "Usage: vmm [info|info-adv|dls-inspect|dls-stats|dls-save]"),
                 }
             }
             None => hpvm_error!("VMM", "hypervisor not initialized"),
@@ -1018,6 +1072,7 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                                 4 => { let _ = hv.delete_vm(vm_id); }
                                 5 => { let _ = hv.save_vm_metadata("/VMSTATE"); }
                                 6 => { let _ = hv.restore_vm_metadata("/VMSTATE"); }
+                                7 => { dashboard.add_vm_console_window(vm_id, "attached VM", "VM"); }
                                 _ => {}
                             }
                         }

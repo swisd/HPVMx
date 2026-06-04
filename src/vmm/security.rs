@@ -1,20 +1,60 @@
 //! Deep Level Security & Autolytic "Fail-Stop" Protocol.
 //! Central gateway for intercepting all VMBUS traffic and managing intrusion response.
 
+use crate::dls::{
+    summarize_hwbus, summarize_vmbus, AnalysisVerdict, DeepSecurityLevel, SoftwareAnalysisMemory,
+    SoftwareAnalysisSample,
+};
+use crate::vmm::hwbus::{HwBus, HwBusMessage};
 use crate::vmm::vmbus::{VmBus, VmBusMessage};
 
 pub struct DeepLevelSecurity {
-    // Security policies would be stored here
+    pub policy: DeepSecurityPolicy,
+    memory: SoftwareAnalysisMemory,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DeepSecurityPolicy {
+    pub level: DeepSecurityLevel,
+    pub fail_stop_threshold: u16,
+    pub training_capture_enabled: bool,
 }
 
 impl DeepLevelSecurity {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            policy: DeepSecurityPolicy::default(),
+            memory: SoftwareAnalysisMemory::new(),
+        }
+    }
+
+    pub fn with_policy(policy: DeepSecurityPolicy) -> Self {
+        Self {
+            policy,
+            memory: SoftwareAnalysisMemory::new(),
+        }
+    }
+
+    pub fn latest_analysis_sample(&self) -> Option<&SoftwareAnalysisSample> {
+        self.memory.latest()
+    }
+
+    pub fn analysis_memory(&self) -> &SoftwareAnalysisMemory {
+        &self.memory
     }
 
     /// Intercept and inspect traffic on the VMBUS.
     /// Acts as a second-tier firewall between the VM Unit and physical hardware/drivers.
-    pub fn inspect_bus(&self, bus: &mut VmBus) -> Result<(), &'static str> {
+    pub fn inspect_bus(&mut self, bus: &VmBus) -> Result<SoftwareAnalysisSample, &'static str> {
+        let messages = bus.queued_messages();
+        let sample = summarize_vmbus(
+            bus.vm_id,
+            "vmbus.queue",
+            self.policy.level,
+            &messages,
+            self.policy.fail_stop_threshold,
+        );
+
         let mut violations = false;
         bus.inspect_messages(|msg| {
             if !self.is_authorized(msg) {
@@ -25,24 +65,119 @@ impl DeepLevelSecurity {
             }
         });
 
-        if violations {
+        self.learn_from_sample(sample.clone());
+
+        if violations || matches!(sample.verdict, AnalysisVerdict::FailStop) {
             Err("VMBUS security policy violation detected")
         } else {
-            Ok(())
+            Ok(sample)
+        }
+    }
+
+    /// Intercept and inspect traffic on the HWBUS.
+    pub fn inspect_hwbus(&mut self, bus: &HwBus) -> Result<SoftwareAnalysisSample, &'static str> {
+        let messages = bus.queued_messages();
+        let sample = summarize_hwbus(
+            bus.vm_id,
+            "hwbus.queue",
+            self.policy.level,
+            &messages,
+            self.policy.fail_stop_threshold,
+        );
+
+        let mut violations = false;
+        bus.inspect_messages(|msg| {
+            if !self.is_hw_authorized(msg) {
+                violations = true;
+                false
+            } else {
+                true
+            }
+        });
+
+        self.learn_from_sample(sample.clone());
+
+        if violations || matches!(sample.verdict, AnalysisVerdict::FailStop) {
+            Err("HWBUS security policy violation detected")
+        } else {
+            Ok(sample)
+        }
+    }
+
+    fn learn_from_sample(&mut self, sample: SoftwareAnalysisSample) {
+        if self.policy.training_capture_enabled {
+            self.memory.learn_from(sample);
         }
     }
 
     fn is_authorized(&self, message: &VmBusMessage) -> bool {
-        // Implement security rules here (e.g., restricted IO ports, disallowed interrupts, etc.)
         match message {
             VmBusMessage::IoRequest { address, .. } => {
-                // Example: Prevent access to sensitive hardware ports
-                if *address >= 0x70 && *address <= 0x71 { // RTC/CMOS
-                    return false;
-                }
-                true
+                !crate::dls::is_restricted_io_port(*address)
             }
-            _ => true,
+            VmBusMessage::Interrupt { vector } => {
+                if matches!(self.policy.level, DeepSecurityLevel::Lab) {
+                    true
+                } else {
+                    !crate::dls::is_privileged_interrupt(*vector)
+                }
+            }
+            VmBusMessage::StorageRequest { count, write, .. } => {
+                !(*write && *count > self.max_storage_write_sectors())
+            }
+            VmBusMessage::InstructionTrace { opcode, mnemonic, .. } => {
+                if matches!(self.policy.level, DeepSecurityLevel::Lab) {
+                    true
+                } else {
+                    !crate::dls::is_suspicious_instruction(*opcode, mnemonic)
+                }
+            }
+            VmBusMessage::Call { to, target_name, .. } => {
+                !crate::dls::is_restricted_call(*to, target_name.as_deref())
+            }
+        }
+    }
+
+    fn is_hw_authorized(&self, message: &HwBusMessage) -> bool {
+        match message {
+            HwBusMessage::MemoryAccess { .. } => true,
+            HwBusMessage::PciConfig { write, .. } => {
+                matches!(self.policy.level, DeepSecurityLevel::Lab) || !*write
+            }
+            HwBusMessage::DevicePort { port, .. } => {
+                !crate::dls::is_restricted_io_port(*port as u64)
+            }
+            HwBusMessage::DmaRequest { bytes, .. } => {
+                matches!(self.policy.level, DeepSecurityLevel::Lab) || *bytes <= 1024 * 1024
+            }
+            HwBusMessage::InstructionTrace { opcode, mnemonic, .. } => {
+                if matches!(self.policy.level, DeepSecurityLevel::Lab) {
+                    true
+                } else {
+                    !crate::dls::is_suspicious_instruction(*opcode, mnemonic)
+                }
+            }
+            HwBusMessage::Call { to, target_name, .. } => {
+                !crate::dls::is_restricted_call(*to, target_name.as_deref())
+            }
+        }
+    }
+
+    fn max_storage_write_sectors(&self) -> u32 {
+        match self.policy.level {
+            DeepSecurityLevel::Standard => 4096,
+            DeepSecurityLevel::Paranoid => 2048,
+            DeepSecurityLevel::Lab => u32::MAX,
+        }
+    }
+}
+
+impl Default for DeepSecurityPolicy {
+    fn default() -> Self {
+        Self {
+            level: DeepSecurityLevel::Paranoid,
+            fail_stop_threshold: 80,
+            training_capture_enabled: true,
         }
     }
 }

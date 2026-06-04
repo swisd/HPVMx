@@ -2,6 +2,7 @@ use uefi::proto::console::text::Color;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
+use uefi::mem::memory_map::MemoryMap;
 use crate::filesystem::State;
 use crate::state::Persistable;
 
@@ -96,6 +97,8 @@ impl Persistable for Vec<LogEntry> {
                 }
                 let _ = write!(stdout, "{}", msg);
                 let _ = write!(stdout, "\n");
+                // let _ = write!(stdout, "{}MB", $crate::hpvmlog::getmem());
+                // let _ = write!(stdout, "\n\n");
                 let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
             })
                 }
@@ -136,4 +139,30 @@ impl Persistable for Vec<LogEntry> {
 // Added this to stop the "unused macro" warning
 #[macro_export] macro_rules! hpvm_error {
     ($tag:expr, $($arg:tt)*) => { hpvm_log!(Color::Red, $tag, $($arg)*) };
+}
+
+pub fn getmem() -> u32 {
+    let mut free_phys_memory_mb = 0;
+    let mut total_phys_memory_mb = 0;
+    match uefi::boot::memory_map(uefi::boot::MemoryType::LOADER_DATA) {
+        Ok(map) => {
+            for entry in map.entries() {
+                let size_mb = (entry.page_count * 4096) / (1024 * 1024);
+                // If TOTAL_PHYSICAL_MEMORY_MB wasn't captured correctly at boot, accumulate it here as fallback
+                if total_phys_memory_mb == 0 {
+                    total_phys_memory_mb += size_mb as u32;
+                }
+                if entry.ty == uefi::boot::MemoryType::CONVENTIONAL {
+                    free_phys_memory_mb += size_mb as u32;
+                }
+            }
+        }
+        Err(_) => {
+            if total_phys_memory_mb == 0 {
+                total_phys_memory_mb = 1024; // Fallback
+            }
+            free_phys_memory_mb = 512;
+        }
+    }
+    free_phys_memory_mb
 }

@@ -819,7 +819,7 @@ impl DashboardUI {
                     if !self.vms.is_empty() {
                         let actions_y = table_y + table_h + gutter;
                         pg.draw_text(margin, actions_y, "Actions for Selected VM:", 0xCCCCCC);
-                        let actions = ["Start", "Stop", "Reset", "Zero", "Delete", "Save", "Restore"];
+                        let actions = ["Start", "Stop", "Reset", "Zero", "Delete", "Save", "Restore", "Console"];
                         let mut action_x = margin;
                         let action_y = actions_y + 20;
                         for (idx, action) in actions.iter().enumerate() {
@@ -2513,6 +2513,15 @@ impl DashboardUI {
         self.focused_process_idx = Some(self.active_apps.len() - 1);
     }
 
+    pub fn add_vm_console_window(&mut self, vm_id: u32, media_path: &str, media_kind: &str) {
+        let vm_app = crate::apps::vm_console::VmConsoleApp::new(vm_id, media_path, media_kind);
+        let dims = crate::env::AppInfo::dimensions(&vm_app);
+        let mut app = Application::new(Box::new(vm_app));
+        app.name = format!("VM {} Console", vm_id);
+        app.dimensions = dims;
+        self.add_app_window(SteppedApplicationContext::new(app, None));
+    }
+
     fn handle_window_keybind(&mut self, key: Key) -> bool {
         let focused_idx = match self.focused_process_idx {
             Some(idx) if idx < self.active_apps.len() => idx,
@@ -2945,7 +2954,7 @@ impl DashboardUI {
                         self.selected_settings_idx = 0;
                     }
                     Key::Special(ScanCode::RIGHT) => {
-                        self.selected_settings_category_idx = (self.selected_settings_category_idx + 1).min(8);
+                        self.selected_settings_category_idx = (self.selected_settings_category_idx + 1).min(9);
                         self.selected_settings_idx = 0;
                     }
                     Key::Special(ScanCode::UP) => {

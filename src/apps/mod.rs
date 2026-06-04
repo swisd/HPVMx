@@ -41,6 +41,7 @@ pub mod doom_glue;
 mod resource_tester;
 mod mc_app;
 mod micro_ide;
+pub mod vm_console;
 
 #[path = "./core/error.rs"]
 pub(crate) mod error;

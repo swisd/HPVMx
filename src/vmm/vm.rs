@@ -3,6 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 use crate::vmm::vcpu::VirtualCpu;
+use crate::vmm::hwbus::HwBus;
 use crate::vmm::vmbus::VmBus;
 use crate::vmm::mapper::ResourceMapper;
 
@@ -56,6 +57,8 @@ pub struct VirtualMachine {
     pub guest_memory_base: Option<usize>,
     /// Communication bus for guest-host interaction.
     pub vmbus: VmBus,
+    /// Hardware-manager bus for virtual hardware to kernel hardware services.
+    pub hwbus: HwBus,
     /// Mapper for virtualized resources (Memory, Disk).
     pub mapper: ResourceMapper,
 }
@@ -82,6 +85,7 @@ impl VirtualMachine {
             vcpus,
             guest_memory_base: None,
             vmbus: VmBus::new(id),
+            hwbus: HwBus::new(id),
             mapper: ResourceMapper::new(id),
         })
     }

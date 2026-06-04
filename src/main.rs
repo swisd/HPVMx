@@ -41,6 +41,7 @@ mod page;
 mod modules;
 mod c_stems;
 mod registry;
+mod dls;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -174,10 +175,12 @@ fn main() -> Status {
                     MemoryType::BOOT_SERVICES_DATA => {}
 
                     _ => hpvm_info!("malloc",
-                         "AREA {:#?}  START {:#x}  PAGE {}",
+                         "AREA {:#?}  START {:#x}  PAGE {}  ATT: {:?}  VS: {:?}",
                          entry.ty,
                          entry.phys_start,
                          entry.page_count,
+                         entry.att,
+                         entry.virt_start,
                      )
                 }
             }
@@ -634,6 +637,36 @@ fn handle_vm_command(command: &[&str]) {
                             Err(e) => hpvm_error!("Boot", "failed to boot VM: {}", e),
                         }
                     }
+                    Some(&"run-system") => {
+                        if command.len() < 6 {
+                            message!("\n", "Usage: vm run-system [name] [iso|disk|efi path] [memory_mb] [vcpus]");
+                            return;
+                        }
+                        let memory_mb: u32 = match command[4].parse() {
+                            Ok(m) => m,
+                            Err(_) => {
+                                hpvm_error!("VMM", "invalid memory size");
+                                return;
+                            }
+                        };
+                        let vcpus: u32 = match command[5].parse() {
+                            Ok(v) => v,
+                            Err(_) => {
+                                hpvm_error!("VMM", "invalid vCPU count");
+                                return;
+                            }
+                        };
+                        match hv.run_system_in_vm(command[2], command[3], memory_mb, vcpus) {
+                            Ok(system) => hpvm_info!(
+                                "Boot",
+                                "VM {} running {} system from {}",
+                                system.vm_id,
+                                system.media_kind,
+                                system.media_path
+                            ),
+                            Err(e) => hpvm_error!("Boot", "failed to run system in VM: {}", e),
+                        }
+                    }
                     Some(&"simulate-violation") => {
                         if command.len() < 4 {
                             message!("\n", "Usage: vm simulate-violation [vm_id] [error_code]");
@@ -658,7 +691,7 @@ fn handle_vm_command(command: &[&str]) {
                             Err(e) => hpvm_error!("VMM", "failed to trigger response: {}", e),
                         }
                     }
-                    _ => message!("\n", "Usage: vm [create|list|start|stop|delete|boot|simulate-violation]"),
+                    _ => message!("\n", "Usage: vm [create|list|start|stop|delete|boot|run-system|simulate-violation]"),
                 }
             }
             None => hpvm_error!("VMM", "hypervisor not initialized"),
@@ -713,7 +746,31 @@ fn handle_vmm_command(command: &[&str]) {
                         message!("", "Total Memory: {} MB", stats.0.total_memory_mb);
                         message!("\n", "INDIVIDUAL VM STATS\n{}", stats.1)
                     }
-                    _ => message!("\n", "Usage: vmm [info]"),
+                    Some(&"dls-inspect") => {
+                        let vm_id = command.get(2).and_then(|id| id.parse::<u32>().ok()).unwrap_or(0);
+                        match hv.inspect_vm_unit_security(vm_id) {
+                            Ok(_) => hpvm_info!("DLS", "VM {} unit inspection complete", vm_id),
+                            Err(e) => hpvm_error!("DLS", "VM {} unit inspection failed: {}", vm_id, e),
+                        }
+                    }
+                    Some(&"dls-stats") => {
+                        let memory = hv.security_training_memory();
+                        message!("\n", "--- DLS Software Analysis Memory ---");
+                        message!("", "Samples: {}", memory.stats.samples_seen);
+                        message!("", "Benign: {}", memory.stats.benign_samples);
+                        message!("", "Suspicious: {}", memory.stats.suspicious_samples);
+                        message!("", "Malicious: {}", memory.stats.malicious_samples);
+                        message!("", "Last Risk: {}", memory.stats.last_risk_score);
+                        message!("", "Cumulative Risk: {}", memory.stats.cumulative_risk_score);
+                    }
+                    Some(&"dls-save") => {
+                        let path = command.get(2).copied().unwrap_or("/DLS_ANALYSIS.JSON");
+                        match hv.save_security_training_report(path) {
+                            Ok(_) => hpvm_info!("DLS", "saved training report to {}", path),
+                            Err(e) => hpvm_error!("DLS", "failed to save training report: {}", e),
+                        }
+                    }
+                    _ => message!("\n", "Usage: vmm [info|info-adv|dls-inspect|dls-stats|dls-save]"),
                 }
             }
             None => hpvm_error!("VMM", "hypervisor not initialized"),

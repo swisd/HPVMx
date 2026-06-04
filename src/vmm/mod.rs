@@ -13,6 +13,7 @@ pub mod devices;
 pub mod ghm;
 pub mod partitioner;
 pub mod vmbus;
+pub mod hwbus;
 pub mod security;
 pub mod mapper;
 
