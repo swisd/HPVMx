@@ -59,7 +59,7 @@ jobs:
           mmd -i dist/usb.img ::/EFI/BOOT
           
           # 5. Inject the compiled Rust output binary renamed to standard fallback loader
-          mcopy -i dist/usb.img target/x86_64-unknown-uefi/release/hpvmx.efi ::/EFI/BOOT/BOOTX64.efi
+          mcopy -i dist/usb.img target/x86_64-unknown-uefi/release/HPVMx.efi ::/EFI/BOOT/BOOTX64.efi
           
           # 6. Create and inject an automation script to instantly boot the binary
           echo "fs0:\EFI\BOOT\BOOTX64.efi" > startup.nsh
