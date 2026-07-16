@@ -28,7 +28,6 @@
             background: #000;
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
-        /* Style adjustments to make sure the v86 canvas renders cleanly */
         #screen_container canvas {
             display: block;
         }
@@ -51,36 +50,44 @@
         <canvas style="display: none;"></canvas>
     </div>
     
-    <div class="status-panel" id="status">Initializing x86_64 Emulator...</div>
+    <div class="status-panel" id="status">Initializing UEFI Environment...</div>
 
     <script src="https://copy.sh/v86/build/libv86.js"></script>
     <script>
         window.onload = function() {
             const statusEl = document.getElementById("status");
 
-            // Initialize the runtime environment matching your workflow outputs
+            // Configuring v86 for UEFI execution
             const emulator = new V86Starter({
                 wasm_path: "https://copy.sh/v86/build/v86.wasm",
-                memory_size: 64 * 1024 * 1024, // Allocate 64MB of RAM for your UEFI app
-                vga_as_pci: true,              // Emulate modern PCI graphics framework for OVMF
                 
-                // 1. Target the unified EDK II BIOS firmware built by your GitHub Action
+                // 1. UEFI OVMF firmware images usually require at least 64MB-128MB to execute
+                memory_size: 128 * 1024 * 1024, 
+                vga_memory_size: 8 * 1024 * 1024,
+                
+                // 2. Hardware configurations vital for UEFI-aware firmware
+                vga_as_pci: true,
+                acpi: true, 
+
+                // 3. Mount bios.bin (code.fd + vars.fd) as initial ROM payload
                 bios: {
                     url: "bios.bin"
                 },
                 
-                // 2. Mount the 16MB FAT32 disk image containing your compiled BOOTX64.efi
+                // 4. Bind usb.img as the primary IDE Hard Disk
                 hda: {
                     url: "usb.img"
                 },
+
+                // 5. Force the emulator to prioritize the custom BIOS binary structure over legacy floppies
+                boot_order: 0x213, // Standard code for CD/BIOS/Hard-Disk priority layout
 
                 screen_container: document.getElementById("screen_container"),
                 autostart: true
             });
 
-            // Update UI once the machine fires up
             emulator.add_listener("emulator-ready", function() {
-                statusEl.innerText = "Status: HPVMx App Running Live";
+                statusEl.innerText = "Status: Running (Click viewport to interact)";
                 statusEl.style.color = "#7ee787";
             });
         };
