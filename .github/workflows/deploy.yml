@@ -1,4 +1,4 @@
-name: Deploy UEFI Sandbox to Pages
+name: Compile Rust UEFI App & Deploy Sandbox
 
 on:
   push:
@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  build-and-deploy:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -23,41 +23,52 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Hard-Disk Tooling
-        run: sudo apt-get update && sudo apt-get install -y dosfstools mtools
+      - name: Install Storage Formatting Utilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dosfstools mtools
 
-      - name: Stage & Pack UEFI Disk Image
+      - name: Set up Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-uefi
+
+      - name: Compile Rust Application
+        run: |
+          # Build target in release mode using native cargo cross-compilation
+          cargo build --release --target x86_64-unknown-uefi
+
+      - name: Assemble Sandbox & Format Bootable USB Image
         run: |
           mkdir dist
           
-          # 1. Copy web runtime components
+          # 1. Bring in index.html architecture from your web folder
           cp -r web/* dist/
           
-          # 2. Concat EDK II image pieces for the core BIOS engine
+          # 2. Concat EDK II BIOS components into a single flash image
           cat code.fd vars.fd > dist/bios.bin
           
-          # 3. Provision a raw 16MB virtual USB storage block
+          # 3. Provision a raw 16MB FAT32 disk volume
           dd if=/dev/zero of=dist/usb.img bs=1M count=16
-          
-          # 4. Format the raw block strictly to FAT32 
           mkfs.vfat -F 32 dist/usb.img
           
-          # 5. Populate directory structure seamlessly inside the image via mtools
+          # 4. Generate the mandatory hardware UEFI directory hierarchy
           mmd -i dist/usb.img ::/EFI
           mmd -i dist/usb.img ::/EFI/BOOT
           
-          # 6. Inject target app binary (HPVMx.efi) renamed to standard fallback loader
-          # Change "HPVMx.efi" below to match the exact relative path of your build output
-          mcopy -i dist/usb.img /target/x86_64-unknown-uefi/release/HPVMx.efi ::/EFI/BOOT/BOOTX64.efi
+          # 5. Inject the compiled Rust output binary renamed to standard fallback loader
+          # Cargo places the target at: target/x86_64-unknown-uefi/release/[package_name].efi
+          mcopy -i dist/usb.img target/x86_64-unknown-uefi/release/hpvmx.efi ::/EFI/BOOT/BOOTX64.efi
 
-      - name: Setup Pages
+      - name: Setup Pages Gateway
         uses: actions/configure-pages@v5
 
-      - name: Upload Artifact
+      - name: Upload Sandbox Files
         uses: actions/upload-pages-artifact@v3
         with:
           path: './dist'
 
-      - name: Deploy to GitHub Pages
+      - name: Deploy Live Pages Instance
         id: deployment
         uses: actions/deploy-pages@v4
