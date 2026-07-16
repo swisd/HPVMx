@@ -1,0 +1,63 @@
+name: Deploy UEFI Sandbox to Pages
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Hard-Disk Tooling
+        run: sudo apt-get update && sudo apt-get install -y dosfstools mtools
+
+      - name: Stage & Pack UEFI Disk Image
+        run: |
+          mkdir dist
+          
+          # 1. Copy web runtime components
+          cp -r web/* dist/
+          
+          # 2. Concat EDK II image pieces for the core BIOS engine
+          cat code.fd vars.fd > dist/bios.bin
+          
+          # 3. Provision a raw 16MB virtual USB storage block
+          dd if=/dev/zero of=dist/usb.img bs=1M count=16
+          
+          # 4. Format the raw block strictly to FAT32 
+          mkfs.vfat -F 32 dist/usb.img
+          
+          # 5. Populate directory structure seamlessly inside the image via mtools
+          mmd -i dist/usb.img ::/EFI
+          mmd -i dist/usb.img ::/EFI/BOOT
+          
+          # 6. Inject target app binary (HPVMx.efi) renamed to standard fallback loader
+          # Change "HPVMx.efi" below to match the exact relative path of your build output
+          mcopy -i dist/usb.img HPVMx.efi ::/EFI/BOOT/BOOTX64.efi
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
