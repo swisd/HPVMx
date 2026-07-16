@@ -1,1 +1,89 @@
-.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HPVMx UEFI Sandbox</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        h1 {
+            font-size: 22px;
+            margin-bottom: 15px;
+            color: #58a6ff;
+        }
+        #screen_container {
+            border: 4px solid #30363d;
+            border-radius: 6px;
+            background: #000;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        /* Style adjustments to make sure the v86 canvas renders cleanly */
+        #screen_container canvas {
+            display: block;
+        }
+        .status-panel {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #8b949e;
+            background: #161b22;
+            padding: 8px 16px;
+            border-radius: 20px;
+            border: 1px solid #30363d;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>HPVMx UEFI Web Sandbox</h1>
+    
+    <div id="screen_container">
+        <canvas style="display: none;"></canvas>
+    </div>
+    
+    <div class="status-panel" id="status">Initializing x86_64 Emulator...</div>
+
+    <script src="https://copy.sh/v86/build/libv86.js"></script>
+    <script>
+        window.onload = function() {
+            const statusEl = document.getElementById("status");
+
+            // Initialize the runtime environment matching your workflow outputs
+            const emulator = new V86Starter({
+                wasm_path: "https://copy.sh/v86/build/v86.wasm",
+                memory_size: 64 * 1024 * 1024, // Allocate 64MB of RAM for your UEFI app
+                vga_as_pci: true,              // Emulate modern PCI graphics framework for OVMF
+                
+                // 1. Target the unified EDK II BIOS firmware built by your GitHub Action
+                bios: {
+                    url: "bios.bin"
+                },
+                
+                // 2. Mount the 16MB FAT32 disk image containing your compiled BOOTX64.efi
+                hda: {
+                    url: "usb.img"
+                },
+
+                screen_container: document.getElementById("screen_container"),
+                autostart: true
+            });
+
+            // Update UI once the machine fires up
+            emulator.add_listener("emulator-ready", function() {
+                statusEl.innerText = "Status: HPVMx App Running Live";
+                statusEl.style.color = "#7ee787";
+            });
+        };
+    </script>
+</body>
+</html>
