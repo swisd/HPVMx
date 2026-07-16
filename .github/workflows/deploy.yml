@@ -28,15 +28,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y dosfstools mtools
 
-      - name: Set up Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Rust Nightly Toolchain
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: stable
+          toolchain: nightly
           targets: x86_64-unknown-uefi
 
-      - name: Compile Rust Application
+      - name: Compile Rust Application (Nightly)
         run: |
-          # Build target in release mode using native cargo cross-compilation
+          # Use internal LLVM linker to ensure valid PE/COFF generation on Ubuntu
+          export RUSTFLAGS="-C linker-flavor=lld-link -C linker=rust-lld"
           cargo build --release --target x86_64-unknown-uefi
 
       - name: Assemble Sandbox & Format Bootable USB Image
@@ -58,8 +59,11 @@ jobs:
           mmd -i dist/usb.img ::/EFI/BOOT
           
           # 5. Inject the compiled Rust output binary renamed to standard fallback loader
-          # Cargo places the target at: target/x86_64-unknown-uefi/release/[package_name].efi
           mcopy -i dist/usb.img target/x86_64-unknown-uefi/release/hpvmx.efi ::/EFI/BOOT/BOOTX64.efi
+          
+          # 6. Create and inject an automation script to instantly boot the binary
+          echo "fs0:\EFI\BOOT\BOOTX64.efi" > startup.nsh
+          mcopy -i dist/usb.img startup.nsh ::/startup.nsh
 
       - name: Setup Pages Gateway
         uses: actions/configure-pages@v5
