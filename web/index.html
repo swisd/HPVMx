@@ -51,6 +51,25 @@
     </div>
     
     <div class="status-panel" id="status">Initializing UEFI Environment...</div>
+       <div id="html-terminal" style="font-family: monospace; background: #eee; padding: 10px;"></div>
+
+  <script>
+    // Overriding the default console behavior
+    const nativeLog = console.log;
+    const terminal = document.getElementById('html-terminal');
+
+    console.log = function (message) {
+      // 1. Keep sending it to the real developer tools console
+      nativeLog.apply(console, arguments); 
+      
+      // 2. Simultaneously append it to the HTML body
+      terminal.innerHTML += `> ${message}<br>`; 
+    };
+
+    // Test statements
+    console.log("Checking database sync...");
+    console.log("Process complete.");
+  </script>
 
     <script src="https://copy.sh/v86/build/libv86.js"></script>
     <script>
