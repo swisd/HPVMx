@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPVMx Mobile Sandbox</title>
+    <title>HPVMx Sandbox</title>
     <style>
         body {
             margin: 0;
@@ -47,7 +47,6 @@
             border: 1px solid #30363d;
             margin-bottom: 15px;
         }
-        /* Mirrored Web DevTools Terminal Layout */
         .devtools-container {
             width: 100%;
             max-width: 640px;
@@ -71,7 +70,7 @@
             border: 1px solid #30363d;
             border-bottom-left-radius: 6px;
             border-bottom-right-radius: 6px;
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-family: monospace;
             font-size: 11px;
             padding: 10px;
             box-sizing: border-box;
@@ -91,47 +90,54 @@
         }
     </style>
     <script>
-        // CRITICAL: We run the console interceptor instantly before any other library loads
+        // Start intercepting console immediately so we can catch script errors early
         (function() {
-            window.addEventListener('DOMContentLoaded', () => {
-                const term = document.getElementById('devtools_terminal');
-                
-                function appendLog(args, type) {
-                    if (!term) return;
-                    const message = Array.from(args).map(arg => {
-                        if (typeof arg === 'object') {
-                            try { return JSON.stringify(arg); } catch(e) { return String(arg); }
-                        }
-                        return String(arg);
-                    }).join(' ');
+            const originalLog = console.log;
+            const originalWarn = console.warn;
+            const originalError = console.error;
+            const logQueue = [];
 
+            window.__appendLogToTerminal = function(args, type) {
+                const term = document.getElementById('devtools_terminal');
+                const message = Array.from(args).map(arg => {
+                    if (typeof arg === 'object') {
+                        try { return JSON.stringify(arg); } catch(e) { return String(arg); }
+                    }
+                    return String(arg);
+                }).join(' ');
+
+                if (term) {
                     const line = document.createElement('div');
                     line.className = `log-line log-${type}`;
                     line.textContent = `[${type.toUpperCase()}] ${message}`;
                     term.appendChild(line);
                     term.scrollTop = term.scrollHeight;
+                } else {
+                    logQueue.push({ args, type });
                 }
+            };
 
-                // Reference original functions so things still log to the true native console
-                const originalLog = console.log;
-                const originalWarn = console.warn;
-                const originalError = console.error;
+            console.log = function() { originalLog.apply(console, arguments); window.__appendLogToTerminal(arguments, 'info'); };
+            console.warn = function() { originalWarn.apply(console, arguments); window.__appendLogToTerminal(arguments, 'warn'); };
+            console.error = function() { originalError.apply(console, arguments); window.__appendLogToTerminal(arguments, 'error'); };
+            
+            window.addEventListener('error', function(e) {
+                window.__appendLogToTerminal([e.message, `at ${e.filename}:${e.lineno}`], 'error');
+            });
 
-                console.log = function() { originalLog.apply(console, arguments); appendLog(arguments, 'info'); };
-                console.warn = function() { originalWarn.apply(console, arguments); appendLog(arguments, 'warn'); };
-                console.error = function() { originalError.apply(console, arguments); appendLog(arguments, 'error'); };
-                
-                // Intercept unhandled promise rejections or general script crashes
-                window.addEventListener('error', function(e) {
-                    appendLog([e.message, `at ${e.filename}:${e.lineno}`], 'error');
-                });
+            window.addEventListener('DOMContentLoaded', () => {
+                // Flush early logs to the terminal box once it renders
+                while(logQueue.length > 0) {
+                    const item = logQueue.shift();
+                    window.__appendLogToTerminal(item.args, item.type);
+                }
             });
         })();
     </script>
 </head>
 <body>
 
-    <h1>HPVMx Mobile Sandbox</h1>
+    <h1>HPVMx Sandbox</h1>
     
     <div id="screen_container" onclick="focusKeyboard()">
         <canvas style="display: none;"></canvas>
@@ -146,10 +152,19 @@
         <div id="devtools_terminal"></div>
     </div>
 
-    <script src="https://copy.sh/v86/build/libv86.js" onload="initEmulator()"></script>
+    <script src="https://cdn.jsdelivr.net/npm/v86@0.5.44/build/libv86.js" id="v86-script"></script>
     
     <script>
-        let emulator = null;
+        // Check manually to see if script loaded or attach listener
+        const scriptTag = document.getElementById('v86-script');
+        if (typeof V86Starter !== 'undefined') {
+            initEmulator();
+        } else {
+            scriptTag.addEventListener('load', initEmulator);
+            scriptTag.addEventListener('error', () => {
+                console.error("The v86 engine script failed to download from the CDN.");
+            });
+        }
 
         function focusKeyboard() {
             document.getElementById("mobile_keyboard_trigger").focus();
@@ -158,10 +173,12 @@
         function initEmulator() {
             const statusEl = document.getElementById("status");
             statusEl.innerText = "Booting UEFI Runtime...";
+            console.log("Starting emulator setup...");
 
             try {
-                emulator = new V86Starter({
-                    wasm_path: "https://copy.sh/v86/build/v86.wasm",
+                const emulator = new V86Starter({
+                    // Align the WebAssembly engine path to match the stable jsDelivr layer
+                    wasm_path: "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/v86.wasm",
                     memory_size: 128 * 1024 * 1024, 
                     vga_memory_size: 8 * 1024 * 1024,
                     vga_as_pci: true,
