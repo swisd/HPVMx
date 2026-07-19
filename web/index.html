@@ -254,7 +254,7 @@
                 // We call the dynamically mapped constructor token we discovered
                 const emulator = new window.ResolvedV86Constructor({
     wasm_path: "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/v86.wasm",
-    memory_size: 128 * 1024 * 1024, 
+    memory_size: 64 * 1024 * 1024, 
     vga_memory_size: 8 * 1024 * 1024,
     
     // CRITICAL: Force standard PCI VGA card mappings instead of standard raw VGA
