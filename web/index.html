@@ -3,113 +3,200 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPVMx UEFI Sandbox</title>
+    <title>HPVMx Mobile Sandbox</title>
     <style>
         body {
             margin: 0;
-            padding: 0;
+            padding: 15px;
             background-color: #0d1117;
             color: #c9d1d9;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
             min-height: 100vh;
+            box-sizing: border-box;
         }
         h1 {
-            font-size: 22px;
-            margin-bottom: 15px;
+            font-size: 20px;
+            margin-bottom: 10px;
             color: #58a6ff;
+            text-align: center;
         }
         #screen_container {
-            border: 4px solid #30363d;
+            border: 3px solid #30363d;
             border-radius: 6px;
             background: #000;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            width: 100%;
+            max-width: 640px;
+            aspect-ratio: 4 / 3;
+            overflow: hidden;
         }
         #screen_container canvas {
+            width: 100% !important;
+            height: 100% !important;
             display: block;
         }
         .status-panel {
-            margin-top: 20px;
-            font-size: 14px;
+            margin-top: 12px;
+            font-size: 13px;
             color: #8b949e;
             background: #161b22;
-            padding: 8px 16px;
+            padding: 6px 14px;
             border-radius: 20px;
             border: 1px solid #30363d;
+            margin-bottom: 15px;
+        }
+        /* Mirrored Web DevTools Terminal Layout */
+        .devtools-container {
+            width: 100%;
+            max-width: 640px;
+            margin-top: 10px;
+        }
+        .devtools-header {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-bottom: none;
+            padding: 6px 12px;
+            font-size: 12px;
+            color: #8b949e;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
+            font-family: monospace;
+        }
+        #devtools_terminal {
+            width: 100%;
+            height: 250px;
+            background-color: #010409;
+            border: 1px solid #30363d;
+            border-bottom-left-radius: 6px;
+            border-bottom-right-radius: 6px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 11px;
+            padding: 10px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .log-line { border-bottom: 1px solid #21262d; padding: 3px 0; }
+        .log-info { color: #c9d1d9; }
+        .log-warn { color: #d29922; background: rgba(187, 128, 9, 0.1); }
+        .log-error { color: #f85149; background: rgba(248, 81, 73, 0.1); }
+        
+        #mobile_keyboard_trigger {
+            position: absolute;
+            left: -9999px;
+            opacity: 0;
         }
     </style>
+    <script>
+        // CRITICAL: We run the console interceptor instantly before any other library loads
+        (function() {
+            window.addEventListener('DOMContentLoaded', () => {
+                const term = document.getElementById('devtools_terminal');
+                
+                function appendLog(args, type) {
+                    if (!term) return;
+                    const message = Array.from(args).map(arg => {
+                        if (typeof arg === 'object') {
+                            try { return JSON.stringify(arg); } catch(e) { return String(arg); }
+                        }
+                        return String(arg);
+                    }).join(' ');
+
+                    const line = document.createElement('div');
+                    line.className = `log-line log-${type}`;
+                    line.textContent = `[${type.toUpperCase()}] ${message}`;
+                    term.appendChild(line);
+                    term.scrollTop = term.scrollHeight;
+                }
+
+                // Reference original functions so things still log to the true native console
+                const originalLog = console.log;
+                const originalWarn = console.warn;
+                const originalError = console.error;
+
+                console.log = function() { originalLog.apply(console, arguments); appendLog(arguments, 'info'); };
+                console.warn = function() { originalWarn.apply(console, arguments); appendLog(arguments, 'warn'); };
+                console.error = function() { originalError.apply(console, arguments); appendLog(arguments, 'error'); };
+                
+                // Intercept unhandled promise rejections or general script crashes
+                window.addEventListener('error', function(e) {
+                    appendLog([e.message, `at ${e.filename}:${e.lineno}`], 'error');
+                });
+            });
+        })();
+    </script>
 </head>
 <body>
 
-    <h1>HPVMx UEFI Web Sandbox</h1>
+    <h1>HPVMx Mobile Sandbox</h1>
     
-    <div id="screen_container">
+    <div id="screen_container" onclick="focusKeyboard()">
         <canvas style="display: none;"></canvas>
     </div>
     
-    <div class="status-panel" id="status">Initializing UEFI Environment...</div>
-       <div id="html-terminal" style="font-family: monospace; background: #eee; padding: 10px;"></div>
+    <input type="text" id="mobile_keyboard_trigger" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
 
-  <script>
-    // Overriding the default console behavior
-    const nativeLog = console.log;
-    const terminal = document.getElementById('html-terminal');
+    <div class="status-panel" id="status">Loading Framework...</div>
 
-    console.log = function (message) {
-      // 1. Keep sending it to the real developer tools console
-      nativeLog.apply(console, arguments); 
-      
-      // 2. Simultaneously append it to the HTML body
-      terminal.innerHTML += `> ${message}<br>`; 
-    };
+    <div class="devtools-container">
+        <div class="devtools-header">Mirrored Browser DevTools Console</div>
+        <div id="devtools_terminal"></div>
+    </div>
 
-    // Test statements
-    console.log("Checking database sync...");
-    console.log("Process complete.");
-  </script>
-
-    <script src="https://copy.sh/v86/build/libv86.js"></script>
+    <script src="https://copy.sh/v86/build/libv86.js" onload="initEmulator()"></script>
+    
     <script>
-        window.onload = function() {
+        let emulator = null;
+
+        function focusKeyboard() {
+            document.getElementById("mobile_keyboard_trigger").focus();
+        }
+
+        function initEmulator() {
             const statusEl = document.getElementById("status");
+            statusEl.innerText = "Booting UEFI Runtime...";
 
-            // Configuring v86 for UEFI execution
-            const emulator = new V86Starter({
-                wasm_path: "https://copy.sh/v86/build/v86.wasm",
-                
-                // 1. UEFI OVMF firmware images usually require at least 64MB-128MB to execute
-                memory_size: 128 * 1024 * 1024, 
-                vga_memory_size: 8 * 1024 * 1024,
-                
-                // 2. Hardware configurations vital for UEFI-aware firmware
-                vga_as_pci: true,
-                acpi: true, 
+            try {
+                emulator = new V86Starter({
+                    wasm_path: "https://copy.sh/v86/build/v86.wasm",
+                    memory_size: 128 * 1024 * 1024, 
+                    vga_memory_size: 8 * 1024 * 1024,
+                    vga_as_pci: true,
+                    acpi: true, 
+                    bios: { url: "bios.bin" },
+                    hda: { url: "usb.img" },
+                    boot_order: 0x213,
+                    screen_container: document.getElementById("screen_container"),
+                    autostart: true
+                });
 
-                // 3. Mount bios.bin (code.fd + vars.fd) as initial ROM payload
-                bios: {
-                    url: "bios.bin"
-                },
-                
-                // 4. Bind usb.img as the primary IDE Hard Disk
-                hda: {
-                    url: "usb.img"
-                },
+                const inputTrigger = document.getElementById("mobile_keyboard_trigger");
+                inputTrigger.addEventListener("input", function(e) {
+                    const char = e.target.value.slice(-1);
+                    if (char) emulator.serial0_send(char);
+                    e.target.value = "";
+                });
 
-                // 5. Force the emulator to prioritize the custom BIOS binary structure over legacy floppies
-                boot_order: 0x213, // Standard code for CD/BIOS/Hard-Disk priority layout
+                inputTrigger.addEventListener("keydown", function(e) {
+                    if (e.key === "Enter") emulator.serial0_send("\r\n");
+                    else if (e.key === "Backspace") emulator.serial0_send("\b");
+                });
 
-                screen_container: document.getElementById("screen_container"),
-                autostart: true
-            });
+                emulator.add_listener("emulator-ready", function() {
+                    statusEl.innerText = "Status: Live. Tap display to type.";
+                    statusEl.style.color = "#7ee787";
+                    console.log("v86 backend reports: Emulator system ready.");
+                });
 
-            emulator.add_listener("emulator-ready", function() {
-                statusEl.innerText = "Status: Running (Click viewport to interact)";
-                statusEl.style.color = "#7ee787";
-            });
-        };
+            } catch (e) {
+                statusEl.innerText = "Initialization Error";
+                statusEl.style.color = "#ff7b72";
+                console.error("Failed to boot v86 initialization wrapper:", e);
+            }
+        }
     </script>
 </body>
 </html>
