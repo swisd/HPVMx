@@ -186,30 +186,60 @@
         verifyAsset("usb.img");
     </script>
 
+    <script src="https://cdn.jsdelivr.net/npm/v86@0.5.44/build/libv86.js" id="v86-script"></script>
+    
     <script>
-        (function() {
-            console.log("Dynamically injecting libv86 script tag...");
-            const script = document.createElement('script');
-            script.src = "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/libv86.js";
-            script.async = true;
+        const scriptTag = document.getElementById('v86-script');
 
-            script.onload = function() {
-                console.log("libv86.js script tag successfully loaded into global document namespace.");
-                console.debug("Type checking V86Starter constructor existence:", typeof V86Starter);
-                if (typeof V86Starter !== 'undefined') {
+        // Check for presence immediately, or wait for the load lifecycle event
+        if (checkV86Availability()) {
+            initEmulator();
+        } else {
+            scriptTag.addEventListener('load', () => {
+                if (checkV86Availability()) {
                     initEmulator();
                 } else {
-                    console.error("CRITICAL: libv86.js loaded successfully, but 'V86Starter' is still undefined in global scope!");
+                    console.warn("Primary CDN structure missed global bindings. Attempting emergency UNPKG runtime fallback...");
+                    loadFallbackEngine();
+                }
+            });
+        }
+
+        // Namespace discovery tool to find where the constructor is hiding
+        function checkV86Availability() {
+            if (typeof V86Starter !== 'undefined') {
+                window.ResolvedV86Constructor = V86Starter;
+                return true;
+            }
+            if (typeof window.v86 !== 'undefined' && typeof window.v86.V86Starter !== 'undefined') {
+                window.ResolvedV86Constructor = window.v86.V86Starter;
+                console.log("Namespace discovery found constructor at: window.v86.V86Starter");
+                return true;
+            }
+            if (typeof window.V86 !== 'undefined' && typeof window.V86.V86Starter !== 'undefined') {
+                window.ResolvedV86Constructor = window.V86.V86Starter;
+                console.log("Namespace discovery found constructor at: window.V86.V86Starter");
+                return true;
+            }
+            return false;
+        }
+
+        // If the jsDelivr package script fails to expose a global variable, hot-swap to the standalone browser build
+        function loadFallbackEngine() {
+            const fallbackScript = document.createElement('script');
+            fallbackScript.src = "https://unpkg.com/v86@0.5.44/build/libv86.js";
+            fallbackScript.async = true;
+            
+            fallbackScript.onload = function() {
+                console.log("Fallback UNPKG script loaded successfully.");
+                if (checkV86Availability()) {
+                    initEmulator();
+                } else {
+                    console.error("CRITICAL: All fallback CDNs exhausted. Engine objects completely unmapped.");
                 }
             };
-
-            script.onerror = function(err) {
-                console.error("CRITICAL: DOM script injection system encountered a network delivery failure for libv86.js.", err);
-                document.getElementById("status").innerText = "Network Error loading libv86.js";
-            };
-
-            document.head.appendChild(script);
-        })();
+            document.head.appendChild(fallbackScript);
+        }
 
         function focusKeyboard() {
             document.getElementById("mobile_keyboard_trigger").focus();
@@ -217,11 +247,12 @@
 
         function initEmulator() {
             const statusEl = document.getElementById("status");
-            statusEl.innerText = "Trace Phase 2: Instantiating Emulation Wrapper...";
-            console.log("Invoking V86Starter options initialization block...");
+            statusEl.innerText = "Booting UEFI Runtime...";
+            console.log("Instantiating sandbox engine via resolved constructor mapping...");
 
             try {
-                const config = {
+                // We call the dynamically mapped constructor token we discovered
+                const emulator = new window.ResolvedV86Constructor({
                     wasm_path: "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/v86.wasm",
                     memory_size: 128 * 1024 * 1024, 
                     vga_memory_size: 8 * 1024 * 1024,
@@ -232,12 +263,7 @@
                     boot_order: 0x213,
                     screen_container: document.getElementById("screen_container"),
                     autostart: true
-                };
-
-                console.debug("Target structural configuration layout payload:", JSON.stringify(config));
-                
-                const emulator = new V86Starter(config);
-                console.log("V86Starter initialization object instantiated successfully.");
+                });
 
                 const inputTrigger = document.getElementById("mobile_keyboard_trigger");
                 inputTrigger.addEventListener("input", function(e) {
@@ -254,13 +280,13 @@
                 emulator.add_listener("emulator-ready", function() {
                     statusEl.innerText = "Status: Live. Tap display to type.";
                     statusEl.style.color = "#7ee787";
-                    console.log("SUCCESS: v86 framework reports system pipeline is ready and running.");
+                    console.log("SUCCESS: Simulation thread completely operational.");
                 });
 
             } catch (e) {
-                statusEl.innerText = "Instantiation Engine Exception Caught";
+                statusEl.innerText = "Initialization Error";
                 statusEl.style.color = "#ff7b72";
-                console.error("V86Starter runtime constructor execution failed:", e);
+                console.error("Failed executing structural V86 instance launch loop:", e);
             }
         }
     </script>
