@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPVMx Sandbox</title>
+    <title>HPVMx Mobile Sandbox - Verbose Debug</title>
     <style>
         body {
             margin: 0;
@@ -65,7 +65,7 @@
         }
         #devtools_terminal {
             width: 100%;
-            height: 250px;
+            height: 300px;
             background-color: #010409;
             border: 1px solid #30363d;
             border-bottom-left-radius: 6px;
@@ -78,8 +78,9 @@
             white-space: pre-wrap;
             word-wrap: break-word;
         }
-        .log-line { border-bottom: 1px solid #21262d; padding: 3px 0; }
+        .log-line { border-bottom: 1px solid #21262d; padding: 3px 0; font-family: monospace; }
         .log-info { color: #c9d1d9; }
+        .log-debug { color: #58a6ff; }
         .log-warn { color: #d29922; background: rgba(187, 128, 9, 0.1); }
         .log-error { color: #f85149; background: rgba(248, 81, 73, 0.1); }
         
@@ -90,7 +91,7 @@
         }
     </style>
     <script>
-        // Start intercepting console immediately so we can catch script errors early
+        // High-fidelity early interceptor pipeline
         (function() {
             const originalLog = console.log;
             const originalWarn = console.warn;
@@ -100,44 +101,57 @@
             window.__appendLogToTerminal = function(args, type) {
                 const term = document.getElementById('devtools_terminal');
                 const message = Array.from(args).map(arg => {
+                    if (arg instanceof Error) return `${arg.name}: ${arg.message}\n${arg.stack}`;
                     if (typeof arg === 'object') {
                         try { return JSON.stringify(arg); } catch(e) { return String(arg); }
                     }
                     return String(arg);
                 }).join(' ');
 
+                const timestamp = new Date().toISOString().split('T')[1].slice(0, -1);
+
                 if (term) {
                     const line = document.createElement('div');
                     line.className = `log-line log-${type}`;
-                    line.textContent = `[${type.toUpperCase()}] ${message}`;
+                    line.textContent = `[${timestamp}] [${type.toUpperCase()}] ${message}`;
                     term.appendChild(line);
                     term.scrollTop = term.scrollHeight;
                 } else {
-                    logQueue.push({ args, type });
+                    logQueue.push({ args, type, timestamp });
                 }
             };
 
             console.log = function() { originalLog.apply(console, arguments); window.__appendLogToTerminal(arguments, 'info'); };
             console.warn = function() { originalWarn.apply(console, arguments); window.__appendLogToTerminal(arguments, 'warn'); };
             console.error = function() { originalError.apply(console, arguments); window.__appendLogToTerminal(arguments, 'error'); };
+            console.debug = function() { window.__appendLogToTerminal(arguments, 'debug'); };
             
             window.addEventListener('error', function(e) {
-                window.__appendLogToTerminal([e.message, `at ${e.filename}:${e.lineno}`], 'error');
+                window.__appendLogToTerminal([e.message, `at ${e.filename}:${e.lineno}:${e.colno}`], 'error');
+            });
+
+            window.addEventListener('unhandledrejection', function(e) {
+                window.__appendLogToTerminal([`Unhandled Promise Rejection: ${e.reason}`], 'error');
             });
 
             window.addEventListener('DOMContentLoaded', () => {
-                // Flush early logs to the terminal box once it renders
+                console.debug("DOM fully loaded and parsed. Emptying log queue...");
+                const term = document.getElementById('devtools_terminal');
                 while(logQueue.length > 0) {
                     const item = logQueue.shift();
-                    window.__appendLogToTerminal(item.args, item.type);
+                    const line = document.createElement('div');
+                    line.className = `log-line log-${item.type}`;
+                    line.textContent = `[${item.timestamp}] [${item.type.toUpperCase()}] ${Array.from(item.args).join(' ')}`;
+                    term.appendChild(line);
                 }
+                term.scrollTop = term.scrollHeight;
             });
         })();
     </script>
 </head>
 <body>
 
-    <h1>HPVMx Sandbox</h1>
+    <h1>HPVMx Mobile Sandbox</h1>
     
     <div id="screen_container" onclick="focusKeyboard()">
         <canvas style="display: none;"></canvas>
@@ -145,26 +159,57 @@
     
     <input type="text" id="mobile_keyboard_trigger" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
 
-    <div class="status-panel" id="status">Loading Framework...</div>
+    <div class="status-panel" id="status">Trace Phase 1: Script Monitoring Active...</div>
 
     <div class="devtools-container">
         <div class="devtools-header">Mirrored Browser DevTools Console</div>
         <div id="devtools_terminal"></div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/v86@0.5.44/build/libv86.js" id="v86-script"></script>
-    
     <script>
-        // Check manually to see if script loaded or attach listener
-        const scriptTag = document.getElementById('v86-script');
-        if (typeof V86Starter !== 'undefined') {
-            initEmulator();
-        } else {
-            scriptTag.addEventListener('load', initEmulator);
-            scriptTag.addEventListener('error', () => {
-                console.error("The v86 engine script failed to download from the CDN.");
-            });
+        console.debug("Verifying core browser environment features...");
+        console.debug("WebAssembly support:", typeof WebAssembly === "object" ? "OK" : "MISSING");
+        console.debug("User Agent:", navigator.userAgent);
+
+        // Pre-flight check asset availability via fetch to diagnose cross-origin or network blocks
+        async function verifyAsset(url) {
+            try {
+                console.debug(`Pre-flight probe: fetching metadata for ${url}...`);
+                const response = await fetch(url, { method: 'HEAD' });
+                console.debug(`Response for ${url}: status=${response.status}, ok=${response.ok}`);
+            } catch (err) {
+                console.warn(`Pre-flight probe failed for ${url}. This might indicate a CORS or network connectivity blocker.`, err);
+            }
         }
+
+        verifyAsset("bios.bin");
+        verifyAsset("usb.img");
+    </script>
+
+    <script>
+        (function() {
+            console.log("Dynamically injecting libv86 script tag...");
+            const script = document.createElement('script');
+            script.src = "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/libv86.js";
+            script.async = true;
+
+            script.onload = function() {
+                console.log("libv86.js script tag successfully loaded into global document namespace.");
+                console.debug("Type checking V86Starter constructor existence:", typeof V86Starter);
+                if (typeof V86Starter !== 'undefined') {
+                    initEmulator();
+                } else {
+                    console.error("CRITICAL: libv86.js loaded successfully, but 'V86Starter' is still undefined in global scope!");
+                }
+            };
+
+            script.onerror = function(err) {
+                console.error("CRITICAL: DOM script injection system encountered a network delivery failure for libv86.js.", err);
+                document.getElementById("status").innerText = "Network Error loading libv86.js";
+            };
+
+            document.head.appendChild(script);
+        })();
 
         function focusKeyboard() {
             document.getElementById("mobile_keyboard_trigger").focus();
@@ -172,12 +217,11 @@
 
         function initEmulator() {
             const statusEl = document.getElementById("status");
-            statusEl.innerText = "Booting UEFI Runtime...";
-            console.log("Starting emulator setup...");
+            statusEl.innerText = "Trace Phase 2: Instantiating Emulation Wrapper...";
+            console.log("Invoking V86Starter options initialization block...");
 
             try {
-                const emulator = new V86Starter({
-                    // Align the WebAssembly engine path to match the stable jsDelivr layer
+                const config = {
                     wasm_path: "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/v86.wasm",
                     memory_size: 128 * 1024 * 1024, 
                     vga_memory_size: 8 * 1024 * 1024,
@@ -188,7 +232,12 @@
                     boot_order: 0x213,
                     screen_container: document.getElementById("screen_container"),
                     autostart: true
-                });
+                };
+
+                console.debug("Target structural configuration layout payload:", JSON.stringify(config));
+                
+                const emulator = new V86Starter(config);
+                console.log("V86Starter initialization object instantiated successfully.");
 
                 const inputTrigger = document.getElementById("mobile_keyboard_trigger");
                 inputTrigger.addEventListener("input", function(e) {
@@ -205,13 +254,13 @@
                 emulator.add_listener("emulator-ready", function() {
                     statusEl.innerText = "Status: Live. Tap display to type.";
                     statusEl.style.color = "#7ee787";
-                    console.log("v86 backend reports: Emulator system ready.");
+                    console.log("SUCCESS: v86 framework reports system pipeline is ready and running.");
                 });
 
             } catch (e) {
-                statusEl.innerText = "Initialization Error";
+                statusEl.innerText = "Instantiation Engine Exception Caught";
                 statusEl.style.color = "#ff7b72";
-                console.error("Failed to boot v86 initialization wrapper:", e);
+                console.error("V86Starter runtime constructor execution failed:", e);
             }
         }
     </script>
