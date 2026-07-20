@@ -181,15 +181,35 @@
         verifyAsset("usb.img");
 
         window.addEventListener('load', () => {
-            console.log("Window fully loaded. Testing constructor visibility...");
-            if (typeof V86Starter !== 'undefined') {
-                initEmulator(V86Starter);
-            } else if (typeof window.v86 !== 'undefined' && typeof window.v86.V86Starter !== 'undefined') {
-                initEmulator(window.v86.V86Starter);
-            } else {
-                console.error("CRITICAL: v86 scripts loaded but compilation namespace could not be located.");
-            }
-        });
+    console.log("Window fully loaded. Running aggressive constructor discovery...");
+    
+    // Scan all possible global namespace attachments used by various v86 compilation targets
+    let ResolvedConstructor = null;
+
+    if (typeof V86Starter !== 'undefined') {
+        ResolvedConstructor = V86Starter;
+        console.log("Found constructor in root scope: V86Starter");
+    } else if (typeof window.V86Starter !== 'undefined') {
+        ResolvedConstructor = window.V86Starter;
+        console.log("Found constructor on window: window.V86Starter");
+    } else if (typeof window.v86 !== 'undefined' && typeof window.v86.V86Starter !== 'undefined') {
+        ResolvedConstructor = window.v86.V86Starter;
+        console.log("Found constructor in lower-case namespace: window.v86.V86Starter");
+    } else if (typeof window.V86 !== 'undefined' && typeof window.V86.V86Starter !== 'undefined') {
+        ResolvedConstructor = window.V86.V86Starter;
+        console.log("Found constructor in upper-case namespace: window.V86.V86Starter");
+    } else if (typeof module !== 'undefined' && this.V86Starter) {
+        ResolvedConstructor = this.V86Starter;
+        console.log("Found constructor in execution context scope");
+    }
+
+    if (ResolvedConstructor) {
+        initEmulator(ResolvedConstructor);
+    } else {
+        console.error("CRITICAL: v86 source script loaded, but no usable export signatures were found globally.");
+        console.debug("Global window keys present:", Object.keys(window).filter(k => k.toLowerCase().includes('v86')));
+    }
+});
 
         function focusKeyboard() {
             document.getElementById("mobile_keyboard_trigger").focus();
