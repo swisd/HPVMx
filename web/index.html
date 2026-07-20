@@ -222,6 +222,15 @@
                     if (char) emulator.serial0_send(char);
                     e.target.value = "";
                 });
+                
+                emulator.add_listener("serial0-output-char", function(char) {
+            const term = document.getElementById('devtools_terminal');
+            if (term) {
+                // Safely append the streaming output coming from the bootloader
+                term.textContent += char;
+                term.scrollTop = term.scrollHeight;
+            }
+        });
 
                 inputTrigger.addEventListener("keydown", function(e) {
                     if (e.key === "Enter") emulator.serial0_send("\r\n");
