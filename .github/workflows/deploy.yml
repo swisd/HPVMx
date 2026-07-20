@@ -53,7 +53,7 @@ jobs:
 
 
           # 3. Provision a raw 16MB FAT32 disk volume
-          dd if=/dev/zero of=dist/usb.img bs=1M count=16
+          dd if=/dev/zero of=dist/usb.img bs=1M count=256
           mkfs.vfat -F 32 dist/usb.img
           
           # 4. Generate the mandatory hardware UEFI directory hierarchy
