@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPVMx Sandbox</title>
+    <title>HPVMx Modern Terminal Sandbox</title>
     <style>
         body {
             margin: 0;
@@ -23,22 +23,7 @@
             color: #58a6ff;
             text-align: center;
         }
-        #screen_container {
-            border: 3px solid #30363d;
-            border-radius: 6px;
-            background: #000;
-            width: 100%;
-            max-width: 640px;
-            aspect-ratio: 4 / 3;
-            overflow: hidden;
-        }
-        #screen_container canvas {
-            width: 100% !important;
-            height: 100% !important;
-            display: block !important;
-        }
         .status-panel {
-            margin-top: 12px;
             font-size: 13px;
             color: #8b949e;
             background: #161b22;
@@ -46,191 +31,133 @@
             border-radius: 20px;
             border: 1px solid #30363d;
             margin-bottom: 15px;
+            width: fit-content;
         }
-        .devtools-container {
+        .terminal-container {
             width: 100%;
-            max-width: 640px;
+            max-width: 700px;
             margin-top: 10px;
         }
-        .devtools-header {
+        .terminal-header {
             background-color: #161b22;
             border: 1px solid #30363d;
             border-bottom: none;
-            padding: 6px 12px;
+            padding: 8px 14px;
             font-size: 12px;
-            color: #8b949e;
+            color: #58a6ff;
             border-top-left-radius: 6px;
             border-top-right-radius: 6px;
             font-family: monospace;
+            font-weight: bold;
         }
-        #devtools_terminal {
+        #terminal_output {
             width: 100%;
-            height: 250px;
+            height: 400px;
             background-color: #010409;
             border: 1px solid #30363d;
             border-bottom-left-radius: 6px;
             border-bottom-right-radius: 6px;
-            font-family: monospace;
-            font-size: 11px;
-            padding: 10px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 13px;
+            padding: 15px;
             box-sizing: border-box;
             overflow-y: auto;
             white-space: pre-wrap;
             word-wrap: break-word;
+            color: #7ee787;
         }
-        .log-line { border-bottom: 1px solid #21262d; padding: 3px 0; }
-        .log-info { color: #c9d1d9; }
-        .log-debug { color: #58a6ff; }
-        .log-warn { color: #d29922; background: rgba(187, 128, 9, 0.1); }
-        .log-error { color: #f85149; background: rgba(248, 81, 73, 0.1); }
-        
         #mobile_keyboard_trigger {
             position: absolute;
             left: -9999px;
             opacity: 0;
         }
     </style>
-    <script>
-        // High-fidelity early logging interceptor loop
-        (function() {
-            const originalLog = console.log;
-            const originalWarn = console.warn;
-            const originalError = console.error;
-            const logQueue = [];
-
-            window.__appendLogToTerminal = function(args, type) {
-                const term = document.getElementById('devtools_terminal');
-                const message = Array.from(args).map(arg => {
-                    if (arg instanceof Error) return `${arg.name}: ${arg.message}\n${arg.stack}`;
-                    if (typeof arg === 'object') {
-                        try { return JSON.stringify(arg); } catch(e) { return String(arg); }
-                    }
-                    return String(arg);
-                }).join(' ');
-
-                const timestamp = new Date().toISOString().split('T')[1].slice(0, -1);
-
-                if (term) {
-                    const line = document.createElement('div');
-                    line.className = `log-line log-${type}`;
-                    line.textContent = `[${timestamp}] [${type.toUpperCase()}] ${message}`;
-                    term.appendChild(line);
-                    term.scrollTop = term.scrollHeight;
-                } else {
-                    logQueue.push({ args, type, timestamp });
-                }
-            };
-
-            console.log = function() { originalLog.apply(console, arguments); window.__appendLogToTerminal(arguments, 'info'); };
-            console.warn = function() { originalWarn.apply(console, arguments); window.__appendLogToTerminal(arguments, 'warn'); };
-            console.error = function() { originalError.apply(console, arguments); window.__appendLogToTerminal(arguments, 'error'); };
-            console.debug = function() { window.__appendLogToTerminal(arguments, 'debug'); };
-            
-            window.addEventListener('error', function(e) {
-                window.__appendLogToTerminal([e.message, `at ${e.filename}:${e.lineno}`], 'error');
-            });
-
-            window.addEventListener('DOMContentLoaded', () => {
-                const term = document.getElementById('devtools_terminal');
-                while(logQueue.length > 0) {
-                    const item = logQueue.shift();
-                    const line = document.createElement('div');
-                    line.className = `log-line log-${item.type}`;
-                    line.textContent = `[${item.timestamp}] [${item.type.toUpperCase()}] ${Array.from(item.args).join(' ')}`;
-                    term.appendChild(line);
-                }
-                term.scrollTop = term.scrollHeight;
-            });
-        })();
-    </script>
 </head>
 <body>
 
-    <h1>HPVMx Web Sandbox</h1>
+    <h1>HPVMx Terminal Sandbox</h1>
     
-    <div id="screen_container">
-        <canvas></canvas>
+    <div class="status-panel" id="status">System Status: Preparing Container Engine...</div>
+
+    <div class="terminal-container" onclick="focusKeyboard()">
+        <div class="terminal-header">Interactive Serial Console Target (\dev\ttyS0)</div>
+        <div id="terminal_output">Initializing terminal instance...</div>
     </div>
     
     <input type="text" id="mobile_keyboard_trigger" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
 
-    <div class="status-panel" id="status">Booting UEFI Machine...</div>
-
-    <div class="devtools-container">
-        <div class="devtools-header">Mirrored Browser DevTools Console</div>
-        <div id="devtools_terminal"></div>
-    </div>
-
     <script type="module">
         import v86Package from 'https://cdn.jsdelivr.net/npm/v86@0.5.44/+esm';
-
-        // Resolve the true constructor out of the import scope
         const V86Starter = v86Package.V86Starter || window.V86Starter || v86Package;
 
-        console.log("ES Module loaded. Resolved constructor type:", typeof V86Starter);
+        const term = document.getElementById('terminal_output');
+        const statusEl = document.getElementById("status");
 
-        document.getElementById("screen_container").addEventListener("click", () => {
+        window.focusKeyboard = function() {
             document.getElementById("mobile_keyboard_trigger").focus();
-        });
+        };
 
         async function verifyAsset(url) {
             try {
                 const response = await fetch(url, { method: 'HEAD' });
-                console.debug(`Verified asset dependency ${url}: status=${response.status}`);
+                return response.ok;
             } catch (err) {
-                console.warn(`Pre-flight probe failed for ${url}`, err);
+                return false;
             }
         }
 
-        verifyAsset("bios.bin");
-        verifyAsset("usb.img");
+        async function main() {
+            term.textContent = "Running diagnostic environment checks...\n";
+            
+            const biosValid = await verifyAsset("bios.bin");
+            const imageValid = await verifyAsset("usb.img");
+            
+            if (!biosValid || !imageValid) {
+                term.textContent += "[ERROR] Asset files missing! Ensure bios.bin and usb.img are deployed.\n";
+                statusEl.innerText = "System Status: Configuration Error";
+                statusEl.style.color = "#ff7b72";
+                return;
+            }
 
-        if (typeof V86Starter === 'function' || typeof V86Starter === 'object') {
-            initEmulator(V86Starter);
-        } else {
-            console.error("CRITICAL: Extracted constructor signature is invalid:", V86Starter);
-        }
-
-        function initEmulator(ConstructorInstance) {
-            const statusEl = document.getElementById("status");
-            console.log("Instantiating emulation container context...");
+            term.textContent += "[OK] System assets validated. Instantiating x86_64 container runtime...\n";
+            statusEl.innerText = "System Status: Spawning Machine Instance...";
 
             try {
-                const emulator = new ConstructorInstance({
+                const emulator = new V86Starter({
                     wasm_path: "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/v86.wasm",
-                    memory_size: 256 * 1024 * 1024, 
-                    vga_memory_size: 24 * 1024 * 1024,
-                    vga_as_pci: false,
-                    acpi: true, 
-                    cpu_version: 0x10,
                     
-                    vgabios: {
-                        url: "https://cdn.jsdelivr.net/npm/v86@0.5.44/bios/vgabios.bin"
-                    },
+                    // Allocated balanced memory footprint for high mobile browser performance
+                    memory_size: 128 * 1024 * 1024, 
+                    vga_memory_size: 2 * 1024 * 1024,
+                    
+                    // Enforce 64-bit architecture execution loops
+                    cpu_version: 0x10,
+                    acpi: false,
+                    
                     bios: { url: "bios.bin" },
                     hda: { url: "usb.img" },
                     boot_order: 0x3,
-                    screen_container: document.getElementById("screen_container"),
+                    
+                    // By removing screen_container entirely, we tell v86 to skip graphic allocations
                     autostart: true
                 });
 
-                console.log("V86Starter system successfully bound.");
+                // Clear layout once initialization completes successfully
+                term.textContent = "";
 
+                // Stream standard serial output from the virtual CPU straight to our terminal text box
+                emulator.add_listener("serial0-output-char", function(char) {
+                    term.textContent += char;
+                    term.scrollTop = term.scrollHeight;
+                });
+
+                // Keyboard interceptor layer
                 const inputTrigger = document.getElementById("mobile_keyboard_trigger");
                 inputTrigger.addEventListener("input", function(e) {
                     const char = e.target.value.slice(-1);
                     if (char) emulator.serial0_send(char);
                     e.target.value = "";
                 });
-                
-                emulator.add_listener("serial0-output-char", function(char) {
-            const term = document.getElementById('devtools_terminal');
-            if (term) {
-                // Safely append the streaming output coming from the bootloader
-                term.textContent += char;
-                term.scrollTop = term.scrollHeight;
-            }
-        });
 
                 inputTrigger.addEventListener("keydown", function(e) {
                     if (e.key === "Enter") emulator.serial0_send("\r\n");
@@ -238,17 +165,18 @@
                 });
 
                 emulator.add_listener("emulator-ready", function() {
-                    statusEl.innerText = "Status: Live. Tap display to type.";
+                    statusEl.innerText = "System Status: Online. Tap terminal area to input text.";
                     statusEl.style.color = "#7ee787";
-                    console.log("SUCCESS: Simulation initialization loop completed.");
                 });
 
             } catch (e) {
-                statusEl.innerText = "Runtime Allocation Failure";
+                statusEl.innerText = "System Status: Crash Caught";
                 statusEl.style.color = "#ff7b72";
-                console.error("Instantiation thread encountered a fatal error:", e);
+                term.textContent += `\n[FATAL] Engine allocation broke: ${e.message}\n`;
             }
         }
+
+        window.addEventListener("load", main);
     </script>
 </body>
 </html>
