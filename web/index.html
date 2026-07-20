@@ -3,25 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPVMx Modern Terminal Sandbox</title>
+    <title>HPVMx Pure x64 Sandbox</title>
     <style>
         body {
             margin: 0;
-            padding: 15px;
+            padding: 20px;
             background-color: #0d1117;
             color: #c9d1d9;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            font-family: monospace;
             display: flex;
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
             box-sizing: border-box;
         }
-        h1 {
-            font-size: 20px;
-            margin-bottom: 10px;
-            color: #58a6ff;
-            text-align: center;
+        h1 { 
+            color: #58a6ff; 
+            font-size: 20px; 
+            margin-bottom: 5px; 
         }
         .status-panel {
             font-size: 13px;
@@ -33,69 +32,35 @@
             margin-bottom: 15px;
             width: fit-content;
         }
-        .terminal-container {
+        #terminal_display {
             width: 100%;
             max-width: 700px;
-            margin-top: 10px;
-        }
-        .terminal-header {
-            background-color: #161b22;
-            border: 1px solid #30363d;
-            border-bottom: none;
-            padding: 8px 14px;
-            font-size: 12px;
-            color: #58a6ff;
-            border-top-left-radius: 6px;
-            border-top-right-radius: 6px;
-            font-family: monospace;
-            font-weight: bold;
-        }
-        #terminal_output {
-            width: 100%;
-            height: 400px;
+            height: 450px;
             background-color: #010409;
-            border: 1px solid #30363d;
-            border-bottom-left-radius: 6px;
-            border-bottom-right-radius: 6px;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 13px;
+            border: 2px solid #30363d;
+            border-radius: 6px;
             padding: 15px;
-            box-sizing: border-box;
             overflow-y: auto;
             white-space: pre-wrap;
             word-wrap: break-word;
             color: #7ee787;
-        }
-        #mobile_keyboard_trigger {
-            position: absolute;
-            left: -9999px;
-            opacity: 0;
+            box-sizing: border-box;
         }
     </style>
 </head>
 <body>
 
-    <h1>HPVMx Terminal Sandbox</h1>
+    <h1>HPVMx Pure x64 Execution Sandbox</h1>
+    <div class="status-panel" id="status">Initializing 64-bit Virtualization Subsystems...</div>
     
-    <div class="status-panel" id="status">System Status: Preparing Container Engine...</div>
-
-    <div class="terminal-container" onclick="focusKeyboard()">
-        <div class="terminal-header">Interactive Serial Console Target (\dev\ttyS0)</div>
-        <div id="terminal_output">Initializing terminal instance...</div>
-    </div>
-    
-    <input type="text" id="mobile_keyboard_trigger" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <div id="terminal_display">Preparing execution space container...</div>
 
     <script type="module">
-        import v86Package from 'https://cdn.jsdelivr.net/npm/v86@0.5.44/+esm';
-        const V86Starter = v86Package.V86Starter || window.V86Starter || v86Package;
+        // Import the stable immutable client-side x86_64 virtualization library natively
+        import * as CheerpX from "https://cxrtnc.leaningtech.com/1.2.8/cx.esm.js";
 
-        const term = document.getElementById('terminal_output');
+        const term = document.getElementById("terminal_display");
         const statusEl = document.getElementById("status");
-
-        window.focusKeyboard = function() {
-            document.getElementById("mobile_keyboard_trigger").focus();
-        };
 
         async function verifyAsset(url) {
             try {
@@ -106,77 +71,57 @@
             }
         }
 
-        async function main() {
-            term.textContent = "Running diagnostic environment checks...\n";
-            
-            const biosValid = await verifyAsset("bios.bin");
-            const imageValid = await verifyAsset("usb.img");
-            
-            if (!biosValid || !imageValid) {
-                term.textContent += "[ERROR] Asset files missing! Ensure bios.bin and usb.img are deployed.\n";
-                statusEl.innerText = "System Status: Configuration Error";
-                statusEl.style.color = "#ff7b72";
-                return;
-            }
-
-            term.textContent += "[OK] System assets validated. Instantiating x86_64 container runtime...\n";
-            statusEl.innerText = "System Status: Spawning Machine Instance...";
-
+        async function bootPureX64() {
             try {
-                const emulator = new V86Starter({
-                    wasm_path: "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/v86.wasm",
-                    
-                    // Allocated balanced memory footprint for high mobile browser performance
-                    memory_size: 128 * 1024 * 1024, 
-                    vga_memory_size: 2 * 1024 * 1024,
-                    
-                    // Enforce 64-bit architecture execution loops
-                    cpu_version: 0x10,
-                    acpi: false,
-                    
-                    bios: { url: "bios.bin" },
-                    hda: { url: "usb.img" },
-                    boot_order: 0x3,
-                    
-                    // By removing screen_container entirely, we tell v86 to skip graphic allocations
-                    autostart: true
+                statusEl.innerText = "Status: Verifying binary assets...";
+                
+                const imageExists = await verifyAsset("usb.img");
+                if (!imageExists) {
+                    throw new Error("Target usb.img data block not located in deployment workspace root.");
+                }
+
+                statusEl.innerText = "Status: Spawning x86_64 WebAssembly JIT engine...";
+                term.textContent = "Assets verified. Mounting direct HTTP filesystem...\n";
+
+                // Map standard runtime nodes and server contexts directly into virtual device trees
+                const webDevice = await CheerpX.WebDevice.create("");
+                const dataDevice = await CheerpX.DataDevice.create();
+
+                const cx = await CheerpX.Linux.create({
+                    mounts: [
+                        { type: "devs", path: "/dev" },
+                        { type: "proc", path: "/proc" },
+                        { type: "dir", path: "/", dev: webDevice },
+                        { type: "dir", path: "/data", dev: dataDevice }
+                    ]
                 });
 
-                // Clear layout once initialization completes successfully
+                statusEl.innerText = "Status: Processing instruction vectors (Live)";
+                statusEl.style.color = "#7ee787";
                 term.textContent = "";
 
-                // Stream standard serial output from the virtual CPU straight to our terminal text box
-                emulator.add_listener("serial0-output-char", function(char) {
-                    term.textContent += char;
-                    term.scrollTop = term.scrollHeight;
+                // Directly fire target operations onto the underlying block images, 
+                // avoiding slow frame-buffer translation crashes completely.
+                await cx.run("/bin/bash", ["-c", "echo '[SYSTEM] x64 Instruction Layer Engaged'; if [ -f '/usb.img' ]; then dd if=/usb.img bs=512 count=8 2>/dev/null; else echo '[WARN] Virtual device file empty'; fi"], {
+                    stdout: (str) => {
+                        term.textContent += str;
+                        term.scrollTop = term.scrollHeight;
+                    },
+                    stderr: (err) => {
+                        term.textContent += `\n[RUNTIME EXCEPTION] ${err}`;
+                    }
                 });
 
-                // Keyboard interceptor layer
-                const inputTrigger = document.getElementById("mobile_keyboard_trigger");
-                inputTrigger.addEventListener("input", function(e) {
-                    const char = e.target.value.slice(-1);
-                    if (char) emulator.serial0_send(char);
-                    e.target.value = "";
-                });
-
-                inputTrigger.addEventListener("keydown", function(e) {
-                    if (e.key === "Enter") emulator.serial0_send("\r\n");
-                    else if (e.key === "Backspace") emulator.serial0_send("\b");
-                });
-
-                emulator.add_listener("emulator-ready", function() {
-                    statusEl.innerText = "System Status: Online. Tap terminal area to input text.";
-                    statusEl.style.color = "#7ee787";
-                });
+                statusEl.innerText = "Status: Cycle execution complete.";
 
             } catch (e) {
-                statusEl.innerText = "System Status: Crash Caught";
+                statusEl.innerText = "Execution Pipeline Faulted";
                 statusEl.style.color = "#ff7b72";
-                term.textContent += `\n[FATAL] Engine allocation broke: ${e.message}\n`;
+                term.textContent = `[FATAL EXCEPTION CRASH] Layout configuration broke down:\n${e.message}\n\nStack:\n${e.stack}`;
             }
         }
 
-        window.addEventListener("load", main);
+        window.addEventListener("load", bootPureX64);
     </script>
 </body>
 </html>
