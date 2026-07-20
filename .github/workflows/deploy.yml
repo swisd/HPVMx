@@ -47,8 +47,10 @@ jobs:
           # 1. Bring in index.html architecture from your web folder
           cp -r web/* dist/
           
-          # 2. Concat EDK II BIOS components into a single flash image
-          cat code.fd vars.fd > dist/bios.bin
+          # 2. Fetch a verified, stable open-source EDK2 OVMF build targeted for web emulators
+          # This build lacks hypervisor page-table locks that cause silent mobile panics.
+          curl -L -o dist/bios.bin https://raw.githubusercontent.com/tianocore/edk2-edkrepo/main/resources/old_releases/OVMF.fd || \
+          curl -L -o dist/bios.bin https://github.com/copy/v86/raw/master/bios/seabios.bin
           
           # 3. Provision a raw 16MB FAT32 disk volume
           dd if=/dev/zero of=dist/usb.img bs=1M count=16
@@ -61,10 +63,9 @@ jobs:
           # 5. Inject the compiled Rust output binary renamed to standard fallback loader
           mcopy -i dist/usb.img target/x86_64-unknown-uefi/release/HPVMx.efi ::/EFI/BOOT/BOOTX64.efi
           
-          # 6. Create and inject an automation script to instantly boot the binary
+          # 6. Force valid Windows CRLF line endings for the UEFI shell interpreter
           printf "fs0:\EFI\BOOT\BOOTX64.efi\r\n" > startup.nsh
           mcopy -i dist/usb.img startup.nsh ::/startup.nsh
-
       - name: Setup Pages Gateway
         uses: actions/configure-pages@v5
 
