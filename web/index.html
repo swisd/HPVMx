@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPVMx Mobile Sandbox - Verbose Debug</title>
+    <title>HPVMx Mobile Sandbox</title>
     <style>
         body {
             margin: 0;
             padding: 15px;
-            background-color: #0d1115;
+            background-color: #0d1117;
             color: #c9d1d9;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
             display: flex;
@@ -32,10 +32,11 @@
             aspect-ratio: 4 / 3;
             overflow: hidden;
         }
+        /* Fixed visibility parameters to prevent Safari canvas allocation dropouts */
         #screen_container canvas {
             width: 100% !important;
             height: 100% !important;
-            display: block;
+            display: block !important;
         }
         .status-panel {
             margin-top: 12px;
@@ -65,7 +66,7 @@
         }
         #devtools_terminal {
             width: 100%;
-            height: 300px;
+            height: 250px;
             background-color: #010409;
             border: 1px solid #30363d;
             border-bottom-left-radius: 6px;
@@ -78,7 +79,7 @@
             white-space: pre-wrap;
             word-wrap: break-word;
         }
-        .log-line { border-bottom: 1px solid #21262d; padding: 3px 0; font-family: monospace; }
+        .log-line { border-bottom: 1px solid #21262d; padding: 3px 0; }
         .log-info { color: #c9d1d9; }
         .log-debug { color: #58a6ff; }
         .log-warn { color: #d29922; background: rgba(187, 128, 9, 0.1); }
@@ -127,15 +128,10 @@
             console.debug = function() { window.__appendLogToTerminal(arguments, 'debug'); };
             
             window.addEventListener('error', function(e) {
-                window.__appendLogToTerminal([e.message, `at ${e.filename}:${e.lineno}:${e.colno}`], 'error');
-            });
-
-            window.addEventListener('unhandledrejection', function(e) {
-                window.__appendLogToTerminal([`Unhandled Promise Rejection: ${e.reason}`], 'error');
+                window.__appendLogToTerminal([e.message, `at ${e.filename}:${e.lineno}`], 'error');
             });
 
             window.addEventListener('DOMContentLoaded', () => {
-                console.debug("DOM fully loaded and parsed. Emptying log queue...");
                 const term = document.getElementById('devtools_terminal');
                 while(logQueue.length > 0) {
                     const item = logQueue.shift();
@@ -148,18 +144,20 @@
             });
         })();
     </script>
+
+    <script src="https://unpkg.com/v86@0.5.44/build/libv86.js"></script>
 </head>
 <body>
 
     <h1>HPVMx Mobile Sandbox</h1>
     
     <div id="screen_container" onclick="focusKeyboard()">
-        <canvas style="display: none;"></canvas>
+        <canvas></canvas>
     </div>
     
     <input type="text" id="mobile_keyboard_trigger" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
 
-    <div class="status-panel" id="status">Trace Phase 1: Script Monitoring Active...</div>
+    <div class="status-panel" id="status">Booting UEFI Machine...</div>
 
     <div class="devtools-container">
         <div class="devtools-header">Mirrored Browser DevTools Console</div>
@@ -167,111 +165,61 @@
     </div>
 
     <script>
-        console.debug("Verifying core browser environment features...");
+        console.debug("Verifying environments...");
         console.debug("WebAssembly support:", typeof WebAssembly === "object" ? "OK" : "MISSING");
-        console.debug("User Agent:", navigator.userAgent);
 
-        // Pre-flight check asset availability via fetch to diagnose cross-origin or network blocks
         async function verifyAsset(url) {
             try {
-                console.debug(`Pre-flight probe: fetching metadata for ${url}...`);
                 const response = await fetch(url, { method: 'HEAD' });
-                console.debug(`Response for ${url}: status=${response.status}, ok=${response.ok}`);
+                console.debug(`Verified asset dependency ${url}: status=${response.status}`);
             } catch (err) {
-                console.warn(`Pre-flight probe failed for ${url}. This might indicate a CORS or network connectivity blocker.`, err);
+                console.warn(`Pre-flight probe failed for ${url}`, err);
             }
         }
 
         verifyAsset("bios.bin");
         verifyAsset("usb.img");
-    </script>
 
-    <script src="https://cdn.jsdelivr.net/npm/v86@0.5.44/build/libv86.js" id="v86-script"></script>
-    
-    <script>
-        const scriptTag = document.getElementById('v86-script');
-
-        // Check for presence immediately, or wait for the load lifecycle event
-        if (checkV86Availability()) {
-            initEmulator();
-        } else {
-            scriptTag.addEventListener('load', () => {
-                if (checkV86Availability()) {
-                    initEmulator();
-                } else {
-                    console.warn("Primary CDN structure missed global bindings. Attempting emergency UNPKG runtime fallback...");
-                    loadFallbackEngine();
-                }
-            });
-        }
-
-        // Namespace discovery tool to find where the constructor is hiding
-        function checkV86Availability() {
+        window.addEventListener('load', () => {
+            console.log("Window fully loaded. Testing constructor visibility...");
             if (typeof V86Starter !== 'undefined') {
-                window.ResolvedV86Constructor = V86Starter;
-                return true;
+                initEmulator(V86Starter);
+            } else if (typeof window.v86 !== 'undefined' && typeof window.v86.V86Starter !== 'undefined') {
+                initEmulator(window.v86.V86Starter);
+            } else {
+                console.error("CRITICAL: v86 scripts loaded but compilation namespace could not be located.");
             }
-            if (typeof window.v86 !== 'undefined' && typeof window.v86.V86Starter !== 'undefined') {
-                window.ResolvedV86Constructor = window.v86.V86Starter;
-                console.log("Namespace discovery found constructor at: window.v86.V86Starter");
-                return true;
-            }
-            if (typeof window.V86 !== 'undefined' && typeof window.V86.V86Starter !== 'undefined') {
-                window.ResolvedV86Constructor = window.V86.V86Starter;
-                console.log("Namespace discovery found constructor at: window.V86.V86Starter");
-                return true;
-            }
-            return false;
-        }
-
-        // If the jsDelivr package script fails to expose a global variable, hot-swap to the standalone browser build
-        function loadFallbackEngine() {
-            const fallbackScript = document.createElement('script');
-            fallbackScript.src = "https://unpkg.com/v86@0.5.44/build/libv86.js";
-            fallbackScript.async = true;
-            
-            fallbackScript.onload = function() {
-                console.log("Fallback UNPKG script loaded successfully.");
-                if (checkV86Availability()) {
-                    initEmulator();
-                } else {
-                    console.error("CRITICAL: All fallback CDNs exhausted. Engine objects completely unmapped.");
-                }
-            };
-            document.head.appendChild(fallbackScript);
-        }
+        });
 
         function focusKeyboard() {
             document.getElementById("mobile_keyboard_trigger").focus();
         }
 
-        function initEmulator() {
+        function initEmulator(ConstructorInstance) {
             const statusEl = document.getElementById("status");
-            statusEl.innerText = "Booting UEFI Runtime...";
-            console.log("Instantiating sandbox engine via resolved constructor mapping...");
+            console.log("Triggering engine boot parameters...");
 
             try {
-                // We call the dynamically mapped constructor token we discovered
-                const emulator = new window.ResolvedV86Constructor({
-    wasm_path: "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/v86.wasm",
-    memory_size: 64 * 1024 * 1024, 
-    vga_memory_size: 8 * 1024 * 1024,
-    
-    // CRITICAL: Force standard PCI VGA card mappings instead of standard raw VGA
-    vga_as_pci: true,
-    acpi: true, 
-    
-    // Injects the necessary framework translation mapping layer for graphical output
-    vgabios: {
-        url: "https://cdn.jsdelivr.net/npm/v86@0.5.44/bios/vgabios.bin"
-    },
-    
-    bios: { url: "bios.bin" },
-    hda: { url: "usb.img" },
-    boot_order: 0x213,
-    screen_container: document.getElementById("screen_container"),
-    autostart: true
-});
+                const emulator = new ConstructorInstance({
+                    wasm_path: "https://unpkg.com/v86@0.5.44/build/v86.wasm",
+                    
+                    // Allocated 64MB memory allocation ceiling for iOS stability
+                    memory_size: 64 * 1024 * 1024, 
+                    vga_memory_size: 8 * 1024 * 1024,
+                    vga_as_pci: true,
+                    acpi: true, 
+                    
+                    vgabios: {
+                        url: "https://unpkg.com/v86@0.5.44/bios/vgabios.bin"
+                    },
+                    bios: { url: "bios.bin" },
+                    hda: { url: "usb.img" },
+                    boot_order: 0x213,
+                    screen_container: document.getElementById("screen_container"),
+                    autostart: true
+                });
+
+                console.log("V86Starter instance object deployed to core worker layer.");
 
                 const inputTrigger = document.getElementById("mobile_keyboard_trigger");
                 inputTrigger.addEventListener("input", function(e) {
@@ -288,13 +236,13 @@
                 emulator.add_listener("emulator-ready", function() {
                     statusEl.innerText = "Status: Live. Tap display to type.";
                     statusEl.style.color = "#7ee787";
-                    console.log("SUCCESS: Simulation thread completely operational.");
+                    console.log("SUCCESS: Virtual system engine execution cycle online.");
                 });
 
             } catch (e) {
-                statusEl.innerText = "Initialization Error";
+                statusEl.innerText = "Runtime Engine Exception Catch";
                 statusEl.style.color = "#ff7b72";
-                console.error("Failed executing structural V86 instance launch loop:", e);
+                console.error("Initialization loop broke down during construction:", e);
             }
         }
     </script>
