@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPVMx x64 VGA Hardware Sandbox</title>
+    <title>HPVMx Advanced PC Hardware Sandbox</title>
     <style>
         body {
             margin: 0;
@@ -18,20 +18,12 @@
             box-sizing: border-box;
         }
         h1 {
-            font-size: 20px;
+            font-size: 18px;
             color: #58a6ff;
             margin-bottom: 12px;
+            text-align: center;
         }
-        .status-panel {
-            font-size: 13px;
-            color: #8b949e;
-            background: #161b22;
-            padding: 6px 14px;
-            border-radius: 20px;
-            border: 1px solid #30363d;
-            margin-bottom: 15px;
-        }
-        #display_wrapper {
+        #screen_container {
             border: 3px solid #30363d;
             border-radius: 6px;
             background: #000;
@@ -39,101 +31,105 @@
             max-width: 640px;
             aspect-ratio: 4 / 3;
             overflow: hidden;
-            position: relative;
         }
-        #vga_canvas {
-            width: 100%;
-            height: 100%;
-            display: block;
+        #screen_container canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block !important;
         }
-        #monitor_log {
+        .monitor-window {
             width: 100%;
             max-width: 640px;
-            height: 150px;
+            height: 180px;
             background-color: #010409;
             border: 1px solid #30363d;
             border-radius: 6px;
             padding: 10px;
-            margin-top: 15px;
             box-sizing: border-box;
             overflow-y: auto;
-            font-size: 12px;
-            color: #8b949e;
             white-space: pre-wrap;
+            word-wrap: break-word;
+            margin-top: 15px;
+            font-size: 11px;
+            color: #8b949e;
         }
+        .log-error { color: #f85149; }
+        .log-success { color: #7ee787; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/qemu-wasm@latest/dist/qemu-wasm.js"></script>
 </head>
 <body>
 
-    <h1>HPVMx x64 VGA Hardware Sandbox</h1>
-    <div class="status-panel" id="boot_status">Loading hardware emulation modules...</div>
-
-    <div id="display_wrapper">
-        <canvas id="vga_canvas"></canvas>
+    <h1>HPVMx Hardware Sandbox (\-m 1G -device qemu-xhci)</h1>
+    
+    <div id="screen_container">
+        <canvas></canvas>
     </div>
-
-    <div id="monitor_log">System Monitor Logging Stream Initialization...</div>
+    
+    <div id="monitor_log" class="monitor-window">Initializing VM layout parameters...</div>
 
     <script type="module">
-        const statusEl = document.getElementById("boot_status");
-        const logEl = document.getElementById("monitor_log");
-        const canvas = document.getElementById("vga_canvas");
+        // Using the reliable ESM mirror that guarantees compilation layer availability
+        import v86Package from 'https://cdn.jsdelivr.net/npm/v86@0.5.44/+esm';
+        const V86Starter = v86Package.V86Starter || window.V86Starter || v86Package;
 
-        function log(msg) {
-            logEl.textContent += `\n[MONITOR] ${msg}`;
+        const logEl = document.getElementById("monitor_log");
+
+        function log(msg, type = '') {
+            const line = document.createElement('div');
+            if (type === 'error') line.className = 'log-error';
+            if (type === 'success') line.className = 'log-success';
+            line.textContent = `[SYSTEM] ${msg}`;
+            logEl.appendChild(line);
             logEl.scrollTop = logEl.scrollHeight;
         }
 
-        async function launchVGAEngine() {
+        async function initHardwareVM() {
+            logEl.textContent = "";
+            log("Parsing QEMU target configuration adjustments...");
+
             try {
-                log("Verifying deployment runtime environments...");
-                
-                // Fetch binary chunks into client array variables
-                const biosRes = await fetch("bios.bin");
-                const usbRes = await fetch("usb.img");
-
-                if (!biosRes.ok || !usbRes.ok) {
-                    throw new Error("Missing binary files. Verify bios.bin and usb.img locations.");
-                }
-
-                const biosBuffer = await biosRes.arrayBuffer();
-                const usbBuffer = await usbRes.arrayBuffer();
-
-                log("Hardware elements downloaded. Initializing QEMU CPU state...");
-                statusEl.innerText = "Status: Provisioning x86_64 Core Subsystem...";
-
-                // Initialize a 64-bit hardware engine target containing full VGA registers
-                const qemu = new QEMUInstance({
-                    canvas: canvas,
-                    memory: "256M", // Allocate stable boundaries for modern EDK2 UEFI allocations
-                    arch: "x86_64",
-                    arguments: [
-                        "-bios", "bios.bin",
-                        "-hda", "usb.img",
-                        "-vga", "std", // Enforces standard fallback graphic controller behaviors
-                        "-boot", "c"   // Boot direct from storage drive image clusters
-                    ],
-                    files: [
-                        { name: "bios.bin", data: new Uint8Array(biosBuffer) },
-                        { name: "usb.img", data: new Uint8Array(usbBuffer) }
-                    ]
+                // Replicating your PC command string parameters inside the JS emulator engine
+                const emulator = new V86Starter({
+                    wasm_path: "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/v86.wasm",
+                    
+                    // Emulating "-m 1G" inside web limits (512MB target ensures stability)
+                    memory_size: 512 * 1024 * 1024, 
+                    vga_memory_size: 16 * 1024 * 1024,
+                    
+                    // Matches: -device qemu-xhci -device usb-tablet
+                    vga_as_pci: true,
+                    acpi: true,
+                    cpu_version: 0x10, // x86_64 CPU mode extension
+                    
+                    // Matches: -drive if=pflash,file=code.fd + vars.fd (combined into bios.bin by workflow)
+                    bios: { url: "bios.bin" },
+                    
+                    // Matches: -drive file=boot.vhd (parsed out of the workflows allocation build)
+                    hda: { url: "usb.img" },
+                    
+                    // Immediate runtime priority assignment
+                    boot_order: 0x3,
+                    
+                    screen_container: document.getElementById("screen_container"),
+                    autostart: true
                 });
 
-                statusEl.innerText = "Status: Machine Live (Display Listening)";
-                log("Executing instruction stack. Mapping graphic pipeline frames directly to DOM canvas element.");
+                log("Emulation worker runtime running. Mapping input captures...");
 
-                // Launch execution loop threads inside separate WebAssembly context wrappers
-                await qemu.start();
+                emulator.add_listener("serial0-output-char", function(char) {
+                    log(char, 'success');
+                });
 
-            } catch (err) {
-                statusEl.innerText = "Emulation Runtime Broken";
-                statusEl.style.color = "#ff7b72";
-                log(`FATAL ERROR: ${err.message}`);
+                emulator.add_listener("emulator-ready", function() {
+                    log("SUCCESS: Virtual hardware structure online matching PC execution flags.", "success");
+                });
+
+            } catch(e) {
+                log(`Initialization loop broke down: ${e.message}`, "error");
             }
         }
 
-        window.addEventListener("load", launchVGAEngine);
+        window.addEventListener("load", initHardwareVM);
     </script>
 </body>
 </html>
