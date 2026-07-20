@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPVMx Pure x64 Sandbox</title>
+    <title>HPVMx x64 VGA Hardware Sandbox</title>
     <style>
         body {
             margin: 0;
-            padding: 20px;
+            padding: 15px;
             background-color: #0d1117;
             color: #c9d1d9;
             font-family: monospace;
@@ -17,10 +17,10 @@
             min-height: 100vh;
             box-sizing: border-box;
         }
-        h1 { 
-            color: #58a6ff; 
-            font-size: 20px; 
-            margin-bottom: 5px; 
+        h1 {
+            font-size: 20px;
+            color: #58a6ff;
+            margin-bottom: 12px;
         }
         .status-panel {
             font-size: 13px;
@@ -30,98 +30,110 @@
             border-radius: 20px;
             border: 1px solid #30363d;
             margin-bottom: 15px;
-            width: fit-content;
         }
-        #terminal_display {
-            width: 100%;
-            max-width: 700px;
-            height: 450px;
-            background-color: #010409;
-            border: 2px solid #30363d;
+        #display_wrapper {
+            border: 3px solid #30363d;
             border-radius: 6px;
-            padding: 15px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            color: #7ee787;
+            background: #000;
+            width: 100%;
+            max-width: 640px;
+            aspect-ratio: 4 / 3;
+            overflow: hidden;
+            position: relative;
+        }
+        #vga_canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #monitor_log {
+            width: 100%;
+            max-width: 640px;
+            height: 150px;
+            background-color: #010409;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 15px;
             box-sizing: border-box;
+            overflow-y: auto;
+            font-size: 12px;
+            color: #8b949e;
+            white-space: pre-wrap;
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/qemu-wasm@latest/dist/qemu-wasm.js"></script>
 </head>
 <body>
 
-    <h1>HPVMx Pure x64 Execution Sandbox</h1>
-    <div class="status-panel" id="status">Initializing 64-bit Virtualization Subsystems...</div>
-    
-    <div id="terminal_display">Preparing execution space container...</div>
+    <h1>HPVMx x64 VGA Hardware Sandbox</h1>
+    <div class="status-panel" id="boot_status">Loading hardware emulation modules...</div>
+
+    <div id="display_wrapper">
+        <canvas id="vga_canvas"></canvas>
+    </div>
+
+    <div id="monitor_log">System Monitor Logging Stream Initialization...</div>
 
     <script type="module">
-        // Import the stable immutable client-side x86_64 virtualization library natively
-        import * as CheerpX from "https://cxrtnc.leaningtech.com/1.2.8/cx.esm.js";
+        const statusEl = document.getElementById("boot_status");
+        const logEl = document.getElementById("monitor_log");
+        const canvas = document.getElementById("vga_canvas");
 
-        const term = document.getElementById("terminal_display");
-        const statusEl = document.getElementById("status");
-
-        async function verifyAsset(url) {
-            try {
-                const response = await fetch(url, { method: 'HEAD' });
-                return response.ok;
-            } catch (err) {
-                return false;
-            }
+        function log(msg) {
+            logEl.textContent += `\n[MONITOR] ${msg}`;
+            logEl.scrollTop = logEl.scrollHeight;
         }
 
-        async function bootPureX64() {
+        async function launchVGAEngine() {
             try {
-                statusEl.innerText = "Status: Verifying binary assets...";
+                log("Verifying deployment runtime environments...");
                 
-                const imageExists = await verifyAsset("usb.img");
-                if (!imageExists) {
-                    throw new Error("Target usb.img data block not located in deployment workspace root.");
+                // Fetch binary chunks into client array variables
+                const biosRes = await fetch("bios.bin");
+                const usbRes = await fetch("usb.img");
+
+                if (!biosRes.ok || !usbRes.ok) {
+                    throw new Error("Missing binary files. Verify bios.bin and usb.img locations.");
                 }
 
-                statusEl.innerText = "Status: Spawning x86_64 WebAssembly JIT engine...";
-                term.textContent = "Assets verified. Mounting direct HTTP filesystem...\n";
+                const biosBuffer = await biosRes.arrayBuffer();
+                const usbBuffer = await usbRes.arrayBuffer();
 
-                // Map standard runtime nodes and server contexts directly into virtual device trees
-                const webDevice = await CheerpX.WebDevice.create("");
-                const dataDevice = await CheerpX.DataDevice.create();
+                log("Hardware elements downloaded. Initializing QEMU CPU state...");
+                statusEl.innerText = "Status: Provisioning x86_64 Core Subsystem...";
 
-                const cx = await CheerpX.Linux.create({
-                    mounts: [
-                        { type: "devs", path: "/dev" },
-                        { type: "proc", path: "/proc" },
-                        { type: "dir", path: "/", dev: webDevice },
-                        { type: "dir", path: "/data", dev: dataDevice }
+                // Initialize a 64-bit hardware engine target containing full VGA registers
+                const qemu = new QEMUInstance({
+                    canvas: canvas,
+                    memory: "256M", // Allocate stable boundaries for modern EDK2 UEFI allocations
+                    arch: "x86_64",
+                    arguments: [
+                        "-bios", "bios.bin",
+                        "-hda", "usb.img",
+                        "-vga", "std", // Enforces standard fallback graphic controller behaviors
+                        "-boot", "c"   // Boot direct from storage drive image clusters
+                    ],
+                    files: [
+                        { name: "bios.bin", data: new Uint8Array(biosBuffer) },
+                        { name: "usb.img", data: new Uint8Array(usbBuffer) }
                     ]
                 });
 
-                statusEl.innerText = "Status: Processing instruction vectors (Live)";
-                statusEl.style.color = "#7ee787";
-                term.textContent = "";
+                statusEl.innerText = "Status: Machine Live (Display Listening)";
+                log("Executing instruction stack. Mapping graphic pipeline frames directly to DOM canvas element.");
 
-                // Directly fire target operations onto the underlying block images, 
-                // avoiding slow frame-buffer translation crashes completely.
-                await cx.run("/bin/bash", ["-c", "echo '[SYSTEM] x64 Instruction Layer Engaged'; if [ -f '/usb.img' ]; then dd if=/usb.img bs=512 count=8 2>/dev/null; else echo '[WARN] Virtual device file empty'; fi"], {
-                    stdout: (str) => {
-                        term.textContent += str;
-                        term.scrollTop = term.scrollHeight;
-                    },
-                    stderr: (err) => {
-                        term.textContent += `\n[RUNTIME EXCEPTION] ${err}`;
-                    }
-                });
+                // Launch execution loop threads inside separate WebAssembly context wrappers
+                await qemu.start();
 
-                statusEl.innerText = "Status: Cycle execution complete.";
-
-            } catch (e) {
-                statusEl.innerText = "Execution Pipeline Faulted";
+            } catch (err) {
+                statusEl.innerText = "Emulation Runtime Broken";
                 statusEl.style.color = "#ff7b72";
-                term.textContent = `[FATAL EXCEPTION CRASH] Layout configuration broke down:\n${e.message}\n\nStack:\n${e.stack}`;
+                log(`FATAL ERROR: ${err.message}`);
             }
         }
 
-        window.addEventListener("load", bootPureX64);
+        window.addEventListener("load", launchVGAEngine);
     </script>
 </body>
 </html>
