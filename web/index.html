@@ -32,7 +32,6 @@
             aspect-ratio: 4 / 3;
             overflow: hidden;
         }
-        /* Fixed visibility parameters to prevent Safari canvas allocation dropouts */
         #screen_container canvas {
             width: 100% !important;
             height: 100% !important;
@@ -92,7 +91,7 @@
         }
     </style>
     <script>
-        // High-fidelity early interceptor pipeline
+        // High-fidelity early logging interceptor loop
         (function() {
             const originalLog = console.log;
             const originalWarn = console.warn;
@@ -144,14 +143,12 @@
             });
         })();
     </script>
-
-    <script src="https://unpkg.com/v86@0.5.44/build/libv86.js"></script>
 </head>
 <body>
 
     <h1>HPVMx Mobile Sandbox</h1>
     
-    <div id="screen_container" onclick="focusKeyboard()">
+    <div id="screen_container">
         <canvas></canvas>
     </div>
     
@@ -164,9 +161,17 @@
         <div id="devtools_terminal"></div>
     </div>
 
-    <script>
-        console.debug("Verifying environments...");
-        console.debug("WebAssembly support:", typeof WebAssembly === "object" ? "OK" : "MISSING");
+    <script type="module">
+        import v86Package from 'https://cdn.jsdelivr.net/npm/v86@0.5.44/+esm';
+
+        // Resolve the true constructor out of the import scope
+        const V86Starter = v86Package.V86Starter || window.V86Starter || v86Package;
+
+        console.log("ES Module loaded. Resolved constructor type:", typeof V86Starter);
+
+        document.getElementById("screen_container").addEventListener("click", () => {
+            document.getElementById("mobile_keyboard_trigger").focus();
+        });
 
         async function verifyAsset(url) {
             try {
@@ -180,57 +185,26 @@
         verifyAsset("bios.bin");
         verifyAsset("usb.img");
 
-        window.addEventListener('load', () => {
-    console.log("Window fully loaded. Running aggressive constructor discovery...");
-    
-    // Scan all possible global namespace attachments used by various v86 compilation targets
-    let ResolvedConstructor = null;
-
-    if (typeof V86Starter !== 'undefined') {
-        ResolvedConstructor = V86Starter;
-        console.log("Found constructor in root scope: V86Starter");
-    } else if (typeof window.V86Starter !== 'undefined') {
-        ResolvedConstructor = window.V86Starter;
-        console.log("Found constructor on window: window.V86Starter");
-    } else if (typeof window.v86 !== 'undefined' && typeof window.v86.V86Starter !== 'undefined') {
-        ResolvedConstructor = window.v86.V86Starter;
-        console.log("Found constructor in lower-case namespace: window.v86.V86Starter");
-    } else if (typeof window.V86 !== 'undefined' && typeof window.V86.V86Starter !== 'undefined') {
-        ResolvedConstructor = window.V86.V86Starter;
-        console.log("Found constructor in upper-case namespace: window.V86.V86Starter");
-    } else if (typeof module !== 'undefined' && this.V86Starter) {
-        ResolvedConstructor = this.V86Starter;
-        console.log("Found constructor in execution context scope");
-    }
-
-    if (ResolvedConstructor) {
-        initEmulator(ResolvedConstructor);
-    } else {
-        console.error("CRITICAL: v86 source script loaded, but no usable export signatures were found globally.");
-        console.debug("Global window keys present:", Object.keys(window).filter(k => k.toLowerCase().includes('v86')));
-    }
-});
-
-        function focusKeyboard() {
-            document.getElementById("mobile_keyboard_trigger").focus();
+        if (typeof V86Starter === 'function' || typeof V86Starter === 'object') {
+            initEmulator(V86Starter);
+        } else {
+            console.error("CRITICAL: Extracted constructor signature is invalid:", V86Starter);
         }
 
         function initEmulator(ConstructorInstance) {
             const statusEl = document.getElementById("status");
-            console.log("Triggering engine boot parameters...");
+            console.log("Instantiating emulation container context...");
 
             try {
                 const emulator = new ConstructorInstance({
-                    wasm_path: "https://unpkg.com/v86@0.5.44/build/v86.wasm",
-                    
-                    // Allocated 64MB memory allocation ceiling for iOS stability
+                    wasm_path: "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/v86.wasm",
                     memory_size: 64 * 1024 * 1024, 
                     vga_memory_size: 8 * 1024 * 1024,
                     vga_as_pci: true,
                     acpi: true, 
                     
                     vgabios: {
-                        url: "https://unpkg.com/v86@0.5.44/bios/vgabios.bin"
+                        url: "https://cdn.jsdelivr.net/npm/v86@0.5.44/bios/vgabios.bin"
                     },
                     bios: { url: "bios.bin" },
                     hda: { url: "usb.img" },
@@ -239,7 +213,7 @@
                     autostart: true
                 });
 
-                console.log("V86Starter instance object deployed to core worker layer.");
+                console.log("V86Starter system successfully bound.");
 
                 const inputTrigger = document.getElementById("mobile_keyboard_trigger");
                 inputTrigger.addEventListener("input", function(e) {
@@ -256,13 +230,13 @@
                 emulator.add_listener("emulator-ready", function() {
                     statusEl.innerText = "Status: Live. Tap display to type.";
                     statusEl.style.color = "#7ee787";
-                    console.log("SUCCESS: Virtual system engine execution cycle online.");
+                    console.log("SUCCESS: Simulation initialization loop completed.");
                 });
 
             } catch (e) {
-                statusEl.innerText = "Runtime Engine Exception Catch";
+                statusEl.innerText = "Runtime Allocation Failure";
                 statusEl.style.color = "#ff7b72";
-                console.error("Initialization loop broke down during construction:", e);
+                console.error("Instantiation thread encountered a fatal error:", e);
             }
         }
     </script>
