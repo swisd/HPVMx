@@ -44,28 +44,28 @@ jobs:
         run: |
           mkdir dist
           
-          # 1. Bring in index.html architecture from your web folder
+          # 1. Copy index.html
           cp -r web/* dist/
           
-          # 2. Fetch a verified, stable open-source EDK2 OVMF build targeted for web emulators
-          # This build lacks hypervisor page-table locks that cause silent mobile panics.
-          curl -L -o dist/bios.bin https://github.com/copy/v86/raw/master/bios/seabios.bin
-
-
-          # 3. Provision a raw 16MB FAT32 disk volume
-          dd if=/dev/zero of=dist/usb.img bs=1M count=256
+          # 2. Copy code.fd and vars.fd as standalone pflash files
+          cp code.fd dist/code.fd
+          cp vars.fd dist/vars.fd
+          
+          # 3. Create raw 16MB FAT32 USB disk image
+          dd if=/dev/zero of=dist/usb.img bs=1M count=16
           mkfs.vfat -F 32 dist/usb.img
           
-          # 4. Generate the mandatory hardware UEFI directory hierarchy
+          # 4. Generate mandatory UEFI hierarchy
           mmd -i dist/usb.img ::/EFI
           mmd -i dist/usb.img ::/EFI/BOOT
           
-          # 5. Inject the compiled Rust output binary renamed to standard fallback loader
+          # 5. Inject the compiled x86_64 Rust EFI application
           mcopy -i dist/usb.img target/x86_64-unknown-uefi/release/HPVMx.efi ::/EFI/BOOT/BOOTX64.efi
           
-          # 6. Force valid Windows CRLF line endings for the UEFI shell interpreter
+          # 6. Force valid CRLF line endings for startup script
           printf "fs0:\EFI\BOOT\BOOTX64.efi\r\n" > startup.nsh
           mcopy -i dist/usb.img startup.nsh ::/startup.nsh
+
       - name: Setup Pages Gateway
         uses: actions/configure-pages@v5
 
