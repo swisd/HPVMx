@@ -71,7 +71,7 @@
 
     <h1>HPVMx Hardware Sandbox (QEMU WASM x86_64)</h1>
     
-    <div class="status-panel" id="status">Status: Preparing Emscripten Engine...</div>
+    <div class="status-panel" id="status">Status: Preparing Engine Context...</div>
 
     <div id="viewport_container">
         <canvas id="canvas" tabindex="-1" onclick="window.focus()"></canvas>
@@ -92,19 +92,16 @@
             logEl.scrollTop = logEl.scrollHeight;
         }
 
-        // Global Emscripten configuration object for qemu-system-x86_64
         var Module = {
             canvas: (function() {
                 var canvas = document.getElementById('canvas');
-                // Context listeners for WebGL / 2D Canvas rendering
                 canvas.addEventListener("webglcontextlost", function(e) { 
-                    log("WebGL Context lost. Reloading canvas...", "error"); 
+                    log("WebGL Context lost. Reloading...", "error"); 
                     e.preventDefault(); 
                 }, false);
                 return canvas;
             })(),
 
-            // Match your PC launch flags directly
             arguments: [
                 '-m', '256M',
                 '-drive', 'if=pflash,format=raw,readonly=on,file=code.fd',
@@ -121,7 +118,7 @@
                 function mountAsset(filename) {
                     try {
                         var xhr = new XMLHttpRequest();
-                        xhr.open('GET', filename, false); // Synchronous download for preRun setup
+                        xhr.open('GET', filename, false); 
                         xhr.responseType = 'arraybuffer';
                         xhr.send(null);
 
@@ -137,7 +134,6 @@
                     }
                 }
 
-                // Inject your required firmware and disk images directly into the virtual OS root
                 mountAsset('code.fd');
                 mountAsset('vars.fd');
                 mountAsset('usb.img');
@@ -146,23 +142,14 @@
             postRun: [function() {
                 statusEl.innerText = "Status: CPU Live. Running UEFI firmware...";
                 statusEl.style.color = "#7ee787";
-                log("qemu-system-x86_64 WASM engine started successfully.", "info");
+                log("QEMU Engine initialized successfully without ORB cross-origin blocks.", "info");
             }],
 
-            print: function(text) {
-                log(text, 'info');
-            },
-
-            printErr: function(text) {
-                log(text, 'error');
-            },
-
-            setStatus: function(text) {
-                if (text) log(`Emscripten Status: ${text}`);
-            }
+            print: function(text) { log(text, 'info'); },
+            printErr: function(text) { log(text, 'error'); }
         };
     </script>
 
-    <script async src="https://copy.sh/v86/build/qemu-system-x86_64.js"></script>
+    <script async src="./qemu-system-x86_64.js"></script>
 </body>
 </html>
