@@ -3,95 +3,166 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPVMx WebAssembly QEMU x86_64</title>
+    <title>HPVMx Full WASM x86_64 Sandbox</title>
     <style>
         body {
             margin: 0;
-            padding: 20px;
+            padding: 15px;
             background-color: #0d1117;
             color: #c9d1d9;
             font-family: monospace;
             display: flex;
             flex-direction: column;
             align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
         }
-        h1 { color: #58a6ff; font-size: 18px; margin-bottom: 10px; }
-        #canvas_container {
-            border: 2px solid #30363d;
-            background: #000;
-            width: 640px;
-            height: 480px;
+        h1 {
+            font-size: 18px;
+            color: #58a6ff;
+            margin-bottom: 12px;
+            text-align: center;
         }
-        #canvas { width: 100%; height: 100%; }
-        #log {
-            width: 640px;
-            height: 150px;
-            background: #010409;
+        .status-panel {
+            font-size: 13px;
+            color: #8b949e;
+            background: #161b22;
+            padding: 6px 14px;
+            border-radius: 20px;
             border: 1px solid #30363d;
-            margin-top: 10px;
-            padding: 8px;
+            margin-bottom: 15px;
+        }
+        #viewport_container {
+            border: 3px solid #30363d;
+            border-radius: 6px;
+            background: #000;
+            width: 100%;
+            max-width: 640px;
+            aspect-ratio: 4 / 3;
+            overflow: hidden;
+            position: relative;
+        }
+        #canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block !important;
+        }
+        .console-window {
+            width: 100%;
+            max-width: 640px;
+            height: 180px;
+            background-color: #010409;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 10px;
             box-sizing: border-box;
             overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin-top: 15px;
             font-size: 11px;
-            color: #7ee787;
+            color: #8b949e;
         }
+        .log-error { color: #f85149; }
+        .log-info { color: #7ee787; }
     </style>
 </head>
 <body>
 
-    <h1>HPVMx QEMU x86_64 WebAssembly Engine</h1>
-    <div id="canvas_container">
-        <canvas id="canvas" tabindex="-1"></canvas>
+    <h1>HPVMx Hardware Sandbox (QEMU WASM x86_64)</h1>
+    
+    <div class="status-panel" id="status">Status: Preparing Emscripten Engine...</div>
+
+    <div id="viewport_container">
+        <canvas id="canvas" tabindex="-1" onclick="window.focus()"></canvas>
     </div>
-    <div id="log">Initializing WebAssembly QEMU filesystem...</div>
+
+    <div id="console_log" class="console-window">Initializing virtual hardware manifest...</div>
 
     <script>
-        const logEl = document.getElementById('log');
-        function log(msg) {
-            logEl.textContent += '\n' + msg;
+        const statusEl = document.getElementById("status");
+        const logEl = document.getElementById("console_log");
+
+        function log(msg, type = '') {
+            const line = document.createElement('div');
+            if (type === 'error') line.className = 'log-error';
+            if (type === 'info') line.className = 'log-info';
+            line.textContent = `[QEMU-WASM] ${msg}`;
+            logEl.appendChild(line);
             logEl.scrollTop = logEl.scrollHeight;
         }
 
-        // QEMU Emscripten Module Configuration
+        // Global Emscripten configuration object for qemu-system-x86_64
         var Module = {
-            canvas: document.getElementById('canvas'),
+            canvas: (function() {
+                var canvas = document.getElementById('canvas');
+                // Context listeners for WebGL / 2D Canvas rendering
+                canvas.addEventListener("webglcontextlost", function(e) { 
+                    log("WebGL Context lost. Reloading canvas...", "error"); 
+                    e.preventDefault(); 
+                }, false);
+                return canvas;
+            })(),
+
+            // Match your PC launch flags directly
             arguments: [
                 '-m', '256M',
                 '-drive', 'if=pflash,format=raw,readonly=on,file=code.fd',
                 '-drive', 'if=pflash,format=raw,file=vars.fd',
                 '-drive', 'file=usb.img,format=raw',
-                '-net', 'none',
-                '-vga', 'std'
+                '-vga', 'std',
+                '-net', 'none'
             ],
+
             preRun: [function() {
-                log("Mounting virtual files into QEMU MEMFS...");
-                
-                // Fetch assets synchronously into Emscripten Virtual File System
-                function loadFile(filename) {
-                    var xhr = new XMLHttpRequest();
-                    xhr.open('GET', filename, false);
-                    xhr.responseType = 'arraybuffer';
-                    xhr.send(null);
-                    if (xhr.status === 200) {
-                        FS.createDataFile('/', filename, new Uint8Array(xhr.response), true, true, true);
-                        log("Loaded asset into MEMFS: " + filename);
-                    } else {
-                        log("ERROR: Failed to fetch " + filename);
+                statusEl.innerText = "Status: Fetching binary assets into MEMFS...";
+                log("Mounting virtual pflash and storage devices into WASM memory...");
+
+                function mountAsset(filename) {
+                    try {
+                        var xhr = new XMLHttpRequest();
+                        xhr.open('GET', filename, false); // Synchronous download for preRun setup
+                        xhr.responseType = 'arraybuffer';
+                        xhr.send(null);
+
+                        if (xhr.status === 200 || xhr.status === 0) {
+                            var data = new Uint8Array(xhr.response);
+                            FS.createDataFile('/', filename, data, true, true, true);
+                            log(`Mounted '/${filename}' (${data.length} bytes)`, "info");
+                        } else {
+                            log(`Failed to fetch ${filename} - HTTP status ${xhr.status}`, "error");
+                        }
+                    } catch (err) {
+                        log(`Error downloading ${filename}: ${err.message}`, "error");
                     }
                 }
 
-                loadFile('code.fd');
-                loadFile('vars.fd');
-                loadFile('usb.img');
+                // Inject your required firmware and disk images directly into the virtual OS root
+                mountAsset('code.fd');
+                mountAsset('vars.fd');
+                mountAsset('usb.img');
             }],
+
             postRun: [function() {
-                log("QEMU x86_64 System Engine successfully initialized.");
+                statusEl.innerText = "Status: CPU Live. Running UEFI firmware...";
+                statusEl.style.color = "#7ee787";
+                log("qemu-system-x86_64 WASM engine started successfully.", "info");
             }],
-            print: function(text) { log('[QEMU stdout] ' + text); },
-            printErr: function(text) { log('[QEMU stderr] ' + text); }
+
+            print: function(text) {
+                log(text, 'info');
+            },
+
+            printErr: function(text) {
+                log(text, 'error');
+            },
+
+            setStatus: function(text) {
+                if (text) log(`Emscripten Status: ${text}`);
+            }
         };
     </script>
-    
+
     <script async src="https://copy.sh/v86/build/qemu-system-x86_64.js"></script>
 </body>
 </html>
