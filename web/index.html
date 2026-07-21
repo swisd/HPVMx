@@ -3,133 +3,95 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPVMx Advanced PC Hardware Sandbox </title>
+    <title>HPVMx WebAssembly QEMU x86_64</title>
     <style>
         body {
             margin: 0;
-            padding: 15px;
+            padding: 20px;
             background-color: #0d1117;
             color: #c9d1d9;
             font-family: monospace;
             display: flex;
             flex-direction: column;
             align-items: center;
-            min-height: 100vh;
-            box-sizing: border-box;
         }
-        h1 {
-            font-size: 18px;
-            color: #58a6ff;
-            margin-bottom: 12px;
-            text-align: center;
-        }
-        #screen_container {
-            border: 3px solid #30363d;
-            border-radius: 6px;
+        h1 { color: #58a6ff; font-size: 18px; margin-bottom: 10px; }
+        #canvas_container {
+            border: 2px solid #30363d;
             background: #000;
-            width: 100%;
-            max-width: 640px;
-            aspect-ratio: 4 / 3;
-            overflow: hidden;
+            width: 640px;
+            height: 480px;
         }
-        #screen_container canvas {
-            width: 100% !important;
-            height: 100% !important;
-            display: block !important;
-        }
-        .monitor-window {
-            width: 100%;
-            max-width: 640px;
-            height: 180px;
-            background-color: #010409;
+        #canvas { width: 100%; height: 100%; }
+        #log {
+            width: 640px;
+            height: 150px;
+            background: #010409;
             border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 10px;
+            margin-top: 10px;
+            padding: 8px;
             box-sizing: border-box;
             overflow-y: auto;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            margin-top: 15px;
             font-size: 11px;
-            color: #8b949e;
+            color: #7ee787;
         }
-        .log-error { color: #f85149; }
-        .log-success { color: #7ee787; }
     </style>
 </head>
 <body>
 
-    <h1>HPVMx Hardware Sandbox (\-m 1G -device qemu-xhci)</h1>
-    
-    <div id="screen_container">
-        <canvas></canvas>
+    <h1>HPVMx QEMU x86_64 WebAssembly Engine</h1>
+    <div id="canvas_container">
+        <canvas id="canvas" tabindex="-1"></canvas>
     </div>
-    
-    <div id="monitor_log" class="monitor-window">Initializing VM layout parameters...</div>
+    <div id="log">Initializing WebAssembly QEMU filesystem...</div>
 
-    <script type="module">
-        // Using the reliable ESM mirror that guarantees compilation layer availability
-        import v86Package from 'https://cdn.jsdelivr.net/npm/v86@0.5.44/+esm';
-        const V86Starter = v86Package.V86Starter || window.V86Starter || v86Package;
-
-        const logEl = document.getElementById("monitor_log");
-
-        function log(msg, type = '') {
-            const line = document.createElement('div');
-            if (type === 'error') line.className = 'log-error';
-            if (type === 'success') line.className = 'log-success';
-            line.textContent = `[SYSTEM] ${msg}`;
-            logEl.appendChild(line);
+    <script>
+        const logEl = document.getElementById('log');
+        function log(msg) {
+            logEl.textContent += '\n' + msg;
             logEl.scrollTop = logEl.scrollHeight;
         }
 
-        async function initHardwareVM() {
-            logEl.textContent = "";
-            log("Parsing QEMU target configuration adjustments...");
+        // QEMU Emscripten Module Configuration
+        var Module = {
+            canvas: document.getElementById('canvas'),
+            arguments: [
+                '-m', '256M',
+                '-drive', 'if=pflash,format=raw,readonly=on,file=code.fd',
+                '-drive', 'if=pflash,format=raw,file=vars.fd',
+                '-drive', 'file=usb.img,format=raw',
+                '-net', 'none',
+                '-vga', 'std'
+            ],
+            preRun: [function() {
+                log("Mounting virtual files into QEMU MEMFS...");
+                
+                // Fetch assets synchronously into Emscripten Virtual File System
+                function loadFile(filename) {
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('GET', filename, false);
+                    xhr.responseType = 'arraybuffer';
+                    xhr.send(null);
+                    if (xhr.status === 200) {
+                        FS.createDataFile('/', filename, new Uint8Array(xhr.response), true, true, true);
+                        log("Loaded asset into MEMFS: " + filename);
+                    } else {
+                        log("ERROR: Failed to fetch " + filename);
+                    }
+                }
 
-            try {
-                // Replicating your PC command string parameters inside the JS emulator engine
-                const emulator = new V86Starter({
-                    wasm_path: "https://cdn.jsdelivr.net/npm/v86@0.5.44/build/v86.wasm",
-                    
-                    // Emulating "-m 1G" inside web limits (512MB target ensures stability)
-                    memory_size: 512 * 1024 * 1024, 
-                    vga_memory_size: 16 * 1024 * 1024,
-                    
-                    // Matches: -device qemu-xhci -device usb-tablet
-                    vga_as_pci: true,
-                    acpi: true,
-                    cpu_version: 0x10, // x86_64 CPU mode extension
-                    
-                    // Matches: -drive if=pflash,file=code.fd + vars.fd (combined into bios.bin by workflow)
-                    bios: { url: "bios.bin" },
-                    
-                    // Matches: -drive file=boot.vhd (parsed out of the workflows allocation build)
-                    hda: { url: "usb.img" },
-                    
-                    // Immediate runtime priority assignment
-                    boot_order: 0x3,
-                    
-                    screen_container: document.getElementById("screen_container"),
-                    autostart: true
-                });
-
-                log("Emulation worker runtime running. Mapping input captures...");
-
-                emulator.add_listener("serial0-output-char", function(char) {
-                    log(char, 'success');
-                });
-
-                emulator.add_listener("emulator-ready", function() {
-                    log("SUCCESS: Virtual hardware structure online matching PC execution flags.", "success");
-                });
-
-            } catch(e) {
-                log(`Initialization loop broke down: ${e.message}`, "error");
-            }
-        }
-
-        window.addEventListener("load", initHardwareVM);
+                loadFile('code.fd');
+                loadFile('vars.fd');
+                loadFile('usb.img');
+            }],
+            postRun: [function() {
+                log("QEMU x86_64 System Engine successfully initialized.");
+            }],
+            print: function(text) { log('[QEMU stdout] ' + text); },
+            printErr: function(text) { log('[QEMU stderr] ' + text); }
+        };
     </script>
+    
+    <script async src="https://copy.sh/v86/build/qemu-system-x86_64.js"></script>
 </body>
 </html>
