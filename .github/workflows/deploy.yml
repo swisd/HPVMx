@@ -47,27 +47,26 @@ jobs:
           # 1. Copy web assets (index.html)
           cp -r web/* dist/
           
-          # 2. Fetch QEMU WebAssembly binaries locally to eliminate ORB / CORS blocks
-          curl -L -o dist/qemu-system-x86_64.js https://copy.sh/v86/build/qemu-system-x86_64.js || true
+          # 2. Fetch pre-compiled QEMU WebAssembly binaries
+          curl -L -o dist/qemu-system-x86_64.js https://raw.githubusercontent.com/ktock/qemu-wasm-demo/main/htdocs/out.js
+          curl -L -o dist/qemu-system-x86_64.wasm https://raw.githubusercontent.com/ktock/qemu-wasm-demo/main/htdocs/qemu-system-x86_64.wasm
           
           # 3. Copy code.fd and vars.fd as standalone pflash files
           cp code.fd dist/code.fd
           cp vars.fd dist/vars.fd
           
-          # 4. Create raw 16MB FAT32 USB disk image
-          dd if=/dev/zero of=dist/usb.img bs=1M count=16
+          # 4. Create raw 256MB FAT32 USB disk image
+          dd if=/dev/zero of=dist/usb.img bs=1M count=256
           mkfs.vfat -F 32 dist/usb.img
           
-          # 5. Generate mandatory UEFI hierarchy
+          # 5. Inject the compiled x86_64 Rust EFI application
           mmd -i dist/usb.img ::/EFI
           mmd -i dist/usb.img ::/EFI/BOOT
-          
-          # 6. Inject the compiled x86_64 Rust EFI application
           mcopy -i dist/usb.img target/x86_64-unknown-uefi/release/HPVMx.efi ::/EFI/BOOT/BOOTX64.efi
           
-          # 7. Force valid CRLF line endings for startup script
           printf "fs0:\EFI\BOOT\BOOTX64.efi\r\n" > startup.nsh
           mcopy -i dist/usb.img startup.nsh ::/startup.nsh
+
       - name: Setup Pages Gateway
         uses: actions/configure-pages@v5
 
