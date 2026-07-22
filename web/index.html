@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPVMx Full WASM x86_64 Sandbox</title>
+    <title>HPVMx WASM x86_64 Sandbox</title>
     <style>
         body {
             margin: 0;
@@ -47,6 +47,29 @@
             height: 100% !important;
             display: block !important;
         }
+        .panel-header {
+            width: 100%;
+            max-width: 640px;
+            margin-top: 15px;
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: #8b949e;
+        }
+        .panel-header button {
+            background: #21262d;
+            color: #c9d1d9;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-family: monospace;
+            cursor: pointer;
+        }
+        .panel-header button:hover {
+            background: #30363d;
+        }
         .console-window {
             width: 100%;
             max-width: 640px;
@@ -59,12 +82,14 @@
             overflow-y: auto;
             white-space: pre-wrap;
             word-wrap: break-word;
-            margin-top: 15px;
             font-size: 11px;
             color: #8b949e;
         }
+        .log-entry { margin-bottom: 2px; }
+        .log-info { color: #58a6ff; }
+        .log-warn { color: #d29922; }
         .log-error { color: #f85149; }
-        .log-info { color: #7ee787; }
+        .log-success { color: #7ee787; }
     </style>
 </head>
 <body>
@@ -77,26 +102,61 @@
         <canvas id="canvas" tabindex="-1" onclick="window.focus()"></canvas>
     </div>
 
-    <div id="console_log" class="console-window">Initializing virtual hardware manifest...</div>
+    <div class="panel-header">
+        <span>DevTools Console Mirror</span>
+        <button onclick="clearConsoleMirror()">Clear Logs</button>
+    </div>
+    <div id="devtools_mirror" class="console-window"></div>
 
     <script>
-        const statusEl = document.getElementById("status");
-        const logEl = document.getElementById("console_log");
+        // --- DEVTOOLS CONSOLE HOOK ---
+        const mirrorEl = document.getElementById('devtools_mirror');
 
-        function log(msg, type = '') {
-            const line = document.createElement('div');
-            if (type === 'error') line.className = 'log-error';
-            if (type === 'info') line.className = 'log-info';
-            line.textContent = `[QEMU-WASM] ${msg}`;
-            logEl.appendChild(line);
-            logEl.scrollTop = logEl.scrollHeight;
+        function appendMirrorLog(msg, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const timestamp = new Date().toISOString().split('T')[1].slice(0, 8);
+            entry.textContent = `[${timestamp}] [${type.toUpperCase()}] ${msg}`;
+            mirrorEl.appendChild(entry);
+            mirrorEl.scrollTop = mirrorEl.scrollHeight;
         }
+
+        window.clearConsoleMirror = function() {
+            mirrorEl.textContent = '';
+        };
+
+        // Intercept native browser console channels
+        (function() {
+            const originalLog = console.log;
+            const originalWarn = console.warn;
+            const originalError = console.error;
+
+            console.log = function(...args) {
+                originalLog.apply(console, args);
+                appendMirrorLog(args.join(' '), 'info');
+            };
+
+            console.warn = function(...args) {
+                originalWarn.apply(console, args);
+                appendMirrorLog(args.join(' '), 'warn');
+            };
+
+            console.error = function(...args) {
+                originalError.apply(console, args);
+                appendMirrorLog(args.join(' '), 'error');
+            };
+        })();
+
+        // --- EMSCRIPTEN QEMU ENGINE CONFIGURATION ---
+        const statusEl = document.getElementById("status");
+
+        console.log("ES Module loaded. Initializing Emscripten container context...");
 
         var Module = {
             canvas: (function() {
                 var canvas = document.getElementById('canvas');
                 canvas.addEventListener("webglcontextlost", function(e) { 
-                    log("WebGL Context lost. Reloading...", "error"); 
+                    console.error("WebGL Context lost. Reloading canvas..."); 
                     e.preventDefault(); 
                 }, false);
                 return canvas;
@@ -113,7 +173,7 @@
 
             preRun: [function() {
                 statusEl.innerText = "Status: Fetching binary assets into MEMFS...";
-                log("Mounting virtual pflash and storage devices into WASM memory...");
+                console.log("Mounting virtual pflash and storage devices into WASM memory...");
 
                 function mountAsset(filename) {
                     try {
@@ -125,12 +185,12 @@
                         if (xhr.status === 200 || xhr.status === 0) {
                             var data = new Uint8Array(xhr.response);
                             FS.createDataFile('/', filename, data, true, true, true);
-                            log(`Mounted '/${filename}' (${data.length} bytes)`, "info");
+                            console.log(`Verified asset dependency ${filename}: status=200 (${data.length} bytes)`);
                         } else {
-                            log(`Failed to fetch ${filename} - HTTP status ${xhr.status}`, "error");
+                            console.error(`Failed to fetch dependency ${filename}: status=${xhr.status}`);
                         }
                     } catch (err) {
-                        log(`Error downloading ${filename}: ${err.message}`, "error");
+                        console.error(`Fatal error downloading asset dependency ${filename}: ${err.message}`);
                     }
                 }
 
@@ -142,11 +202,15 @@
             postRun: [function() {
                 statusEl.innerText = "Status: CPU Live. Running UEFI firmware...";
                 statusEl.style.color = "#7ee787";
-                log("QEMU Engine initialized successfully without ORB cross-origin blocks.", "info");
+                console.log("QEMU Engine successfully bound and instruction loop engaged.");
             }],
 
-            print: function(text) { log(text, 'info'); },
-            printErr: function(text) { log(text, 'error'); }
+            print: function(text) { 
+                console.log(`[QEMU stdout] ${text}`); 
+            },
+            printErr: function(text) { 
+                console.error(`[QEMU stderr] ${text}`); 
+            }
         };
     </script>
 
