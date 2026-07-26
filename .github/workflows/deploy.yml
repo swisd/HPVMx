@@ -40,26 +40,27 @@ jobs:
           export RUSTFLAGS="-C linker-flavor=lld-link -C linker=rust-lld"
           cargo build --release --target x86_64-unknown-uefi
 
-      - name: Assemble Sandbox
+      - name: Assemble Sandbox Output Directory
         run: |
-            mkdir -p dist
-            
-            # Copies web files, including qemu-system-x86_64.js and .wasm
-            cp -r web/* dist/
-            
-            # Copy firmware and create USB storage image
-            cp code.fd dist/code.fd
-            cp vars.fd dist/vars.fd
-            
-            dd if=/dev/zero of=dist/usb.img bs=1M count=16
-            mkfs.vfat -F 32 dist/usb.img
-            
-            mmd -i dist/usb.img ::/EFI
-            mmd -i dist/usb.img ::/EFI/BOOT
-            mcopy -i dist/usb.img target/x86_64-unknown-uefi/release/HPVMx.efi ::/EFI/BOOT/BOOTX64.efi
-            
-            printf "fs0:\EFI\BOOT\BOOTX64.efi\r\n" > startup.nsh
-            mcopy -i dist/usb.img startup.nsh ::/startup.nsh
+          mkdir -p dist
+          
+          # Copy web assets into staging directory
+          cp -r web/* dist/
+          
+          # Copy UEFI firmware files
+          cp code.fd dist/code.fd
+          cp vars.fd dist/vars.fd
+          
+          # Format FAT32 USB Image with Rust EFI Binary
+          dd if=/dev/zero of=dist/usb.img bs=1M count=16
+          mkfs.vfat -F 32 dist/usb.img
+          
+          mmd -i dist/usb.img ::/EFI
+          mmd -i dist/usb.img ::/EFI/BOOT
+          mcopy -i dist/usb.img target/x86_64-unknown-uefi/release/HPVMx.efi ::/EFI/BOOT/BOOTX64.efi
+          
+          printf "fs0:\EFI\BOOT\BOOTX64.efi\r\n" > startup.nsh
+          mcopy -i dist/usb.img startup.nsh ::/startup.nsh
 
       - name: Setup Pages Gateway
         uses: actions/configure-pages@v5
