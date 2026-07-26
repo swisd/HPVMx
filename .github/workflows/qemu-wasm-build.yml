@@ -40,9 +40,11 @@ jobs:
         run: |
           cd qemu-src
           
-          # Configure minimal x86_64 software emulation target for Emscripten
+          # Pass --cpu=wasm32 and --cross-prefix= to force Meson into cross-compile mode
           emconfigure ./configure \
             --target-list=x86_64-softmmu \
+            --cpu=wasm32 \
+            --cross-prefix= \
             --static \
             --disable-tools \
             --disable-cocoa \
@@ -52,10 +54,10 @@ jobs:
             --disable-kvm \
             --disable-xen
           
-          # Compile system target using all CPU threads
+          # Compile using Emscripten make
           emmake make -j$(nproc)
           
-          # Copy outputs to output directory
+          # Stage compiled outputs
           mkdir -p ../output
           cp build/qemu-system-x86_64.js ../output/qemu-system-x86_64.js
           cp build/qemu-system-x86_64.wasm ../output/qemu-system-x86_64.wasm
