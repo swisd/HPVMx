@@ -52,7 +52,7 @@ jobs:
           cp vars.fd dist/vars.fd
           
           # Format FAT32 USB Image with Rust EFI Binary
-          dd if=/dev/zero of=dist/usb.img bs=1M count=16
+          dd if=/dev/zero of=dist/usb.img bs=1M count=256
           mkfs.vfat -F 32 dist/usb.img
           
           mmd -i dist/usb.img ::/EFI
