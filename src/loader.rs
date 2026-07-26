@@ -15,7 +15,7 @@ pub unsafe fn load_and_jump_os(path: &str) -> ! {
     let mut gop = boot::open_protocol_exclusive::<uefi::proto::console::gop::GraphicsOutput>(gop_handle).unwrap();
     let fb_ptr = gop.frame_buffer().as_mut_ptr();
     let fb_size = gop.frame_buffer().size();
-    hpvm_info!("loader", "{:?}  {:?}  {:?}", gop_handle, fb_ptr, fb_size);
+    crate::vdebug!("loader", "{:?}  {:?}  {:?}", gop_handle, fb_ptr, fb_size);
 
     // 2. Load ELF data
     let data = FileSystem::read_file(path).expect("OS file not found");
@@ -23,7 +23,7 @@ pub unsafe fn load_and_jump_os(path: &str) -> ! {
 
     // We need to track the actual load address to calculate the jump later
     let mut load_base: Option<u64> = None;
-    hpvm_info!("loader", "load base {:?}", load_base);
+    crate::vdebug!("loader", "load base {:?}", load_base);
 
     // 3. Allocate and Copy segments
     for phdr in file.segments().unwrap().iter().filter(|p| p.p_type == elf::abi::PT_LOAD) {
@@ -59,7 +59,7 @@ pub unsafe fn load_and_jump_os(path: &str) -> ! {
         let src_start = phdr.p_offset as usize;
         let src_end = src_start + phdr.p_filesz as usize;
         dest_slice[..phdr.p_filesz as usize].copy_from_slice(&data[src_start..src_end]);
-        hpvm_info!("loader", "vaddr {:#x} aligned_vaddr {:#x} page_int_offset {:#x} total_sz {:#x} pages {:?} alloc_addr {:?} dest_ptr {:?}", vaddr, aligned_vaddr, offset_within_page, total_size, pages, allocated_addr, dest_ptr);
+        crate::vdebug!("loader", "vaddr {:#x} aligned_vaddr {:#x} page_int_offset {:#x} total_sz {:#x} pages {:?} alloc_addr {:?} dest_ptr {:?}", vaddr, aligned_vaddr, offset_within_page, total_size, pages, allocated_addr, dest_ptr);
     }
 
     // 4. Calculate Dynamic Entry Point
@@ -67,14 +67,14 @@ pub unsafe fn load_and_jump_os(path: &str) -> ! {
     let entry_point = file.ehdr.e_entry + load_base.expect("No loadable segments found");
     // let entry_offset: u64 = file.ehdr.e_entry - file.ehdr.;   // Fix this to add offset
     let actual_jump_address = entry_point; // + entry_offset;
-    hpvm_info!("loader", "ac_jump_addr {:#x} e_entry {:#x} load_base {:#x}", actual_jump_address, file.ehdr.e_entry, load_base.expect("No loadable segments found"));
+    crate::vdebug!("loader", "ac_jump_addr {:#x} e_entry {:#x} load_base {:#x}", actual_jump_address, file.ehdr.e_entry, load_base.expect("No loadable segments found"));
 
     // 5. Exit Boot Services (Safety: Disable interrupts first)
     // Note: You should ideally pass the memory map to the kernel here!
     let _mmap = unsafe {
 
         x86_64::instructions::interrupts::disable(); // Recommended if available
-        hpvm_info!("loader", "exit boot_services");
+        crate::vdebug!("loader", "exit boot_services");
         boot::exit_boot_services(Some(MemoryType::LOADER_DATA))
 
     };

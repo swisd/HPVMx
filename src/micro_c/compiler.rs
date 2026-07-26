@@ -45,7 +45,7 @@ pub fn compile(source: &str, arch: &str) -> String {
 
         _ => {
             error("Unsupported architecture");
-            return "".to_string()
+            "".to_string()
         },
     }
 }

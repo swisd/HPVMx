@@ -1,9 +1,7 @@
 // src/arch/x86_64_raw.rs
 
-//! Raw x86_64 backend.
-//!
-//! This backend generates x86_64 assembly without any specific OS ABI
-//! assumptions, suitable for bare-metal or simple bootloaders.
+//! Raw x86_64 backend for HPVMx system instruction set
+
 
 use alloc::string::String;
 use alloc::{format, vec};
@@ -17,12 +15,12 @@ use crate::regalloc::RegisterAllocator;
 use crate::stackframe::StackFrame;
 
 /// Backend for generating raw x86_64 assembly.
-pub struct X86_64RawBackend {
+pub struct X86_64_HSISRawBackend {
     regs: RegisterAllocator,
     function_params: HashMap<String, Vec<String>>,
 }
 
-impl X86_64RawBackend {
+impl X86_64_HSISRawBackend {
     pub fn new(function_params: HashMap<String, Vec<String>>) -> Self {
         Self {
             regs: RegisterAllocator::new(vec![
@@ -35,7 +33,7 @@ impl X86_64RawBackend {
         }
     }
 
-    fn split_functions(&self, ir: &[IRInst]) -> Vec<(String, Vec<IRInst>)> {
+    fn split_functions(ir: &[IRInst]) -> Vec<(String, Vec<IRInst>)> {
         let mut funcs = Vec::new();
         let mut current_name: Option<String> = None;
         let mut current_body = Vec::new();
@@ -44,15 +42,13 @@ impl X86_64RawBackend {
             match inst {
                 IRInst::Extern(_) => {}
 
-                IRInst::Label(name) if self.function_params.contains_key(name) => {
+                IRInst::Label(name) => {
                     if let Some(prev) = current_name.take() {
                         funcs.push((prev, current_body));
                         current_body = Vec::new();
                     }
                     current_name = Some(name.clone());
                 }
-
-                IRInst::Label(_) if current_name.is_none() => {}
 
                 _ => current_body.push(inst.clone()),
             }
@@ -126,7 +122,7 @@ impl X86_64RawBackend {
         if let Some(params) = self.function_params.get(name) {
             for (i, param) in params.iter().enumerate() {
                 if i >= arg_regs.len() {
-                    error("@BACKEND  Too many parameters for x86_64 ABI");
+                    error("@BACKEND  Too many parameters for x86_64_HSIS ABI");
                     return;
                 }
 
@@ -194,28 +190,6 @@ impl X86_64RawBackend {
                 ));
             }
 
-            IRInst::StackAlloc(dst, size) => {
-                let rd = self.regs.alloc(dst);
-                let size = if *size <= 0 { 8 } else { *size };
-
-                out.push_str(&format!("    sub rsp, {}\n", size));
-                out.push_str(&format!("    mov {}, rsp\n", rd));
-            }
-
-            IRInst::LoadMem(dst, addr) => {
-                let rd = self.regs.alloc(dst);
-                let ra = self.regs.alloc(addr);
-
-                out.push_str(&format!("    mov {}, [{}]\n", rd, ra));
-            }
-
-            IRInst::StoreMem(addr, src) => {
-                let ra = self.regs.alloc(addr);
-                let rs = self.regs.alloc(src);
-
-                out.push_str(&format!("    mov [{}], {}\n", ra, rs));
-            }
-
             IRInst::Add(dst, a, b) => {
                 let rd = self.regs.alloc(dst);
                 let ra = self.regs.alloc(a);
@@ -248,26 +222,6 @@ impl X86_64RawBackend {
                     rd,
                     rb
                 ));
-            }
-
-            IRInst::Mul(dst, a, b) => {
-                let rd = self.regs.alloc(dst);
-                let ra = self.regs.alloc(a);
-                let rb = self.regs.alloc(b);
-
-                out.push_str(&format!("    mov {}, {}\n", rd, ra));
-                out.push_str(&format!("    imul {}, {}\n", rd, rb));
-            }
-
-            IRInst::Div(dst, a, b) => {
-                let rd = self.regs.alloc(dst);
-                let ra = self.regs.alloc(a);
-                let rb = self.regs.alloc(b);
-
-                out.push_str(&format!("    mov rax, {}\n", ra));
-                out.push_str("    cqo\n");
-                out.push_str(&format!("    idiv {}\n", rb));
-                out.push_str(&format!("    mov {}, rax\n", rd));
             }
 
 
@@ -389,28 +343,6 @@ impl X86_64RawBackend {
                 ));
             }
 
-            IRInst::LtEq(dst, a, b) => {
-                let rd = self.regs.alloc(dst);
-                let ra = self.regs.alloc(a);
-                let rb = self.regs.alloc(b);
-
-                out.push_str(&format!("    cmp {}, {}\n", ra, rb));
-                out.push_str("    setle al\n");
-                out.push_str("    movzx rax, al\n");
-                out.push_str(&format!("    mov {}, rax\n", rd));
-            }
-
-            IRInst::GtEq(dst, a, b) => {
-                let rd = self.regs.alloc(dst);
-                let ra = self.regs.alloc(a);
-                let rb = self.regs.alloc(b);
-
-                out.push_str(&format!("    cmp {}, {}\n", ra, rb));
-                out.push_str("    setge al\n");
-                out.push_str("    movzx rax, al\n");
-                out.push_str(&format!("    mov {}, rax\n", rd));
-            }
-
             
 
             IRInst::JumpIfZero(cond, label) => {
@@ -436,20 +368,22 @@ impl X86_64RawBackend {
             }
 
 
-            IRInst::Label(name) => {
-                out.push_str(&format!("{}:\n", name));
-            }
+            // Ignore labels here
+
+            IRInst::Label(_) => {}
             IRInst::Extern(_) => {}
+
+            _ => {}
         }
     }
 }
 
-impl Architecture for X86_64RawBackend {
+impl Architecture for X86_64_HSISRawBackend {
     fn emit_program(&mut self, ir: &[IRInst]) -> String {
         let mut out = String::new();
 
         // raw binary asm header
-        out.push_str("; ARCH x86_64\n");
+        out.push_str("; ARCH x86_64_HSIS\n");
         out.push_str("; Generated ASM file. Modifications will not be preserved\n");
 
 
@@ -470,7 +404,7 @@ impl Architecture for X86_64RawBackend {
         out.push_str("    hlt\n");
         out.push_str("    jmp .halt\n\n");
 
-        let funcs = self.split_functions(ir);
+        let funcs = Self::split_functions(ir);
 
         for (name, body) in funcs {
             self.emit_function(&mut out, &name, &body);

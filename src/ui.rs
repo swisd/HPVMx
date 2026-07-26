@@ -71,6 +71,8 @@ pub struct DashboardUI {
     pub vms: Vec<VmDisplayInfo>,
     pub resources: SystemResources,
     scroll_offset: usize,
+    console_scroll_offset: usize,
+    console_h_scroll_offset: usize,
     cursor: crate::graphics::Cursor,
     pub current_path: String,
     pub files: Vec<FileEntry>,
@@ -418,6 +420,8 @@ impl DashboardUI {
                 frame_ms: 0,
             },
             scroll_offset: 0,
+            console_scroll_offset: 0,
+            console_h_scroll_offset: 0,
             cursor: crate::graphics::Cursor::new(),
             current_path: String::from("\\"),
             files: Vec::new(),
@@ -1012,10 +1016,18 @@ impl DashboardUI {
                 DashboardTab::Console => {
                     pg.draw_text(20, 100, "Hypervisor Real-time Log", 0x00FF00);
                     let logs = crate::hpvmlog::get_logs();
-                    pg.draw_log_viewer(margin, 130, width - margin * 2, height - 135 - margin * 8, &logs);
+                    pg.draw_log_viewer(
+                        margin,
+                        130,
+                        width - margin * 2,
+                        height - 135 - margin * 8,
+                        &logs,
+                        self.console_scroll_offset,
+                        self.console_h_scroll_offset,
+                    );
                     
                     let y_msg = height - margin * 6;
-                    pg.draw_text(margin, y_msg, "Use PgUp/PgDn to scroll, C to clear", 0x888888);
+                    pg.draw_text(margin, y_msg, "Use PgUp/PgDn to scroll logs, LEFT/RIGHT to scroll text, C to clear", 0x888888);
 
                     pg.draw_rect_outline(margin, height-95, width - margin * 8, 35, 0x999999);
                     if self.term_selected {
@@ -3131,6 +3143,12 @@ impl DashboardUI {
                     Key::Special(ScanCode::END) => {
                         self.term_selected = true;
                     }
+                    Key::Special(ScanCode::PAGE_UP) => {
+                        self.console_scroll_offset = self.console_scroll_offset.saturating_add(5);
+                    }
+                    Key::Special(ScanCode::PAGE_DOWN) => {
+                        self.console_scroll_offset = self.console_scroll_offset.saturating_sub(5);
+                    }
                     _ => {}
                 }
             }
@@ -3295,6 +3313,8 @@ impl DashboardUI {
                     if self.selected_vm_idx > 0 {
                         self.selected_vm_idx -= 1;
                     }
+                } else if matches!(self.selected_tab, DashboardTab::Console) {
+                    self.console_scroll_offset = self.console_scroll_offset.saturating_add(1);
                 } else {
                     if self.scroll_offset > 0 {
                         self.scroll_offset -= 1;
@@ -3331,6 +3351,8 @@ impl DashboardUI {
                     if self.selected_vm_idx < self.vms.len().saturating_sub(1) {
                         self.selected_vm_idx += 1;
                     }
+                } else if matches!(self.selected_tab, DashboardTab::Console) {
+                    self.console_scroll_offset = self.console_scroll_offset.saturating_sub(1);
                 } else {
                     if self.scroll_offset < self.vms.len().saturating_sub(1) {
                         self.scroll_offset += 1;
@@ -3340,6 +3362,8 @@ impl DashboardUI {
             Key::Special(ScanCode::LEFT) => {
                 if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
                     self.vm_action_idx = self.vm_action_idx.saturating_sub(1);
+                } else if matches!(self.selected_tab, DashboardTab::Console) {
+                    self.console_h_scroll_offset = self.console_h_scroll_offset.saturating_add(1);
                 } else if matches!(self.selected_tab, DashboardTab::Apps) {
                     if self.selected_app_idx > 0 {
                         self.selected_app_idx -= 1;
@@ -3349,6 +3373,8 @@ impl DashboardUI {
             Key::Special(ScanCode::RIGHT) => {
                 if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
                     self.vm_action_idx = (self.vm_action_idx + 1).min(6);
+                } else if matches!(self.selected_tab, DashboardTab::Console) {
+                    self.console_h_scroll_offset = self.console_h_scroll_offset.saturating_sub(1);
                 } else if matches!(self.selected_tab, DashboardTab::Apps) {
                     if self.selected_app_idx + 1 < crate::apps::APP_REGISTRY.len() {
                         self.selected_app_idx += 1;

@@ -113,6 +113,7 @@ impl IRGenerator {
                 then_branch,
                 elif,
                 else_branch,
+                ..
             } => {
                 let cond_val = self.gen_expr(cond);
                 let else_label = self.label();
@@ -199,7 +200,8 @@ impl IRGenerator {
             }
 
             Stmt::Import { .. } => {}
-            Stmt::None => {}
+
+            Stmt::None => {error(&format!("{:#X} UNK Stmt {:?}", self.position, stmt));}
         }
     }
 
@@ -348,7 +350,7 @@ impl IRGenerator {
             }
         }
 
-        error(&format!("unknown field {}", field));
+        error(&format!("@IR:{:#X} UNK Field {:?}", self.position, field));
         0
     }
 }

@@ -39,7 +39,7 @@ impl Parser {
             self.advance();
         } else {
             let arrow = String::from_utf8(vec![b'^'; format!("{}", self.current).len()]).unwrap();
-            error(&format!("(@{:#X}), Expected {:?}, got {:?}\n {} {}\n {}", self.position, t, self.current, self.current, self.next, arrow));
+            error(&format!("@PAR:{:#X}  Expected {:?}, got {:?}\n {} {}\n {}", self.position, t, self.current, self.current, self.next, arrow));
             self.advance();
             return;
         }
@@ -69,7 +69,7 @@ impl Parser {
             Token::Loop => self.parse_loop(),
             Token::Return => self.parse_return(),
             Token::Include(_) => {
-                error("#include is only supported at the top level");
+                error("@PAR  #include is only supported at the top level");
                 self.advance();
                 Stmt::None
             }
@@ -139,7 +139,7 @@ impl Parser {
 
         let name = match self.current.clone() {
             Token::Ident(s) => s,
-            _ => {error("Expected identifier");
+            _ => {error("@PAR  Expected identifier");
                 self.advance();
                 return Stmt::None},
         };
@@ -159,7 +159,7 @@ impl Parser {
                     })
                 }
                 _ => {
-                    error("Expected type");
+                    error("@PAR  Expected type");
                     self.advance();
                     return Stmt::None
                 },
@@ -179,7 +179,7 @@ impl Parser {
         let name = match self.current.clone() {
             Token::Ident(s) => s,
             _ => {
-                error("");
+                error("nul");
                 return Stmt::None
             },
         };
@@ -208,7 +208,7 @@ impl Parser {
         let name = match self.current.clone() {
             Token::Ident(s) => s,
             _ => {
-                error("Expected struct name");
+                error("@PAR  Expected struct name");
                 self.advance();
                 return Stmt::None
             },
@@ -222,7 +222,7 @@ impl Parser {
         while self.current != Token::RBrace {
             let field = match self.current.clone() {
                 Token::Ident(s) => s,
-                _ => {error("Expected field name");
+                _ => {error("@PAR  Expected field name");
                     self.advance();
                     return Stmt::None},
             };
@@ -239,7 +239,7 @@ impl Parser {
                         _ => Type::Struct(t),
                     }
                 }
-                _ => {error("Expected type");
+                _ => {error("@PAR  Expected type");
                     self.advance();
                     Type::I64},
             };
@@ -267,7 +267,7 @@ impl Parser {
         let name = match self.current.clone() {
             Token::Ident(s) => s,
             _ => {
-                error("Expected function name");
+                error("@PAR  Expected function name");
                 self.advance();
                 return Stmt::None
             },
@@ -292,7 +292,7 @@ impl Parser {
         let name = match self.current.clone() {
             Token::Ident(s) => s,
             _ => {
-                error("Expected extern function name");
+                error("@PAR  Expected extern function name");
                 self.advance();
                 return Stmt::None
             },
@@ -317,7 +317,7 @@ impl Parser {
                     self.advance();
                 }
                 _ => {
-                    error("Expected parameter name");
+                    error("@PAR  Expected parameter name");
                     self.advance();
                     break;
                 }
@@ -525,7 +525,7 @@ impl Parser {
                                 Token::Ident(s) => s,
                                 _ => {
                                     let arrow = String::from_utf8(vec![b'^'; format!("{}", self.current).len()]).unwrap();
-                                    error(&format!("(@{:#X}) Expected field name\n {} {}\n {}", self.position, self.current, self.next, arrow));
+                                    error(&format!("@PAR:{:#X} Expected field name\n {} {}\n {}", self.position, self.current, self.next, arrow));
                                     self.advance();
                                     return Expr::Number(0)},
                             };
@@ -550,7 +550,7 @@ impl Parser {
 
             _ => {
                 let arrow = String::from_utf8(vec![b'^'; format!("{}", self.current).len()]).unwrap();
-                error(&format!("(@{:#X}) Unexpected token: {}\n {} {}\n {}", self.position, self.current, self.current, self.next, arrow));
+                error(&format!("@PAR:{:#X} Unexpected token: {}\n {} {}\n {}", self.position, self.current, self.current, self.next, arrow));
                 self.advance();
                 Expr::Number(0)},
         }

@@ -126,7 +126,7 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
         hpvm_error!("NET", "MAC address is all zeros! Check NIC initialization.");
     }
 
-    hpvm_info!("dhcp", "mac: {:?}", mac);
+    crate::vdebug!("dhcp", "mac: {:?}", mac);
 
     //let mut rng = XorShiftRng::new(20);
     //let xid = rng.rand(4) as u32;
@@ -175,17 +175,17 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
         Err(e) => {hpvm_warn!("NET", "Could not send RAWUDP Discover: {}", e)}
     }
 
-    hpvm_info!("NET", "DHCP Discover sent, waiting for Offer...");
+    crate::vdebug!("NET", "DHCP Discover sent, waiting for Offer...");
 
     let mut cfg: Option<([u8; 4], [u8; 4], [u8; 4])> = None;
     let mut timeout = 24; // Increase timeout
     while timeout > 0 {
         if let Some(config) = poll_for_dhcp_response() {
-            hpvm_info!("dhcp", "Received DHCP Offer: {:?}", config);
+            crate::vdebug!("dhcp", "Received DHCP Offer: {:?}", config);
             cfg = Some(config);
             break;
         }
-        hpvm_info!("dhcp", "no offer recieved");
+        crate::vdebug!("dhcp", "no offer recieved");
         boot::stall(Duration::from_micros(10_000)); // 10ms wait between polls
         timeout -= 1;
     }
@@ -196,7 +196,7 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
         let mut timeout = 200;
         while timeout > 0 {
             if let Some(response) = poll_for_dhcp_response() {
-                hpvm_info!("dhcp", "Received DHCP ACK: {:?}", response);
+                crate::vdebug!("dhcp", "Received DHCP ACK: {:?}", response);
                 return Some(response)
             }
             boot::stall(Duration::from_micros(10_000));
@@ -204,7 +204,7 @@ pub fn discover_config() -> Option<([u8; 4], [u8; 4], [u8; 4])> {
         }
     }
 
-    hpvm_info!("NET", "no dhcp response, using fallback IP. configure static ip in network tab");
+    crate::vdebug!("NET", "no dhcp response, using fallback IP. configure static ip in network tab");
     Some(([192, 168, 1, 50], [192, 168, 1, 1], [255, 255, 255, 0]))
 }
 
@@ -242,7 +242,7 @@ pub fn send_dhcp_request(offered_ip: [u8; 4], server_ip: [u8; 4], xid: u32) {
     // 4. End Option
     packet.options[cursor] = 255;
 
-    hpvm_info!("NET", "Sending DHCP Request...");
+    crate::vdebug!("NET", "Sending DHCP Request...");
     // Broadcast the request
     if let Ok(_result) = net_stack::send_raw_udp(
         [0, 0, 0, 0],
@@ -320,12 +320,12 @@ fn ensure_hw() {
     }
 
     if !net_stack::is_initialized() {
-        hpvm_info!("NET", "Discovering network configuration via DHCP...");
+        crate::vdebug!("NET", "Discovering network configuration via DHCP...");
 
         // Attempt to get config from the wire
         if let Some((my_ip, my_gw, my_mask)) = discover_config() {
             net_stack::init(my_ip, my_gw, my_mask);
-            hpvm_info!("NET", "DHCP Success: {}.{}.{}.{}", my_ip[0], my_ip[1], my_ip[2], my_ip[3]);
+            crate::vdebug!("NET", "DHCP Success: {}.{}.{}.{}", my_ip[0], my_ip[1], my_ip[2], my_ip[3]);
         } else {
             hpvm_warn!("NET", "DHCP failed. Falling back to static recovery IP.");
             let fallback_ip = [169, 254, 1, 1];
@@ -343,12 +343,12 @@ fn ensure_net() {
     }
 
     if !net_stack::is_initialized() {
-        hpvm_info!("NET", "Discovering network configuration via DHCP...");
+        crate::vdebug!("NET", "Discovering network configuration via DHCP...");
 
         // Attempt to get config from the wire
         if let Some((my_ip, my_gw, my_mask)) = discover_config() {
             net_stack::init(my_ip, my_gw, my_mask);
-            hpvm_info!("NET", "DHCP Success: {}.{}.{}.{}", my_ip[0], my_ip[1], my_ip[2], my_ip[3]);
+            crate::vdebug!("NET", "DHCP Success: {}.{}.{}.{}", my_ip[0], my_ip[1], my_ip[2], my_ip[3]);
         } else {
             hpvm_warn!("NET", "DHCP failed. Falling back to static recovery IP.");
             let fallback_ip = [169, 254, 1, 1];
@@ -422,7 +422,7 @@ pub fn lanscan(prefix: &str) {
         String::from("201 "), String::from("226 "), String::from("251 "),
     ];
 
-    hpvm_info!("NET", "Starting LAN scan via ARP probes...");
+    crate::vdebug!("NET", "Starting LAN scan via ARP probes...");
 
     for host in 1..=255u16 {
         let ip_str = alloc::format!("{}{}", prefix, host);
@@ -509,7 +509,7 @@ pub fn lanscan(prefix: &str) {
 //            });
 //        }
     }
-    hpvm_info!("NET", "scan complete. hosts detected: {}", found.len());
+    crate::vdebug!("NET", "scan complete. hosts detected: {}", found.len());
 }
 
 /// Start a very small management HTTP server on a separate thread (placeholder).
@@ -521,7 +521,7 @@ pub fn httpd_start(port: u16) {
         return;
     }
     net_stack::httpd_start(port);
-    hpvm_info!("HTTPD", "Management server listening on port {}", port);
+    crate::vdebug!("HTTPD", "Management server listening on port {}", port);
 }
 
 pub fn httpd_stop() {

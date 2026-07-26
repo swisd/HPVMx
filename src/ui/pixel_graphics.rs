@@ -972,7 +972,16 @@ impl PixelGraphics {
         }
     }
 
-    pub fn draw_log_viewer(&mut self, x: usize, y: usize, width: usize, height: usize, logs: &[(uefi::proto::console::text::Color, String, String)]) {
+    pub fn draw_log_viewer(
+        &mut self,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        logs: &[(uefi::proto::console::text::Color, String, String)],
+        vertical_offset: usize,
+        horizontal_offset: usize,
+    ) {
         self.fill_rect(x, y, width, height, 0x1A1A1A);
         self.draw_rect_outline(x, y, width, height, 0x444444);
 
@@ -1000,9 +1009,18 @@ impl PixelGraphics {
             }
         }
 
-        let start_idx = display_lines.len().saturating_sub(max_lines);
-        for (i, (color, line)) in display_lines.iter().skip(start_idx).enumerate() {
-            self.draw_text(x + 5, y + 5 + i * line_h, line, *color);
+        let visible_lines = max_lines.min(display_lines.len());
+        let base_start = display_lines.len().saturating_sub(visible_lines);
+        let start_idx = base_start.saturating_sub(vertical_offset.min(base_start));
+
+        for (i, (color, line)) in display_lines
+            .iter()
+            .skip(start_idx)
+            .take(visible_lines)
+            .enumerate()
+        {
+            let rendered = line.chars().skip(horizontal_offset).collect::<String>();
+            self.draw_text(x + 5, y + 5 + i * line_h, &rendered, *color);
         }
     }
 

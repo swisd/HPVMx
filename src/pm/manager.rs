@@ -227,7 +227,7 @@ impl PackageManager {
         }
 
         if missing.is_empty() {
-            hpvm_info!("pm", "no missing packages for: {}", pkg_name);
+            crate::vdebug!("pm", "no missing packages for: {}", pkg_name);
         } else {
             hpvm_warn!("pm", "Packages not found: {:?}", missing);
         }
@@ -235,12 +235,12 @@ impl PackageManager {
 
     pub fn load_registry(&mut self) {
         FileSystem::cd(&*self.package_path);
-        hpvm_info!("pm", "loading packages from {}registry.prg", self.package_path);
+        crate::vdebug!("pm", "loading packages from {}registry.prg", self.package_path);
         let reg = FileSystem::read_file_to_string("registry.prg").expect("could not open registry");
         let pkgs = reg.replace("\r", "");
         let packages = pkgs.split("\n").collect::<Vec<&str>>();
         for package in packages {
-            hpvm_info!("pm", "found package '{}'", package.to_string());
+            crate::vdebug!("pm", "found package '{}'", package.to_string());
             let pack_path = self.package_path.clone() + "/" + package + "/";
             FileSystem::cd(&*pack_path);
             let json = FileSystem::read_file_to_string("package.json").unwrap();
@@ -331,7 +331,7 @@ impl PackageManager {
             return hpvm_warn!("pm", "Invalid Package: Package File Invalid");
         }
         self.registry.insert(pkg.name.clone(), pkg);
-        hpvm_info!("pm", "Registry size now: {}", self.registry.len());
+        crate::vdebug!("pm", "Registry size now: {}", self.registry.len());
     }
 
     pub fn list_packages(&self) -> () {
@@ -366,13 +366,13 @@ impl PackageManager {
     }
 
     pub fn download_package(&mut self, pkg_name: &str) {
-        hpvm_info!("pm", "Attempting to download package: {}", pkg_name);
+        crate::vdebug!("pm", "Attempting to download package: {}", pkg_name);
         if let Some(pkg) = self.registry.get(pkg_name) {
             if let Some(url) = &pkg.repo_url {
-                hpvm_info!("pm", "Downloading from: {}", url);
+                crate::vdebug!("pm", "Downloading from: {}", url);
                 // In a real implementation, we would use the network stack here.
                 // For now, we simulate a successful download.
-                hpvm_info!("pm", "Successfully downloaded {}", pkg_name);
+                crate::vdebug!("pm", "Successfully downloaded {}", pkg_name);
             } else {
                 hpvm_warn!("pm", "No repo_url for package: {}", pkg_name);
             }
@@ -382,7 +382,7 @@ impl PackageManager {
     }
 
     pub fn autocompile_package(&mut self, pkg_name: &str) {
-        hpvm_info!("pm", "Attempting to autocompile package: {}", pkg_name);
+        crate::vdebug!("pm", "Attempting to autocompile package: {}", pkg_name);
         let pkg_path = format!("{}/{}/", self.package_path, pkg_name);
         
         // Change to package directory
@@ -393,7 +393,7 @@ impl PackageManager {
         let source_file = "src/main.micro";
         match FileSystem::read_file_to_string(source_file) {
             Ok(source) => {
-                hpvm_info!("pm", "Compiling {}...", source_file);
+                crate::vdebug!("pm", "Compiling {}...", source_file);
                 let arch = "x86_64"; // Default architecture
                 let binary = crate::micro_c::compiler::compile(&source, arch);
                 
@@ -401,14 +401,14 @@ impl PackageManager {
                     hpvm_error!("pm", "Compilation failed for {}", pkg_name);
                     if let Some(pkg) = self.registry.get_mut(pkg_name) {
                         pkg.has_compilation_issues = true;
-                        hpvm_info!("pm", "Package status updated with compilation issues");
+                        crate::vdebug!("pm", "Package status updated with compilation issues");
                     }
                 } else {
 
                     let out_file = format!("bin/{}.bin", pkg_name);
                     match FileSystem::write_to_file(&out_file, &binary, 'w') {
                         Ok(_) => {
-                            hpvm_info!("pm", "Successfully compiled to {}", out_file);
+                            crate::vdebug!("pm", "Successfully compiled to {}", out_file);
                             if let Some(pkg) = self.registry.get_mut(pkg_name) {
                                 //pkg.has_compilation_issues = false;
                                 pkg.has_compilation_issues = true;

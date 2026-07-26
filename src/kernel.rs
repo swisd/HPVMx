@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use uefi::{data_types, CStr16, CString16};
 use uefi::proto::media::file::{File, FileMode, FileAttribute};
 use uefi::proto::media::fs::SimpleFileSystem;
-use crate::message;
+use crate::{message, vdebug};
 
 pub struct KernelLoader;
 
@@ -22,8 +22,8 @@ impl KernelLoader {
 
         // Convert path to CStr16
         let path_u16: Vec<u16> = path.encode_utf16().collect();
-        message!("", "n: {:#?}", String::from_utf16_lossy(&path_u16));
-        let path_cstr = CStr16::from_u16_with_nul(&path_u16)
+        crate::vdebug!("Kernel", "loading path '{}'", String::from_utf16_lossy(&path_u16));
+        let path_cstr = CString16::try_from(path)
             .map_err(move |_| {
                 "Invalid kernel path"
             })?;
@@ -31,7 +31,7 @@ impl KernelLoader {
 
         // Open the kernel file
         let kernel_handle = root.open(
-            path_cstr,
+            &path_cstr,
             FileMode::Read,
             FileAttribute::empty(),
         ).map_err(|_| "Failed to open kernel file")?;
@@ -73,7 +73,7 @@ impl KernelLoader {
 
         // Convert path to CStr16
         let path_u16: Vec<u16> = path.encode_utf16().collect();
-        message!("", "n: {:#?}", String::from_utf16_lossy(&path_u16));
+        crate::vdebug!("Kernel", "loading path '{}'", String::from_utf16_lossy(&path_u16));
         let path_cstr = Self::u16_to_cstr16_unsafe(&*path_u16) // danger
             .map_err(move |_| {
                 "Invalid kernel path"

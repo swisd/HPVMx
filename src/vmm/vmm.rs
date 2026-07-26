@@ -13,7 +13,7 @@ use crate::vmm::partitioner::HardwarePartitioner;
 use crate::vmm::security::{DeepLevelSecurity, AutolyticProtocol};
 use crate::vmm::vmbus::VmBusMessage;
 use crate::dls::{SoftwareAnalysisMemory, SoftwareAnalysisSample};
-use crate::{hpvm_info, hpvm_error, hpvm_log};
+use crate::{hpvm_info, hpvm_error, hpvm_log, vdebug};
 use crate::filesystem::FileSystem;
 use uefi::proto::console::text::Color;
 use uefi::mem::memory_map::MemoryMap;
@@ -30,15 +30,21 @@ pub enum BootMediaKind {
 
 impl BootMediaKind {
     pub fn detect(path: &str) -> Self {
-        if path.ends_with(".iso") {
+        let normalized = path.to_ascii_lowercase();
+
+        if normalized.ends_with(".iso") {
             Self::Iso
-        } else if path.ends_with(".efi") {
+        } else if normalized.ends_with(".efi") {
             Self::Efi
-        } else if path.ends_with(".img")
-            || path.ends_with(".vhd")
-            || path.ends_with(".vdi")
-            || path.ends_with(".vmdk")
-            || path.ends_with(".raw")
+        } else if normalized.ends_with(".img")
+            || normalized.ends_with(".vhd")
+            || normalized.ends_with(".vhdx")
+            || normalized.ends_with(".vdi")
+            || normalized.ends_with(".vmdk")
+            || normalized.ends_with(".qcow")
+            || normalized.ends_with(".qcow2")
+            || normalized.ends_with(".raw")
+            || normalized.ends_with(".bin")
         {
             Self::DiskImage
         } else {
@@ -46,6 +52,15 @@ impl BootMediaKind {
         }
     }
 }
+
+const MIN_VM_MEMORY_MB: u32 = 64;
+const MAX_VM_MEMORY_MB: u32 = 32768;
+const MIN_VM_VCPUS: u32 = 1;
+const MAX_VM_VCPUS: u32 = 64;
+const MAX_BOOT_MEDIA_BYTES: usize = 1024 * 1024 * 1024;
+const VM_DISPLAY_GPA: u64 = 0xE0000000;
+const VM_MMIO_CONFIG_PORT: u16 = 0x3D0;
+const VM_SERIAL_PORT: u16 = 0x3F8;
 
 impl core::fmt::Display for BootMediaKind {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -56,6 +71,63 @@ impl core::fmt::Display for BootMediaKind {
             BootMediaKind::Unknown => write!(f, "Unknown"),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DisplayDescriptor {
+    width: u32,
+    height: u32,
+    stride: u32,
+    bytes: usize,
+    host_fb_hpa: u64,
+}
+
+fn detect_host_display_descriptor() -> Option<DisplayDescriptor> {
+    let gop_handle = uefi::boot::get_handle_for_protocol::<uefi::proto::console::gop::GraphicsOutput>().ok()?;
+    let mut gop = uefi::boot::open_protocol_exclusive::<uefi::proto::console::gop::GraphicsOutput>(gop_handle).ok()?;
+    let mode = gop.current_mode_info();
+    let (width, height) = mode.resolution();
+    let stride = mode.stride() as u32;
+    let host_fb_hpa = gop.frame_buffer().as_mut_ptr() as u64;
+    let bytes = gop.frame_buffer().size();
+
+    if width == 0 || height == 0 || bytes == 0 || host_fb_hpa == 0 {
+        return None;
+    }
+
+    Some(DisplayDescriptor {
+        width: width as u32,
+        height: height as u32,
+        stride,
+        bytes,
+        host_fb_hpa,
+    })
+}
+
+fn validate_boot_media_path(media_path: &str) -> Result<BootMediaKind, &'static str> {
+    if media_path.is_empty() {
+        return Err("empty boot media path");
+    }
+    if media_path.contains("..") {
+        return Err("path traversal in boot media path is not allowed");
+    }
+
+    let media_kind = BootMediaKind::detect(media_path);
+    if media_kind == BootMediaKind::Unknown {
+        return Err("unsupported boot media format");
+    }
+
+    Ok(media_kind)
+}
+
+fn validate_vm_profile(memory_mb: u32, vcpu_count: u32) -> Result<(), &'static str> {
+    if !(MIN_VM_MEMORY_MB..=MAX_VM_MEMORY_MB).contains(&memory_mb) {
+        return Err("memory size outside secure bounds");
+    }
+    if !(MIN_VM_VCPUS..=MAX_VM_VCPUS).contains(&vcpu_count) {
+        return Err("vCPU count outside secure bounds");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +153,56 @@ pub struct HypervisorManager {
 
 #[allow(dead_code)]
 impl HypervisorManager {
+    fn prime_vm_hardware_interfaces(vm: &mut VirtualMachine) {
+        vm.hwbus.send_message(HwBusMessage::DevicePort {
+            port: VM_SERIAL_PORT,
+            size: 1,
+            write: false,
+            data: None,
+        });
+        vm.hwbus.send_message(HwBusMessage::Call {
+            from: 0,
+            to: 0x1000000,
+            target_name: Some(String::from("hardware.interface.probe")),
+        });
+        vm.vmbus.send_message(VmBusMessage::IoRequest {
+            address: VM_MMIO_CONFIG_PORT as u64,
+            size: 4,
+            write: false,
+            data: None,
+        });
+    }
+
+    fn map_vm_display(vm: &mut VirtualMachine) -> bool {
+        let Some(display) = detect_host_display_descriptor() else {
+            hpvm_error!("Display", "GOP framebuffer unavailable; VM display passthrough not ready");
+            return false;
+        };
+
+        vm.mapper.add_memory_mapping(VM_DISPLAY_GPA, display.host_fb_hpa, display.bytes);
+        vm.hwbus.send_message(HwBusMessage::MemoryAccess {
+            gpa: VM_DISPLAY_GPA,
+            hpa: display.host_fb_hpa,
+            size: display.bytes,
+            write: true,
+        });
+
+        let mut mode_blob = Vec::with_capacity(16);
+        mode_blob.extend_from_slice(&display.width.to_le_bytes());
+        mode_blob.extend_from_slice(&display.height.to_le_bytes());
+        mode_blob.extend_from_slice(&display.stride.to_le_bytes());
+        mode_blob.extend_from_slice(&(VM_DISPLAY_GPA as u32).to_le_bytes());
+
+        vm.vmbus.send_message(VmBusMessage::IoRequest {
+            address: VM_MMIO_CONFIG_PORT as u64,
+            size: mode_blob.len(),
+            write: true,
+            data: Some(mode_blob),
+        });
+        vm.vmbus.send_message(VmBusMessage::Interrupt { vector: 0x20 });
+        true
+    }
+
     /// Create a new hypervisor manager instance
     pub fn new() -> Self {
         Self {
@@ -149,7 +271,9 @@ impl HypervisorManager {
         memory_mb: u32,
         vcpu_count: u32,
     ) -> Result<BootedSystem, &'static str> {
-        let media_kind = BootMediaKind::detect(media_path);
+        crate::vdebug!("Boot", "run-system request: name='{}' media='{}' mem={}MB vcpus={}", name, media_path, memory_mb, vcpu_count);
+        validate_vm_profile(memory_mb, vcpu_count)?;
+        let media_kind = validate_boot_media_path(media_path)?;
         let vm_id = self.create_vm(name, memory_mb, vcpu_count)?;
 
         if let Some(vm) = self.vms.get_mut(&vm_id) {
@@ -206,7 +330,7 @@ impl HypervisorManager {
         let bus = &self.vms.get(&vm_id).ok_or("VM not found")?.vmbus;
         match self.security.inspect_bus(bus) {
             Ok(sample) => {
-                hpvm_info!("DLS", "VM {} analysis verdict: {:?}", vm_id, sample.verdict);
+                crate::vdebug!("DLS", "VM {} analysis verdict: {:?}", vm_id, sample.verdict);
                 Ok(sample)
             }
             Err(e) => {
@@ -222,7 +346,7 @@ impl HypervisorManager {
         let bus = &self.vms.get(&vm_id).ok_or("VM not found")?.hwbus;
         match self.security.inspect_hwbus(bus) {
             Ok(sample) => {
-                hpvm_info!("DLS", "VM {} HWBUS analysis verdict: {:?}", vm_id, sample.verdict);
+                crate::vdebug!("DLS", "VM {} HWBUS analysis verdict: {:?}", vm_id, sample.verdict);
                 Ok(sample)
             }
             Err(e) => {
@@ -303,7 +427,7 @@ impl HypervisorManager {
         let _ = FileSystem::remove(path);
         FileSystem::touch(path)?;
         FileSystem::write_to_file(path, &data, 'w')?;
-        hpvm_info!("DLS", "saved {} software-analysis samples to {}", memory.samples.len(), path);
+        crate::vdebug!("DLS", "saved {} software-analysis samples to {}", memory.samples.len(), path);
         Ok(())
     }
 
@@ -361,7 +485,7 @@ impl HypervisorManager {
             // In a real bare-metal environment, we would use a DMA-based zeroing 
             // or a fast loop to clear the physical memory at mapping.hpa
             // For now, we simulate this.
-            hpvm_info!("VMM", "Zeroing physical memory at 0x{:x} ({} bytes)", mapping.hpa, mapping.size);
+            crate::vdebug!("VMM", "Zeroing physical memory at 0x{:x} ({} bytes)", mapping.hpa, mapping.size);
         }
 
         // 2. Zero the disk regions if applicable
@@ -464,12 +588,19 @@ impl HypervisorManager {
 
     pub fn boot_vm_with_media(&mut self, vm_id: u32, media_path: &str) -> Result<(), &'static str> {
         let vm = self.vms.get_mut(&vm_id).ok_or("VM not found")?;
-        let media_kind = BootMediaKind::detect(media_path);
+        let media_kind = validate_boot_media_path(media_path)?;
 
-        hpvm_info!("Boot", "Loading {} media: {}", media_kind, media_path);
+        crate::vdebug!("Boot", "Loading {} media: {}", media_kind, media_path);
         
         // 1. Load the media (kernel/ISO)
         let data = crate::kernel::KernelLoader::load_kernel(media_path)?;
+        crate::vdebug!("Boot", "media loaded: vm={} kind={} bytes={}", vm_id, media_kind, data.len());
+        if data.is_empty() {
+            return Err("boot media is empty");
+        }
+        if data.len() > MAX_BOOT_MEDIA_BYTES {
+            return Err("boot media size exceeds secure limit");
+        }
         let sector_count = ((data.len() + 511) / 512).max(1).min(u32::MAX as usize) as u32;
         vm.vmbus.send_message(VmBusMessage::StorageRequest {
             sector: 0,
@@ -498,6 +629,7 @@ impl HypervisorManager {
         }
 
         vm.mapper.add_memory_mapping(guest_addr, hpa, data.len());
+        crate::vdebug!("Boot", "mapped boot media vm={} guest=0x{:x} host=0x{:x}", vm_id, guest_addr, hpa);
         vm.vmbus.send_message(VmBusMessage::Call {
             from: 0,
             to: guest_addr,
@@ -527,8 +659,14 @@ impl HypervisorManager {
             vcpu.set_stack_pointer(stack_gpa + stack_size as u64);
         }
 
+        Self::prime_vm_hardware_interfaces(vm);
+        let display_ready = Self::map_vm_display(vm);
+        if display_ready {
+            crate::vdebug!("Display", "VM {} display configured (GPA 0x{:x})", vm_id, VM_DISPLAY_GPA);
+        }
+
         vm.state = VmState::Running;
-        hpvm_info!("Boot", "VM {} is now running from {}", vm_id, media_path);
+        crate::vdebug!("Boot", "VM {} is now running from {}", vm_id, media_path);
 
         Ok(())
     }
@@ -549,7 +687,7 @@ impl HypervisorManager {
         let _ = FileSystem::remove(path);
         FileSystem::touch(path)?;
         FileSystem::write_to_file(path, &data, 'w')?;
-        hpvm_info!("VMM", "saved {} VM definitions to {}", self.vms.len(), path);
+        crate::vdebug!("VMM", "saved {} VM definitions to {}", self.vms.len(), path);
         Ok(())
     }
 
@@ -575,7 +713,7 @@ impl HypervisorManager {
             }
         }
 
-        hpvm_info!("VMM", "restored {} VM definitions from {}", restored, path);
+        crate::vdebug!("VMM", "restored {} VM definitions from {}", restored, path);
         Ok(restored)
     }
 }

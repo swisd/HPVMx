@@ -6,6 +6,7 @@
 pub(crate) mod win64;
 pub(crate) mod arm64;
 pub(crate) mod x86_64_raw;
+pub(crate) mod x86_64_hsis;
 
 use alloc::string::String;
 use crate::ir::IRInst;

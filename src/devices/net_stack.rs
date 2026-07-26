@@ -206,9 +206,9 @@ pub fn init(ip: [u8; 4], gw: [u8; 4], mask: [u8; 4]) {
     #[allow(static_mut_refs)]
     unsafe { NET_STATE.write(Some(state)); }
     STACK_INIT.store(true, Ordering::SeqCst);
-    hpvm_info!("NET", "Stack initialized at {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
-    hpvm_info!("NET", "Mask: {}.{}.{}.{}", mask[0], mask[1], mask[2], mask[3]);
-    hpvm_info!("NET", "SNP stack up: IP: {}.{}.{}.{}  GW: {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3], gw[0], gw[1], gw[2], gw[3]);
+    crate::vdebug!("NET", "Stack initialized at {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
+    crate::vdebug!("NET", "Mask: {}.{}.{}.{}", mask[0], mask[1], mask[2], mask[3]);
+    crate::vdebug!("NET", "SNP stack up: IP: {}.{}.{}.{}  GW: {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3], gw[0], gw[1], gw[2], gw[3]);
 }
 
 /// Resolves a MAC address. If target is remote, resolves the Gateway's MAC instead.
@@ -259,7 +259,7 @@ pub fn ping_external(target_ip: [u8; 4], timeout: u32, print: bool) -> bool {
         unsafe {
             if NET_STATE.assume_init_ref().as_ref().unwrap().ping_success {
                 if print {
-                    hpvm_info!("PING", "Reply from {}.{}.{}.{}", target_ip[0], target_ip[1], target_ip[2], target_ip[3]);
+                    crate::vdebug!("PING", "Reply from {}.{}.{}.{}", target_ip[0], target_ip[1], target_ip[2], target_ip[3]);
                 }
                 return true;
             }
@@ -287,7 +287,7 @@ fn update_arp_cache(ip: [u8; 4], mac: [u8; 6]) {
                     entry.ip = ip;
                     entry.mac = mac;
                     entry.valid = true;
-                    hpvm_info!("ARP", "Cached {}.{}.{}.{} -> {:02X}:{:02X}:...", ip[0], ip[1], ip[2], ip[3], mac[0], mac[1]);
+                    crate::vdebug!("ARP", "Cached {}.{}.{}.{} -> {:02X}:{:02X}:...", ip[0], ip[1], ip[2], ip[3], mac[0], mac[1]);
                     return;
                 }
             }
@@ -363,7 +363,7 @@ pub fn ping_loopback(dst: &str) -> Result<u32, &'static str> {
     //init(/* [u8; 4] */, /* [u8; 4] */);
     if dst == "127.0.0.1" || dst.eq_ignore_ascii_case("localhost") {
         // Pretend we sent an ICMP echo and received it immediately.
-        hpvm_info!("PING", "loopback echo reply from {}: bytes=32 time=1ms TTL=64", dst);
+        crate::vdebug!("PING", "loopback echo reply from {}: bytes=32 time=1ms TTL=64", dst);
         Ok(1)
     } else {
         hpvm_warn!("PING", "only loopback is available currently; cannot reach {}", dst);
@@ -556,7 +556,7 @@ fn handle_tcp(src_ip: [u8; 4], src_mac: [u8; 6], packet: &[u8]) {
         }
     } else if dst_port >= 49152 {
         // Potential client response
-        hpvm_info!("TCP", "Client packet: flags=0x{:x} seq={} ack={} payload={}", flags, u32::from_be(tcp.seq), u32::from_be(tcp.ack), packet.len() - (((u16::from_be(tcp.off_flags) >> 12) * 4) as usize));
+        crate::vdebug!("TCP", "Client packet: flags=0x{:x} seq={} ack={} payload={}", flags, u32::from_be(tcp.seq), u32::from_be(tcp.ack), packet.len() - (((u16::from_be(tcp.off_flags) >> 12) * 4) as usize));
         handle_tcp_client(src_ip, src_mac, tcp, flags, packet, state_mut);
     }
 }
@@ -567,7 +567,7 @@ fn handle_httpd(src_ip: [u8; 4], src_mac: [u8; 6], tcp: &TcpHeader, flags: u16, 
 
     // 1. Connection Request (SYN) -> Reply with SYN/ACK
     if (flags & (TCP_FLAG_SYN as u16)) != 0 {
-        hpvm_info!("HTTPD", "Connection request from {}.{}.{}.{}", src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
+        crate::vdebug!("HTTPD", "Connection request from {}.{}.{}.{}", src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
         send_tcp_packet(src_ip, src_mac, 80, u16::from_be(tcp.src_port),
                         0, seq + 1, TCP_FLAG_SYN | TCP_FLAG_ACK, &[]);
     }
@@ -577,7 +577,7 @@ fn handle_httpd(src_ip: [u8; 4], src_mac: [u8; 6], tcp: &TcpHeader, flags: u16, 
         let payload = &packet[header_len..];
 
         if !payload.is_empty() && payload.starts_with(b"GET") {
-            hpvm_info!("HTTPD", "GET request from {}.{}.{}.{}", src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
+            crate::vdebug!("HTTPD", "GET request from {}.{}.{}.{}", src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
             let body = "<html><body><h1>HPVM UEFI Server</h1><p>Status: OK</p></body></html>";
             let response = [
                 "HTTP/1.1 200 OK\r\n",
@@ -608,7 +608,7 @@ fn handle_tcp_client(src_ip: [u8; 4], src_mac: [u8; 6], tcp: &TcpHeader, flags: 
 
     if (flags & (TCP_FLAG_SYN as u16)) != 0 && (flags & (TCP_FLAG_ACK as u16)) != 0 {
         // SYN/ACK received
-        hpvm_info!("TCP", "SYN/ACK received, connecting...");
+        crate::vdebug!("TCP", "SYN/ACK received, connecting...");
         state.tcp_connected = true;
         state.tcp_seq = ack;
         state.tcp_ack = seq + 1;
@@ -619,7 +619,7 @@ fn handle_tcp_client(src_ip: [u8; 4], src_mac: [u8; 6], tcp: &TcpHeader, flags: 
         state.tcp_seq = ack;
         if packet.len() > header_len {
             let payload = &packet[header_len..];
-            hpvm_info!("TCP", "Received {} bytes of data", payload.len());
+            crate::vdebug!("TCP", "Received {} bytes of data", payload.len());
             state.tcp_rx_data.extend_from_slice(payload);
             state.tcp_ack = seq + payload.len() as u32;
             // ACK the data
@@ -795,14 +795,14 @@ fn send_icmp_reply(dst_ip: [u8; 4], dst_mac: [u8; 6], ident: u16, seq: u16, payl
     icmp.checksum = calculate_checksum(icmp_full_slice).to_be();
 
     let _ = snp_tx(&frame[..total_len]);
-    hpvm_info!("ICMP", "Ping reply sent to {}.{}.{}.{}", dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3]);
+    crate::vdebug!("ICMP", "Ping reply sent to {}.{}.{}.{}", dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3]);
 }
 
 fn handle_udp(src_ip: [u8; 4], port: u16, data: &[u8]) {
     // Example: A simple "echo" or command listener on port 1234
     match port {
         1234 => {
-            hpvm_info!("UDP", "Received {} bytes on port 1234 from {}.{}.{}.{}",
+            crate::vdebug!("UDP", "Received {} bytes on port 1234 from {}.{}.{}.{}",
                 data.len(), src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
             // You could parse commands here (e.g., "REBOOT", "STATS")
         }
@@ -816,7 +816,7 @@ pub fn httpd_start(_port: u16) {
         hpvm_warn!("HTTPD", "already running");
         return;
     }
-    hpvm_info!("HTTPD", "loopback HTTPD placeholder started (no external clients)");
+    crate::vdebug!("HTTPD", "loopback HTTPD placeholder started (no external clients)");
 }
 
 pub fn httpd_stop() {
@@ -824,7 +824,7 @@ pub fn httpd_stop() {
         hpvm_warn!("HTTPD", "not running");
         return;
     }
-    hpvm_info!("HTTPD", "stopped");
+    crate::vdebug!("HTTPD", "stopped");
 }
 
 
@@ -994,7 +994,7 @@ pub fn ping(target_ip: [u8; 4], timeout_loops: u32) -> bool {
         poll_tick();
         unsafe {
             if NET_STATE.assume_init_ref().as_ref().unwrap().ping_success {
-                hpvm_info!("PING", "Success!");
+                crate::vdebug!("PING", "Success!");
                 return true;
             }
         }

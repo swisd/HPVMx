@@ -235,7 +235,7 @@ impl Lexer {
                     self.next();
                     Token::NotEq
                 } else {
-                    {error("Unexpected !"); Token::None}
+                    {error("@LEX Unexpected !"); Token::None}
                 }
             }
 
@@ -286,21 +286,21 @@ impl Lexer {
                             }
                             module_name.push(self.next().unwrap());
                         }
-                        error("Unterminated include directive: expected '>'");
+                        error("@LEX Unterminated include directive: expected '>'");
                         Token::None
                     } else {
-                        error("Expected '<' after #include");
+                        error("@LEX Expected '<' after #include");
                         Token::None
                     }
                 } else {
-                    error(&format!("Unknown directive #{}", directive));
+                    error(&format!("@LEX Unknown directive #{}", directive));
                     Token::None
                 }
             }
 
             None => Token::EOF,
 
-            Some(c) => {error(&format!("Unexpected char {}", c)); Token::None}
+            Some(c) => {error(&format!("@LEX Unexpected char {}", c)); Token::None}
         }
     }
 }

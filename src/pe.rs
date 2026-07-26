@@ -135,7 +135,7 @@ impl PeLoader {
             return Err("Not a PE32+ (64-bit) file");
         }
 
-        crate::hpvm_info!("PE", "Loading PE image: EntryPoint RVA=0x{:x}, ImageBase=0x{:x}, Size=0x{:x}", 
+        crate::vdebug!("PE", "Loading PE image: EntryPoint RVA=0x{:x}, ImageBase=0x{:x}, Size=0x{:x}", 
             optional_header.address_of_entry_point, 
             optional_header.image_base,
             optional_header.size_of_image);
@@ -181,7 +181,7 @@ impl PeLoader {
             }
             
             let name = core::str::from_utf8(&section.name).unwrap_or("unknown");
-            crate::hpvm_info!("PE", "Section {}: {} mapped to 0x{:x}", i, name, image_addr + section.virtual_address as u64);
+            crate::vdebug!("PE", "Section {}: {} mapped to 0x{:x}", i, name, image_addr + section.virtual_address as u64);
         }
 
         // Handle relocations if image base changed
@@ -191,7 +191,7 @@ impl PeLoader {
         }
 
         let entry_point = image_addr + optional_header.address_of_entry_point as u64;
-        crate::hpvm_info!("PE", "PE loaded successfully. Entry point: 0x{:x}", entry_point);
+        crate::vdebug!("PE", "PE loaded successfully. Entry point: 0x{:x}", entry_point);
 
         Ok(entry_point)
     }
@@ -199,7 +199,7 @@ impl PeLoader {
     fn apply_relocations(image_ptr: *mut u8, image_base: u64, optional_header: &OptionalHeader64) -> Result<(), &'static str> {
         let reloc_dir = &optional_header.data_directories[5]; // IMAGE_DIRECTORY_ENTRY_BASERELOC
         if reloc_dir.virtual_address == 0 || reloc_dir.size == 0 {
-            crate::hpvm_info!("PE", "No relocations found");
+            crate::vdebug!("PE", "No relocations found");
             return Ok(());
         }
 
@@ -237,7 +237,7 @@ impl PeLoader {
             current_offset += block_size as usize;
         }
 
-        crate::hpvm_info!("PE", "Relocations applied with delta 0x{:x}", delta);
+        crate::vdebug!("PE", "Relocations applied with delta 0x{:x}", delta);
         Ok(())
     }
 
@@ -277,9 +277,9 @@ impl PeLoader {
             return Err("Not a PE32+ (64-bit) file");
         }
 
-        crate::hpvm_info!("PE", "Entry point RVA: 0x{:x}", optional_header.address_of_entry_point);
-        crate::hpvm_info!("PE", "Image base: 0x{:x}", optional_header.image_base);
-        crate::hpvm_info!("PE", "Number of sections: {}", coffee_header.number_of_sections);
+        crate::vdebug!("PE", "Entry point RVA: 0x{:x}", optional_header.address_of_entry_point);
+        crate::vdebug!("PE", "Image base: 0x{:x}", optional_header.image_base);
+        crate::vdebug!("PE", "Number of sections: {}", coffee_header.number_of_sections);
 
         let section_header_offset = optional_header_offset + coffee_header.size_of_optional_header as usize;
         for i in 0..coffee_header.number_of_sections {
@@ -289,7 +289,7 @@ impl PeLoader {
             }
             let section = unsafe { &*(data.as_ptr().add(offset) as *const SectionHeader) };
             let name = core::str::from_utf8(&section.name).unwrap_or("unknown");
-            crate::hpvm_info!("PE", "Section {}: {} (VSize: 0x{:x}, VAddr: 0x{:x})", i, name, section.virtual_size, section.virtual_address);
+            crate::vdebug!("PE", "Section {}: {} (VSize: 0x{:x}, VAddr: 0x{:x})", i, name, section.virtual_size, section.virtual_address);
         }
 
         Ok(())

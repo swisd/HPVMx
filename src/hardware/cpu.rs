@@ -78,7 +78,7 @@ impl CpuInfo {
             })
             .unwrap_or_else(|| String::from("Unknown CPU"));
 
-        hpvm_info!("cpu", "cpu brand: {}", brand);
+        crate::vdebug!("cpu", "cpu brand: {}", brand);
 
         let cores = cpuid
             .get_feature_info()
@@ -89,21 +89,21 @@ impl CpuInfo {
             })
             .unwrap_or(1);
 
-        hpvm_info!("cpu", "cpu cores: {}", cores);
+        crate::vdebug!("cpu", "cpu cores: {}", cores);
 
         let supports_64bit = cpuid
             .get_extended_feature_info()
             .map(|info| info.has_avx2())
             .unwrap_or(false);
 
-        hpvm_info!("cpu", "supports 64-bit AVX2: {:?}", supports_64bit);
+        crate::vdebug!("cpu", "supports 64-bit AVX2: {:?}", supports_64bit);
 
         let supports_vmx = cpuid
             .get_feature_info()
             .map(|info| info.has_vmx())
             .unwrap_or(false);
 
-        hpvm_info!("cpu", "supports 64-bit VMX: {:?}", supports_64bit);
+        crate::vdebug!("cpu", "supports 64-bit VMX: {:?}", supports_64bit);
 
         Self {
             brand,

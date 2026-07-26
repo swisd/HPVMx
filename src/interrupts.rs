@@ -8,7 +8,7 @@ static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 pub fn init_idt() {
     unsafe {
         let idt_ptr = addr_of_mut!(IDT);
-        hpvm_info!("IDT", "idt ptr {:#?}", idt_ptr);
+        crate::vdebug!("IDT", "idt ptr {:#?}", idt_ptr);
         (*idt_ptr).breakpoint.set_handler_fn(breakpoint_handler);
         (*idt_ptr).double_fault.set_handler_fn(double_fault_handler)
             .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);

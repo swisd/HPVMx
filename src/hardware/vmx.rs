@@ -51,7 +51,7 @@ impl VtxCapabilities {
             .map(|info| true) // true for testing only. Change to info.has_vmx()
             .unwrap_or(false);
 
-        hpvm_info!("vmx", "hypervisor capabilities available: {}", available);
+        crate::vdebug!("vmx", "hypervisor capabilities available: {}", available);
 
         if !available {
             return Self {
@@ -69,7 +69,7 @@ impl VtxCapabilities {
             .map(|info| true)
             .unwrap_or(false);
 
-        hpvm_info!("vmx", "ept capabilities available: {}", ept_supported);
+        crate::vdebug!("vmx", "ept capabilities available: {}", ept_supported);
 
         // Check for VPID support
         let vpid_supported = cpuid
@@ -77,7 +77,7 @@ impl VtxCapabilities {
             .map(|info| true)
             .unwrap_or(false);
 
-        hpvm_info!("vmx", "virtual network capabilities available: {}", vpid_supported);
+        crate::vdebug!("vmx", "virtual network capabilities available: {}", vpid_supported);
 
         Self {
             available,

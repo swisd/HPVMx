@@ -6,7 +6,7 @@ use uefi::{StatusExt, Identify};
 use uefi::boot::OpenProtocolAttributes;
 use uefi::proto::console::pointer::Pointer;
 use uefi_raw::protocol::console::AbsolutePointerProtocol;
-use crate::{hpvm_warn, message};
+use crate::{hpvm_warn, message, vdebug};
 
 #[repr(transparent)]
 struct AbsolutePointer(AbsolutePointerProtocol);
@@ -67,16 +67,16 @@ impl Cursor {
             // Try absolute first (modern environments/VMs)
             let val = self.try_update_absolute(screen_width, screen_height);
             if val == 0 {
-                hpvm_info!("mouse", "abs {}{}", self.x, self.y);
+                crate::vdebug!("Mouse", "absolute pointer update x={} y={}", self.x, self.y);
                 return;
             }
-            hpvm_info!("mouse", "abs err {}", val);
+            crate::vdebug!("Mouse", "absolute pointer update error code={}", val);
             // Fallback to relative
             let val = self.try_update_relative(screen_width, screen_height);
             if val == 0 {
-                hpvm_info!("mouse", "rel {}{}", self.x, self.y);
+                crate::vdebug!("Mouse", "relative pointer update x={} y={}", self.x, self.y);
             } else {
-                hpvm_info!("mouse", "rel err {}", val);
+                crate::vdebug!("Mouse", "relative pointer update error code={}", val);
             }
         }
     }
@@ -112,7 +112,7 @@ impl Cursor {
                         self.x = (new_x as i32).clamp(0, screen_width as i32 - 1);
                         self.y = (new_y as i32).clamp(0, screen_height as i32 - 1);
                     }
-                    hpvm_info!("mouse", "{}, {}", self.x, self.y);
+                    crate::vdebug!("mouse", "{}, {}", self.x, self.y);
 
                     self.left_button = state.active_buttons & 0x1 != 0;
                     self.right_button = state.active_buttons & 0x2 != 0;
@@ -185,50 +185,50 @@ impl Cursor {
         use uefi::proto::console::pointer::Pointer;
         use uefi_raw::protocol::console::AbsolutePointerProtocol;
 
-        message!("\n", "--- Mouse Debug ---");
+        crate::vdebug!("Mouse", "--- Mouse Debug ---");
 
         // Check relative pointer
         let handles = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::ByProtocol(&Pointer::GUID));
         match handles {
             Ok(h) => {
-                message!("", "Found {} handles with Simple Pointer protocol", h.as_slice().len());
+                crate::vdebug!("Mouse", "Found {} handles with Simple Pointer protocol", h.as_slice().len());
                 for (i, handle) in h.as_slice().iter().enumerate() {
                     if let Ok(mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(*handle) {
                         let mode = mouse.mode();
-                        message!("", "  [{}] Resolution: [{}, {}, {}], Buttons: [{}, {}]", 
+                        crate::vdebug!("Mouse", "  [{}] Resolution: [{}, {}, {}], Buttons: [{}, {}]", 
                             i, mode.resolution[0], mode.resolution[1], mode.resolution[2],
                             mode.has_button[0], mode.has_button[1]);
                     } else {
-                        message!("", "  [{}] Failed to open protocol", i);
+                        crate::vdebug!("Mouse", "  [{}] Failed to open protocol", i);
                     }
                 }
             }
-            Err(_) => message!("", "No Simple Pointer protocol found"),
+            Err(_) => crate::vdebug!("Mouse", "No Simple Pointer protocol found"),
         }
 
         // Check absolute pointer
         let handles = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::ByProtocol(&AbsolutePointerProtocol::GUID));
         match handles {
             Ok(h) => {
-                message!("", "Found {} handles with Absolute Pointer protocol", h.as_slice().len());
+                crate::vdebug!("Mouse", "Found {} handles with Absolute Pointer protocol", h.as_slice().len());
                 for (i, handle) in h.as_slice().iter().enumerate() {
                     // Use our local wrapper
                     if let Ok(mouse) = uefi::boot::open_protocol_exclusive::<AbsolutePointer>(*handle) {
                         let mode = mouse.mode();
-                        message!("", "  [{}] Range: [{}..{}, {}..{}, {}..{}], Buttons: {:?}", 
+                        crate::vdebug!("Mouse", "  [{}] Range: [{}..{}, {}..{}, {}..{}], Buttons: {:?}", 
                             i, mode.absolute_min_x, mode.absolute_max_x,
                             mode.absolute_min_y, mode.absolute_max_y,
                             mode.absolute_min_z, mode.absolute_max_z,
                             mode.attributes);
                     } else {
-                        message!("", "  [{}] Failed to open protocol", i);
+                        crate::vdebug!("Mouse", "  [{}] Failed to open protocol", i);
                     }
                 }
             }
-            Err(_) => message!("", "No Absolute Pointer protocol found"),
+            Err(_) => crate::vdebug!("Mouse", "No Absolute Pointer protocol found"),
         }
 
-        message!("", "Polling data... Press any key to stop.");
+        crate::vdebug!("Mouse", "Polling data... Press any key to stop.");
         
         loop {
             // Poll relative
@@ -236,7 +236,7 @@ impl Cursor {
                 if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<Pointer>(handle) {
                     if let Ok(Some(state)) = mouse.read_state() {
                         if state.relative_movement[0] != 0 || state.relative_movement[1] != 0 || state.button[0] || state.button[1] {
-                            message!("", "REL: dx={}, dy={}, btn=[{}, {}]", 
+                            crate::vdebug!("Mouse", "REL: dx={}, dy={}, btn=[{}, {}]", 
                                 state.relative_movement[0], state.relative_movement[1],
                                 state.button[0], state.button[1]);
                         }
@@ -254,7 +254,7 @@ impl Cursor {
             if let Ok(handle) = uefi::boot::get_handle_for_protocol::<AbsolutePointer>() {
                 if let Ok(mut mouse) = uefi::boot::open_protocol_exclusive::<AbsolutePointer>(handle) {
                     if let Ok(Some(state)) = mouse.read_state() {
-                        message!("", "ABS: x={}, y={}, btn={}", 
+                        crate::vdebug!("Mouse", "ABS: x={}, y={}, btn={}", 
                             state.current_x, state.current_y, state.active_buttons);
                     } else if let Ok(None) = mouse.read_state() {
                         uefi::boot::stall(Duration::from_millis(10));

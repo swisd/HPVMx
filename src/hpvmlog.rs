@@ -17,7 +17,18 @@ const MAX_LOGS: usize = 4096;
 pub static mut LOG_BUFFER: Option<Vec<LogEntry>> = None;
 static LOG_COUNT: AtomicUsize = AtomicUsize::new(0);
 pub static mut LOGGING_SILENCED: bool = false;
+pub static mut VERBOSE_DEBUG_ENABLED: bool = false;
 pub static mut BUSY_TSC: u64 = 0;
+
+pub fn set_verbose_debug(enabled: bool) {
+    unsafe {
+        VERBOSE_DEBUG_ENABLED = enabled;
+    }
+}
+
+pub fn verbose_debug_enabled() -> bool {
+    unsafe { VERBOSE_DEBUG_ENABLED }
+}
 
 pub fn init_log_buffer() {
     unsafe {
@@ -139,6 +150,26 @@ impl Persistable for Vec<LogEntry> {
 // Added this to stop the "unused macro" warning
 #[macro_export] macro_rules! hpvm_error {
     ($tag:expr, $($arg:tt)*) => { hpvm_log!(Color::Red, $tag, $($arg)*) };
+}
+
+#[macro_export] macro_rules! vdebug {
+    ($tag:expr, $($arg:tt)*) => {
+        {
+            unsafe {
+                if crate::hpvmlog::VERBOSE_DEBUG_ENABLED && !crate::hpvmlog::LOGGING_SILENCED {
+                    let msg = alloc::format!($($arg)*);
+                    uefi::system::with_stdout(|stdout| {
+                        use core::fmt::Write;
+                        let _ = stdout.set_color(uefi::proto::console::text::Color::LightBlue, uefi::proto::console::text::Color::Black);
+                        let _ = write!(stdout, "[{}] ", $tag);
+                        let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
+                        let _ = write!(stdout, "{}", msg);
+                        let _ = write!(stdout, "\n");
+                    });
+                }
+            }
+        }
+    };
 }
 
 pub fn getmem() -> u32 {

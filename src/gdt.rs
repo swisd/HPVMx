@@ -35,33 +35,33 @@ pub fn init() {
         let gdt = addr_of_mut!(GDT);
         // Using append for compatibility with x86_64 0.15.4
         let code_selector = (*gdt).append(Descriptor::kernel_code_segment());
-        hpvm_info!("GDT", "gdt append code selector {:#?}", code_selector);
+        crate::vdebug!("GDT", "gdt append code selector {:#?}", code_selector);
         let data_selector = (*gdt).append(Descriptor::kernel_data_segment());
-        hpvm_info!("GDT", "gdt append data_selector {:#?}", data_selector);
+        crate::vdebug!("GDT", "gdt append data_selector {:#?}", data_selector);
         let tss_selector = (*gdt).append(Descriptor::tss_segment(&*tss));
-        hpvm_info!("GDT", "tss append selector {:#?}", tss_selector);
+        crate::vdebug!("GDT", "tss append selector {:#?}", tss_selector);
 
-        hpvm_info!("GDT", "start gdt load");
+        crate::vdebug!("GDT", "start gdt load");
         hpvm_error!("GDT", "no gdt loading");
         //(*gdt).load();
-        //hpvm_info!("GDT", "gdt load ok");
+        //crate::vdebug!("GDT", "gdt load ok");
 
-        //hpvm_info!("GDT", "set reg DS ES SS to 0");
+        //crate::vdebug!("GDT", "set reg DS ES SS to 0");
         use x86_64::instructions::segmentation::{DS, ES, SS, Segment};
         //DS::set_reg(SegmentSelector(0));
         //ES::set_reg(SegmentSelector(0));
         //SS::set_reg(SegmentSelector(0));
-        // hpvm_info!("GDT", "set reg DS ES SS ok");
+        // crate::vdebug!("GDT", "set reg DS ES SS ok");
         //
-        // hpvm_info!("GDT", "set reg CS");
+        // crate::vdebug!("GDT", "set reg CS");
         // //CS::set_reg(code_selector);
-        // hpvm_info!("GDT", "set reg CS ok with {:#?}", code_selector);
+        // crate::vdebug!("GDT", "set reg CS ok with {:#?}", code_selector);
         //
-        // hpvm_info!("GDT", "load tss {:#?}", tss_selector);
+        // crate::vdebug!("GDT", "load tss {:#?}", tss_selector);
         // //load_tss(tss_selector);
-        // hpvm_info!("GDT", "load tss ok");
+        // crate::vdebug!("GDT", "load tss ok");
         //
-        // hpvm_info!("GDT", "GDT and TSS loaded");
+        // crate::vdebug!("GDT", "GDT and TSS loaded");
         hpvm_warn!("GDT", "gdt may be invalid due to misload of _gdt");
 
         SELECTORS = Some(Selectors {

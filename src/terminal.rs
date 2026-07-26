@@ -23,7 +23,7 @@ use uefi::proto::console::text::{Color, Key};
 use crate::env::{Application, Environment};
 use crate::pm::PackageManager;
 use crate::apps::simple_app::SimpleApp;
-use crate::hpvmlog::LOGGING_SILENCED;
+use crate::hpvmlog::{LOGGING_SILENCED, set_verbose_debug, verbose_debug_enabled};
 use crate::ui::pixel_graphics::PixelGraphics;
 
 pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manager: &mut PackageManager) {
@@ -63,7 +63,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                         message!("\n", "\nMicro-C Toolchain:\n  micro-c compile [file.micro] - compile source to .asm\n  micro-c run [file.bin] - run compiled binary\n")
                     }
                     "misc" => {
-                        message!("\n", "\n Misc / Other:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n")
+                        message!("\n", "\n Misc / Other:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\n  vdebug [on|off|status] - toggle verbose debug console logs\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n")
                     }
                     "prog" => {
                         message!("\n", "no help for '{}' (yet)", parts[2])
@@ -89,7 +89,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 message!("\n", "Usage: mkdir [directory]");
             } else {
                 match FileSystem::mkdir(parts[1]) {
-                    Ok(_) => hpvm_info!("fs", "directory '{}' created", parts[1]),
+                    Ok(_) => crate::vdebug!("fs", "directory '{}' created", parts[1]),
                     Err(e) => hpvm_error!("fs", "failed to create directory: {}", e),
                 }
             }
@@ -99,7 +99,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 message!("\n", "Usage: touch [file]");
             } else {
                 match FileSystem::touch(parts[1]) {
-                    Ok(_) => hpvm_info!("fs", "file '{}' created", parts[1]),
+                    Ok(_) => crate::vdebug!("fs", "file '{}' created", parts[1]),
                     Err(e) => hpvm_error!("fs", "failed to create file: {}", e),
                 }
             }
@@ -109,7 +109,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 message!("\n", "Usage: cpy [source] [destination]");
             } else {
                 match FileSystem::copy(parts[1], parts[2]) {
-                    Ok(_) => hpvm_info!("fs", "file '{}' copied to '{}'", parts[1], parts[2]),
+                    Ok(_) => crate::vdebug!("fs", "file '{}' copied to '{}'", parts[1], parts[2]),
                     Err(e) => hpvm_error!("fs", "failed to copy file: {}", e),
                 }
             }
@@ -119,7 +119,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 message!("\n", "Usage: mov [source] [destination]");
             } else {
                 match FileSystem::move_file(parts[1], parts[2]) {
-                    Ok(_) => hpvm_info!("fs", "file '{}' moved to '{}'", parts[1], parts[2]),
+                    Ok(_) => crate::vdebug!("fs", "file '{}' moved to '{}'", parts[1], parts[2]),
                     Err(e) => hpvm_error!("fs", "failed to move file: {}", e),
                 }
             }
@@ -129,7 +129,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 message!("\n", "Usage: rm [file]");
             } else {
                 match FileSystem::remove(parts[1]) {
-                    Ok(_) => hpvm_info!("fs", "file '{}' deleted", parts[1]),
+                    Ok(_) => crate::vdebug!("fs", "file '{}' deleted", parts[1]),
                     Err(e) => hpvm_error!("fs", "failed to delete file: {}", e),
                 }
             }
@@ -148,7 +148,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 message!("\n", "Usage: clon [source] [destination]");
             } else {
                 match FileSystem::clone_dir(parts[1], parts[2]) {
-                    Ok(_) => hpvm_info!("fs", "directory '{}' cloned to '{}'", parts[1], parts[2]),
+                    Ok(_) => crate::vdebug!("fs", "directory '{}' cloned to '{}'", parts[1], parts[2]),
                     Err(e) => hpvm_error!("fs", "failed to clone directory: {}", e),
                 }
             }
@@ -199,6 +199,23 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
             return;
         },
         "mouse-debug" => crate::graphics::Cursor::debug_mouse(),
+        "vdebug" => {
+            match command.get(1).copied() {
+                Some("on") => {
+                    set_verbose_debug(true);
+                    crate::vdebug!("Debug", "verbose debug logging enabled");
+                }
+                Some("off") => {
+                    set_verbose_debug(false);
+                    crate::vdebug!("Debug", "verbose debug logging disabled");
+                }
+                Some("status") | None => {
+                    let status = if verbose_debug_enabled() { "on" } else { "off" };
+                    crate::vdebug!("Debug", "verbose debug logging is {}", status);
+                }
+                _ => message!("\n", "Usage: vdebug [on|off|status]"),
+            }
+        }
 
         "shutdown" => {
             if command.len() > 1 {
@@ -290,7 +307,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 devices::net::status();
             } else if parts[1] == "up" {
                 match devices::net_hw::init() {
-                    Ok(()) => hpvm_info!("net", "NIC initialized (SNP)"),
+                    Ok(()) => crate::vdebug!("net", "NIC initialized (SNP)"),
                     Err(e) => hpvm_warn!("net", "NIC init failed: {}", e),
                 }
             } else {
@@ -426,15 +443,15 @@ fn enter(itm: &str) {
 }
 
 fn start_kernel(path: &str) {
-    hpvm_info!("kernel", "attempting to load kernel from: {}", path);
+    crate::vdebug!("kernel", "attempting to load kernel from: {}", path);
 
     match KernelLoader::load_kernel(path) {
         Ok(kernel_data) => {
-            hpvm_info!("kernel", "kernel loaded, {} bytes", kernel_data.len());
+            crate::vdebug!("kernel", "kernel loaded, {} bytes", kernel_data.len());
 
             match KernelLoader::validate_kernel(&kernel_data) {
                 Ok(entry_point) => {
-                    hpvm_info!("kernel", "kernel validated, entry point: {:#x}", entry_point);
+                    crate::vdebug!("kernel", "kernel validated, entry point: {:#x}", entry_point);
                     hpvm_warn!("kernel", "jumping to kernel... goodbye!");
 
                     unsafe {
@@ -452,11 +469,11 @@ fn start_kernel(path: &str) {
 
             match KernelLoader::load_kernel_dangerous(path) {
                 Ok(kernel_data) => {
-                    hpvm_info!("kernel", "kernel loaded, {} bytes", kernel_data.len());
+                    crate::vdebug!("kernel", "kernel loaded, {} bytes", kernel_data.len());
 
                     match KernelLoader::validate_kernel(&kernel_data) {
                         Ok(entry_point) => {
-                            hpvm_info!("kernel", "kernel validated, entry point: {:#x}", entry_point);
+                            crate::vdebug!("kernel", "kernel validated, entry point: {:#x}", entry_point);
                             hpvm_warn!("kernel", "jumping to kernel... goodbye!");
 
                             unsafe {
@@ -484,12 +501,12 @@ fn start_kernel(path: &str) {
 fn shutdown(mode: char) {
     match mode {
         's' => {
-            hpvm_info!("HPVMx", "shutting down...");
+            crate::vdebug!("HPVMx", "shutting down...");
             let mmap = unsafe { boot::exit_boot_services(None) };
 
-            hpvm_info!("malloc", "Memory Map:");
+            crate::vdebug!("malloc", "Memory Map:");
             for desc in mmap.entries() {
-                hpvm_info!("malloc",
+                crate::vdebug!("malloc",
             "start=0x{:016x} size=0x{:016x} type={:?}, attr={:?}",
             desc.phys_start,
             desc.page_count * 4096,
@@ -500,10 +517,10 @@ fn shutdown(mode: char) {
             runtime::reset(ResetType::SHUTDOWN, Status::SUCCESS, Some(&[0]))
         }
         'r' => {
-            hpvm_info!("HPVMx", "restarting...");
+            crate::vdebug!("HPVMx", "restarting...");
             runtime::reset(ResetType::SHUTDOWN, Status::SUCCESS, Some(&[255]))
         }
-        _ => { hpvm_info!("x", "incorrect, command") }
+        _ => { crate::vdebug!("x", "incorrect, command") }
     }
 }
 
@@ -535,7 +552,7 @@ fn handle_vm_command(command: &[&str]) {
                         };
 
                         match hv.create_vm(name, memory_mb, vcpus) {
-                            Ok(vm_id) => hpvm_info!("VMM", "VM '{}' created with ID: {}", name, vm_id),
+                            Ok(vm_id) => crate::vdebug!("VMM", "VM '{}' created with ID: {}", name, vm_id),
                             Err(e) => hpvm_error!("VMM", "failed to create VM: {}", e),
                         }
                     }
@@ -563,7 +580,7 @@ fn handle_vm_command(command: &[&str]) {
                             }
                         };
                         match hv.start_vm(vm_id) {
-                            Ok(_) => hpvm_info!("VMM", "VM {} started", vm_id),
+                            Ok(_) => crate::vdebug!("VMM", "VM {} started", vm_id),
                             Err(e) => hpvm_error!("VMM", "failed to start VM: {}", e),
                         }
                     }
@@ -580,7 +597,7 @@ fn handle_vm_command(command: &[&str]) {
                             }
                         };
                         match hv.stop_vm(vm_id) {
-                            Ok(_) => hpvm_info!("VMM", "VM {} stopped", vm_id),
+                            Ok(_) => crate::vdebug!("VMM", "VM {} stopped", vm_id),
                             Err(e) => hpvm_error!("VMM", "failed to stop VM: {}", e),
                         }
                     }
@@ -597,7 +614,7 @@ fn handle_vm_command(command: &[&str]) {
                             }
                         };
                         match hv.delete_vm(vm_id) {
-                            Ok(_) => hpvm_info!("VMM", "VM {} deleted", vm_id),
+                            Ok(_) => crate::vdebug!("VMM", "VM {} deleted", vm_id),
                             Err(e) => hpvm_error!("VMM", "failed to delete VM: {}", e),
                         }
                     }
@@ -615,7 +632,7 @@ fn handle_vm_command(command: &[&str]) {
                         };
                         let path = command[3];
                         match hv.boot_vm_with_media(vm_id, path) {
-                            Ok(_) => hpvm_info!("Boot", "VM {} boot process initiated", vm_id),
+                            Ok(_) => crate::vdebug!("Boot", "VM {} boot process initiated", vm_id),
                             Err(e) => hpvm_error!("Boot", "failed to boot VM: {}", e),
                         }
                     }
@@ -639,7 +656,7 @@ fn handle_vm_command(command: &[&str]) {
                             }
                         };
                         match hv.run_system_in_vm(command[2], command[3], memory_mb, vcpus) {
-                            Ok(system) => hpvm_info!(
+                            Ok(system) => crate::vdebug!(
                                 "Boot",
                                 "VM {} running {} system from {}",
                                 system.vm_id,
@@ -669,7 +686,7 @@ fn handle_vm_command(command: &[&str]) {
                             }
                         };
                         match hv.trigger_autolytic_response(vm_id, error_code) {
-                            Ok(_) => hpvm_info!("VMM", "Autolytic response triggered for VM {}", vm_id),
+                            Ok(_) => crate::vdebug!("VMM", "Autolytic response triggered for VM {}", vm_id),
                             Err(e) => hpvm_error!("VMM", "failed to trigger response: {}", e),
                         }
                     }
@@ -707,7 +724,7 @@ fn handle_vmm_command(command: &[&str]) {
                     Some(&"dls-inspect") => {
                         let vm_id = command.get(2).and_then(|id| id.parse::<u32>().ok()).unwrap_or(0);
                         match hv.inspect_vm_unit_security(vm_id) {
-                            Ok(_) => hpvm_info!("DLS", "VM {} unit inspection complete", vm_id),
+                            Ok(_) => crate::vdebug!("DLS", "VM {} unit inspection complete", vm_id),
                             Err(e) => hpvm_error!("DLS", "VM {} unit inspection failed: {}", vm_id, e),
                         }
                     }
@@ -724,7 +741,7 @@ fn handle_vmm_command(command: &[&str]) {
                     Some(&"dls-save") => {
                         let path = command.get(2).copied().unwrap_or("/DLS_ANALYSIS.JSON");
                         match hv.save_security_training_report(path) {
-                            Ok(_) => hpvm_info!("DLS", "saved training report to {}", path),
+                            Ok(_) => crate::vdebug!("DLS", "saved training report to {}", path),
                             Err(e) => hpvm_error!("DLS", "failed to save training report: {}", e),
                         }
                     }
@@ -745,38 +762,21 @@ fn boot_vm_with_media(vm_id: u32, media_path: &str) {
     unsafe {
         match HYPERVISOR.as_mut() {
             Some(hv) => {
-                // Determine media type from file extension
-                let media_type = if media_path.ends_with(".iso") {
-                    hpvm_info!("Boot", "detected ISO image");
+                let normalized = media_path.to_ascii_lowercase();
+                let media_type = if normalized.ends_with(".iso") {
                     "ISO"
-                } else if media_path.ends_with(".efi") {
-                    hpvm_info!("Boot", "detected EFI executable");
+                } else if normalized.ends_with(".efi") {
                     "EFI"
-                } else if media_path.ends_with(".img") {
-                    hpvm_info!("Boot", "detected disk image");
-                    "IMG"
                 } else {
-                    hpvm_warn!("Boot", "unknown media type, assuming disk image");
-                    "IMG"
+                    "Disk"
                 };
 
-                // Load the media file
-                match crate::load_boot_media(media_path) {
-                    Ok(media_data) => {
-                        hpvm_info!("Boot", "loaded {} bytes from '{}'", media_data.len(), media_path);
-
-                        // Attempt to boot the VM with the media
-                        match hv.boot_vm_with_media(vm_id, media_path) {
-                            Ok(_) => {
-                                hpvm_info!("Boot", "VM {} booted with {}", vm_id, media_type);
-                            }
-                            Err(e) => {
-                                hpvm_error!("Boot", "failed to boot VM {}: {}", vm_id, e);
-                            }
-                        }
+                match hv.boot_vm_with_media(vm_id, media_path) {
+                    Ok(_) => {
+                        crate::vdebug!("Boot", "VM {} booted with {} media '{}'", vm_id, media_type, media_path);
                     }
                     Err(e) => {
-                        hpvm_error!("Boot", "failed to load media '{}': {}", media_path, e);
+                        hpvm_error!("Boot", "failed to boot VM {}: {}", vm_id, e);
                     }
                 }
             }
@@ -788,11 +788,11 @@ fn boot_vm_with_media(vm_id: u32, media_path: &str) {
 #[allow(static_mut_refs)]
 /// Run a standalone EFI application
 fn run_efi_application(efi_path: &str, args: &[&str]) {
-    hpvm_info!("EFI", "loading EFI application from '{}'", efi_path);
+    crate::vdebug!("EFI", "loading EFI application from '{}'", efi_path);
 
     match crate::load_boot_media(efi_path) {
         Ok(efi_data) => {
-            hpvm_info!("EFI", "loaded {} bytes", efi_data.len());
+            crate::vdebug!("EFI", "loaded {} bytes", efi_data.len());
 
             // Parse EFI header
             if efi_data.len() < 64 {
@@ -805,7 +805,7 @@ fn run_efi_application(efi_path: &str, args: &[&str]) {
                 hpvm_warn!("EFI", "file doesn't start with MZ signature");
             }
 
-            hpvm_info!("EFI", "executing application with {} arguments", args.len());
+            crate::vdebug!("EFI", "executing application with {} arguments", args.len());
 
             // In a real implementation, you would:
             // 1. Set up page tables and memory mapping
@@ -813,7 +813,7 @@ fn run_efi_application(efi_path: &str, args: &[&str]) {
             // 3. Call the entry point
             // For now, we'll just log the arguments
             for (i, arg) in args.iter().enumerate() {
-                hpvm_info!("EFI", "  arg[{}]: {}", i, arg);
+                crate::vdebug!("EFI", "  arg[{}]: {}", i, arg);
             }
 
             hpvm_warn!("EFI", "EFI execution not fully implemented in this build");
@@ -836,7 +836,7 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
     }
     if crate::FileSystem::read_file(crate::registry::DEFAULT_SYSTEM_REG_PATH).is_ok() {
         match crate::registry::load_system_registry(crate::registry::DEFAULT_SYSTEM_REG_PATH, &mut dashboard.settings) {
-            Ok(_) => hpvm_info!("reg", "loaded {}", crate::registry::DEFAULT_SYSTEM_REG_PATH),
+            Ok(_) => crate::vdebug!("reg", "loaded {}", crate::registry::DEFAULT_SYSTEM_REG_PATH),
             Err(e) => hpvm_warn!("reg", "could not load registry: {}", e),
         }
     }
@@ -1072,7 +1072,17 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                                 4 => { let _ = hv.delete_vm(vm_id); }
                                 5 => { let _ = hv.save_vm_metadata("/VMSTATE"); }
                                 6 => { let _ = hv.restore_vm_metadata("/VMSTATE"); }
-                                7 => { dashboard.add_vm_console_window(vm_id, "attached VM", "VM"); }
+                                7 => {
+                                    let boot_media = "boot.vhd";
+                                    match hv.boot_vm_with_media(vm_id, boot_media) {
+                                        Ok(_) => {
+                                            dashboard.add_vm_console_window(vm_id, boot_media, "Disk");
+                                        }
+                                        Err(e) => {
+                                            hpvm_error!("VMM", "failed to boot VM {} into window: {}", vm_id, e);
+                                        }
+                                    }
+                                }
                                 _ => {}
                             }
                         }
@@ -1087,7 +1097,7 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                 unsafe {
                     if let Some(hv) = HYPERVISOR.as_mut() {
                         if let Ok(vm_id) = hv.create_vm(&name, mem, vcpus) {
-                            hpvm_info!("VMM", "Created VM '{}' via UI", name);
+                            crate::vdebug!("VMM", "Created VM '{}' via UI", name);
                         }
                     }
                 }
@@ -1097,7 +1107,7 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
             }
 
             if dashboard.exit_requested() {
-                hpvm_info!("Dashboard", "exiting dashboard");
+                crate::vdebug!("Dashboard", "exiting dashboard");
                 if let Some(mut pg) = PixelGraphics::new() {
                     let mut pg = pg.with_backbuffer();
                     let (width, height) = pg.resolution();
@@ -1151,7 +1161,7 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
 #[allow(static_mut_refs, dead_code)]
 /// Attach to a VM's console for interaction
 fn attach_vm_console(vm_id: u32) {
-    hpvm_info!("Console", "attaching to VM {} console", vm_id);
+    crate::vdebug!("Console", "attaching to VM {} console", vm_id);
 
     unsafe {
         match HYPERVISOR.as_mut() {
@@ -1167,7 +1177,7 @@ fn attach_vm_console(vm_id: u32) {
                     return;
                 }
 
-                hpvm_info!("Console", "connected to VM {} console (type 'exit' to disconnect)", vm_id);
+                crate::vdebug!("Console", "connected to VM {} console (type 'exit' to disconnect)", vm_id);
                 hpvm_warn!("Console", "use Ctrl+Alt+D to disconnect");
 
                 // Simple console loop
@@ -1185,12 +1195,12 @@ fn attach_vm_console(vm_id: u32) {
 
                     // Check exit conditions
                     if trimmed == "exit" || trimmed == "quit" {
-                        hpvm_info!("Console", "disconnecting from VM console");
+                        crate::vdebug!("Console", "disconnecting from VM console");
                         break;
                     }
 
                     // In a real implementation, send input to VM's serial port/console
-                    hpvm_info!("Console", "sent to VM: {}", trimmed);
+                    crate::vdebug!("Console", "sent to VM: {}", trimmed);
                 }
             }
             None => hpvm_error!("Console", "hypervisor not initialized"),
@@ -1205,7 +1215,7 @@ fn load_boot_media(path: &str) -> Result<Vec<u8>, &'static str> {
     // which already has file loading capability
     match KernelLoader::load_kernel(path) {
         Ok(data) => {
-            hpvm_info!("FileIO", "loaded {} bytes from '{}'", data.len(), path);
+            crate::vdebug!("FileIO", "loaded {} bytes from '{}'", data.len(), path);
             Ok(data)
         }
         Err(e) => {
@@ -1214,7 +1224,7 @@ fn load_boot_media(path: &str) -> Result<Vec<u8>, &'static str> {
 
             match KernelLoader::load_kernel_dangerous(path) {
                 Ok(data) => {
-                    hpvm_info!("FileIO", "loaded {} bytes from '{}' in dangerous mode", data.len(), path);
+                    crate::vdebug!("FileIO", "loaded {} bytes from '{}' in dangerous mode", data.len(), path);
                     Ok(data)
                 }
                 Err(e) => {
