@@ -12,35 +12,55 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Set up Emscripten SDK
+        uses: mymindstorm/setup-emsdk@v13
+        with:
+          version: 3.1.50 # Stable Emscripten release for QEMU build targets
 
-      - name: Build QEMU WASM from Source
+      - name: Install System Build Dependencies
         run: |
-          mkdir -p output
-          
-          # 1. Clone patched QEMU WASM repository
-          git clone --depth 1 https://github.com/ktock/qemu-wasm.git qemu-src
-          
-          # 2. Build the self-contained Emscripten build environment container
-          docker build -t buildqemu ./qemu-src
-          
-          # 3. Run container and build qemu-system-x86_64 inside
-          CONTAINER_ID=$(docker run -d buildqemu tail -f /dev/null)
-          
-          docker exec $CONTAINER_ID /bin/bash -c "
-            cd /qemu && \
-            emconfigure ./configure --static --disable-tools --target-list=x86_64-softmmu && \
-            emmake make -j\$(nproc)
-          "
-          
-          # 4. Extract generated artifacts
-          docker cp $CONTAINER_ID:/qemu/build/qemu-system-x86_64.js ./output/qemu-system-x86_64.js
-          docker cp $CONTAINER_ID:/qemu/build/qemu-system-x86_64.wasm ./output/qemu-system-x86_64.wasm
-          
-          docker rm -f $CONTAINER_ID
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            ninja-build \
+            pkg-config \
+            libglib2.0-dev \
+            libpixman-1-dev \
+            flex \
+            bison \
+            python3 \
+            python3-pip
 
-      - name: Commit and Push Binaries
+      - name: Clone QEMU Source
+        run: |
+          # Clone stable QEMU source with WASM patches
+          git clone --depth 1 https://github.com/ktock/qemu-wasm.git qemu-src
+
+      - name: Configure and Build QEMU to WebAssembly
+        run: |
+          cd qemu-src
+          
+          # Configure minimal x86_64 software emulation target for Emscripten
+          emconfigure ./configure \
+            --target-list=x86_64-softmmu \
+            --static \
+            --disable-tools \
+            --disable-cocoa \
+            --disable-sdl \
+            --disable-gtk \
+            --disable-vnc \
+            --disable-kvm \
+            --disable-xen
+          
+          # Compile system target using all CPU threads
+          emmake make -j$(nproc)
+          
+          # Copy outputs to output directory
+          mkdir -p ../output
+          cp build/qemu-system-x86_64.js ../output/qemu-system-x86_64.js
+          cp build/qemu-system-x86_64.wasm ../output/qemu-system-x86_64.wasm
+
+      - name: Commit and Push Binaries to Web Folder
         run: |
           mkdir -p web
           cp output/qemu-system-x86_64.js web/qemu-system-x86_64.js
@@ -55,5 +75,5 @@ jobs:
             git commit -m "ci: update precompiled qemu-system-x86_64 WASM binaries"
             git push
           else
-            echo "No changes detected in compiled binaries."
+            echo "No binary changes detected."
           fi
