@@ -1,10 +1,7 @@
 name: Build QEMU WASM Engine
 
 on:
-  workflow_dispatch: # Allows manual trigger from GitHub UI
-  push:
-    paths:
-      - 'qemu/**' # Optional: Trigger if you keep QEMU source/patches in a subfolder
+  workflow_dispatch:
 
 jobs:
   build-qemu-wasm:
@@ -22,16 +19,28 @@ jobs:
         run: |
           mkdir -p output
           
-          # Build QEMU using the specialized Emscripten compilation container
-          docker build -t qemu-wasm-builder https://github.com/ktock/qemu-wasm-sample.git#main
+          # 1. Clone patched QEMU WASM repository
+          git clone --depth 1 https://github.com/ktock/qemu-wasm.git qemu-src
           
-          # Run container and extract compiled WASM and JS outputs
-          CONTAINER_ID=$(docker create qemu-wasm-builder)
+          # 2. Build the self-contained Emscripten build environment container
+          docker build -t buildqemu ./qemu-src
+          
+          # 3. Run container and build qemu-system-x86_64 inside
+          CONTAINER_ID=$(docker run -d buildqemu tail -f /dev/null)
+          
+          docker exec $CONTAINER_ID /bin/bash -c "
+            cd /qemu && \
+            emconfigure ./configure --static --disable-tools --target-list=x86_64-softmmu && \
+            emmake make -j\$(nproc)
+          "
+          
+          # 4. Extract generated artifacts
           docker cp $CONTAINER_ID:/qemu/build/qemu-system-x86_64.js ./output/qemu-system-x86_64.js
           docker cp $CONTAINER_ID:/qemu/build/qemu-system-x86_64.wasm ./output/qemu-system-x86_64.wasm
-          docker rm $CONTAINER_ID
+          
+          docker rm -f $CONTAINER_ID
 
-      - name: Commit and Push Binaries to Repository
+      - name: Commit and Push Binaries
         run: |
           mkdir -p web
           cp output/qemu-system-x86_64.js web/qemu-system-x86_64.js
@@ -42,10 +51,9 @@ jobs:
           
           git add web/qemu-system-x86_64.js web/qemu-system-x86_64.wasm
           
-          # Only commit if changes were detected
           if git status --porcelain | grep -E 'qemu-system-x86_64\.(js|wasm)'; then
             git commit -m "ci: update precompiled qemu-system-x86_64 WASM binaries"
             git push
           else
-            echo "No changes in compiled WASM outputs."
+            echo "No changes detected in compiled binaries."
           fi
