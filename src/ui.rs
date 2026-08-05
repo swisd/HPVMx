@@ -28,7 +28,7 @@ pub mod graphics3d;
 
 use crate::{handle_vm_command, hpvm_warn, message, terminal};
 use crate::pm::{Package, PackageManager, PackageType};
-use pixel_graphics::{PixelGraphics, TreeViewNode};
+use pixel_graphics::{PixelGraphics, TreeViewNode, icons};
 use crate::apps::error::ErrorApp;
 use crate::env::{Application, SteppedApplicationContext, WindowState};
 use crate::input::ScanCodeV2;
@@ -629,23 +629,31 @@ impl DashboardUI {
             pg.clear(0x222222);
 
             // Draw header
-            pg.fill_rect(0, 0, width, 48, 0x008080); // Cyan-ish
-            pg.draw_text(width / 2 - 160, 16, "HPVMx - Hypervisor Management Console", 0xFFFFFF);
+            pg.fill_rect(0, 0, width, 32, 0x608080); // Cyan-ish
+            // pg.draw_text(width / 2 - 160, 16, "HPVMx - Hypervisor Management Console", 0xFFFFFF);
 
             // Draw clock in top right
             if let Ok(time) = runtime::get_time() {
-                let time_str = alloc::format!("{:02}:{:02}:{:02}", time.hour(), time.minute(), time.second());
-                pg.draw_text(width - 100, 16, &time_str, 0xFFFF00); // Yellow clock
+                let time_str = alloc::format!("{:02}:{:02}", time.hour(), time.minute());
+                pg.draw_text(width - 50, 12, &time_str, 0xFFFF00); // Yellow clock
             }
+
+            pg.draw_text(width - 150, 8, &format!("{} fps", self.resources.fps), 0xFFFFFF);
+            pg.draw_text(width - 200, 8, &format!("{} ms", self.resources.frame_ms), 0xFFFFFF);
+            pg.draw_text(width - 250, 8, &format!("{}%", self.resources.cpu_usage), 0xFFFFFF);
+            pg.draw_text(width - 165, 19, &format!("{} MHz", TSC_PER_US), 0xFFFFFF);
+            pg.draw_text(width - 250, 19, &format!("{} MB", self.resources.used_memory_mb), 0xFFFFFF);
 
             pg.draw_text(width - 100, 2, if self.ctrl_mode {"ctrl"} else {""}, 0xFFFFFF);
             pg.draw_text((width - 100) + 33, 2, if self.alt_mode {"alt"} else {""}, 0xFFFFFF);
             pg.draw_text((width - 100) + 60, 2, if self.fn_mode {"fn"} else {""}, 0xFFFFFF);
 
-            pg.draw_text(40, 1, "   __ _____ _   ____  ___", 0xFFFFFF);
-            pg.draw_text(40, 11, "  / // / _ \\ | / /  |/  /_ __", 0xFFFFFF);
-            pg.draw_text(40, 21, " / _  / ___/ |/ / /|_/ /\\ \\ /", 0xFFFFFF);
-            pg.draw_text(40, 31, "/_//_/_/   |___/_/  /_//_\\_\\", 0xFFFFFF);
+            // pg.draw_text(40, 1, "   __ _____ _   ____  ___", 0xFFFFFF);
+            // pg.draw_text(40, 11, "  / // / _ \\ | / /  |/  /_ __", 0xFFFFFF);
+            // pg.draw_text(40, 21, " / _  / ___/ |/ / /|_/ /\\ \\ /", 0xFFFFFF);
+            // pg.draw_text(40, 31, "/_//_/_/   |___/_/  /_//_\\_\\", 0xFFFFFF);
+
+            pg.draw_icon(5, 5, 128, 128, &icons::HPVMX_128_CLR_ICON_DATA);
 
             // Draw navigation
             pg.fill_rect(0, 48, width, 32, 0x444444); // Dark Gray
@@ -661,7 +669,8 @@ impl DashboardUI {
             let gutter = 12usize; // space between widgets/rows
             let line_h = 15usize; // standard text line height
 
-            // Content area based on selected tab
+            // Content area based on selected tab, will be cnaged soon
+            //todo: make the tabs individual windows/apps instead
             match self.selected_tab {
                 DashboardTab::Overview => {
                     pg.draw_text(20, 100, "System Overview", 0x00FF00);
@@ -1721,12 +1730,6 @@ impl DashboardUI {
             // Draw footer
             pg.fill_rect(0, height - 48, width, 48, 0x000080); // Blue
             pg.draw_text(10, height - 32, " Use keys O, V, R, S, N, D, C, T, Z to switch tabs | X to shutdown", 0xFFFFFF);
-            pg.draw_text(width - 60, height - 13, &format!("{} fps", self.resources.fps), 0xFFFFFF);
-            pg.draw_text(width - 120, height - 13, &format!("{} ms", self.resources.frame_ms), 0xFFFFFF);
-            pg.draw_text(width - 200, height - 13, &format!("{} MHz", TSC_PER_US), 0xFFFFFF);
-            pg.draw_text(width - 250, height - 13, &format!("{}%", self.resources.cpu_usage), 0xFFFFFF);
-            pg.draw_text(width - 330, height - 13, &format!("{} MB", self.resources.used_memory_mb), 0xFFFFFF);
-            pg.draw_rect_outline(width - 340, height - 15, 338, 14, 0xCCCCCC);
 
             // Update and draw cursor
             if self.iter % 20 == 0 {

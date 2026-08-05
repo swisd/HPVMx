@@ -22,6 +22,7 @@ use crate::apps::mc_app::MinecraftApp;
 use crate::apps::browser::BrowserApp;
 use crate::apps::micro_ide::MicroIdeApp;
 use crate::apps::resource_tester::SysTestApp;
+use crate::apps::x_storage::X_Storage;
 use crate::env::Runnable;
 use crate::filesystem::FileSystem;
 use crate::ui::pixel_graphics::icons;
@@ -45,6 +46,19 @@ pub mod vm_console;
 
 #[path = "./core/error.rs"]
 pub(crate) mod error;
+mod x_overview;
+mod x_apps;
+mod x_vms;
+mod x_createvm;
+mod x_network;
+mod x_resources;
+mod x_console;
+mod x_test;
+mod x_devices;
+mod x_storage;
+mod x_editor;
+mod x_settings;
+mod x_packages;
 
 /// A type alias for a function that creates a boxed app and returns its preferred window dimensions.
 pub type AppConstructor = fn() -> (Box<dyn Runnable>, (usize, usize));
@@ -124,6 +138,11 @@ pub(crate) static APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
         let dims = crate::env::AppInfo::dimensions(&app);
         (Box::new(app), dims)
     }, icons::WARNING_32_ICON_DATA, "0.1.0"),
+    ("X_FileManager", || {
+        let app = X_Storage::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::FLOPPY_SAVE_32_ICON_DATA, "same"),
 ];
 
 // pub(crate) static HIDDEN_APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
