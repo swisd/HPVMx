@@ -17,3 +17,9 @@ Stats will be moved to the bar, top right, as well as time
 bottom bar will show all open windows with other window-dep stats, such as notofications, active window count, etc
 
 ** ---------- **
+
+
+
+- make a uefi and kernel mode, so that os can run at uefi ring 0 and os level
+
+- make/force goo upscale to monitor resolution 
