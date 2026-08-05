@@ -1,6 +1,7 @@
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::any::Any;
 use uefi::proto::console::text::{Key, ScanCode};
 
 use crate::env::{AppInfo, Environment, Runnable};
@@ -136,5 +137,13 @@ impl Runnable for MicroIdeApp {
             }
             _ => {}
         }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

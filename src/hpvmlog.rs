@@ -17,7 +17,7 @@ const MAX_LOGS: usize = 4096;
 pub static mut LOG_BUFFER: Option<Vec<LogEntry>> = None;
 static LOG_COUNT: AtomicUsize = AtomicUsize::new(0);
 pub static mut LOGGING_SILENCED: bool = false;
-pub static mut VERBOSE_DEBUG_ENABLED: bool = false;
+pub static mut VERBOSE_DEBUG_ENABLED: bool = true;
 pub static mut BUSY_TSC: u64 = 0;
 
 pub fn set_verbose_debug(enabled: bool) {

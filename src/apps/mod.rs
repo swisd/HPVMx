@@ -23,6 +23,18 @@ use crate::apps::browser::BrowserApp;
 use crate::apps::micro_ide::MicroIdeApp;
 use crate::apps::resource_tester::SysTestApp;
 use crate::apps::x_storage::X_Storage;
+use crate::apps::x_overview::X_Overview;
+use crate::apps::x_vms::X_VMs;
+use crate::apps::x_resources::X_Resources;
+use crate::apps::x_apps::X_Apps;
+use crate::apps::x_network::X_Network;
+use crate::apps::x_console::X_Console;
+use crate::apps::x_devices::X_Devices;
+use crate::apps::x_settings::X_Settings;
+use crate::apps::x_packages::X_Packages;
+use crate::apps::x_test::X_Test;
+use crate::apps::x_createvm::X_CreateVM;
+use crate::apps::x_editor::X_Editor;
 use crate::env::Runnable;
 use crate::filesystem::FileSystem;
 use crate::ui::pixel_graphics::icons;
@@ -46,19 +58,19 @@ pub mod vm_console;
 
 #[path = "./core/error.rs"]
 pub(crate) mod error;
-mod x_overview;
-mod x_apps;
-mod x_vms;
-mod x_createvm;
-mod x_network;
-mod x_resources;
-mod x_console;
-mod x_test;
-mod x_devices;
-mod x_storage;
-mod x_editor;
-mod x_settings;
-mod x_packages;
+pub mod x_overview;
+pub mod x_apps;
+pub mod x_vms;
+pub mod x_createvm;
+pub mod x_network;
+pub mod x_resources;
+pub mod x_console;
+pub mod x_test;
+pub mod x_devices;
+pub mod x_storage;
+pub mod x_editor;
+pub mod x_settings;
+pub mod x_packages;
 
 /// A type alias for a function that creates a boxed app and returns its preferred window dimensions.
 pub type AppConstructor = fn() -> (Box<dyn Runnable>, (usize, usize));
@@ -142,7 +154,67 @@ pub(crate) static APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
         let app = X_Storage::new();
         let dims = crate::env::AppInfo::dimensions(&app);
         (Box::new(app), dims)
-    }, icons::FLOPPY_SAVE_32_ICON_DATA, "same"),
+    }, icons::CUBE_WINDOW_RED_32_ICON_DATA, "same"),
+    ("X_Overview", || {
+        let app = X_Overview::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::CUBE_WINDOW_RED_32_ICON_DATA, "1.0.0"),
+    ("X_VMs", || {
+        let app = X_VMs::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::CUBE_WINDOW_RED_32_ICON_DATA, "1.0.0"),
+    ("X_Resources", || {
+        let app = X_Resources::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::INTEGRATED_CIRCUIT_32_ICON_DATA, "1.0.0"),
+    ("X_Apps", || {
+        let app = X_Apps::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::ADD_PLUS_32_ICON_DATA, "1.0.0"),
+    ("X_Network", || {
+        let app = X_Network::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::COMPUTE_UNIT_V_GLOBE_32_ICON_DATA, "1.0.0"),
+    ("X_Console", || {
+        let app = X_Console::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::COM_PORT_32_ICON_DATA, "1.0.0"),
+    ("X_Devices", || {
+        let app = X_Devices::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::INTEGRATED_CIRCUIT_32_ICON_DATA, "1.0.0"),
+    ("X_Settings", || {
+        let app = X_Settings::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::GEAR_YB_32_ICON_DATA, "1.0.0"),
+    ("X_Packages", || {
+        let app = X_Packages::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::ADD_PLUS_32_ICON_DATA, "1.0.0"),
+    ("X_Test", || {
+        let app = X_Test::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::INTEGRATED_CIRCUIT_32_ICON_DATA, "1.0.0"),
+    ("X_CreateVM", || {
+        let app = X_CreateVM::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::ADD_PLUS_32_ICON_DATA, "1.0.0"),
+    ("X_Editor", || {
+        let app = X_Editor::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::SCRIPT_YELLOW_32_ICON_DATA, "1.0.0"),
 ];
 
 // pub(crate) static HIDDEN_APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[

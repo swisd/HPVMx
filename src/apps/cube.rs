@@ -1,5 +1,6 @@
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::any::Any;
 use libm::{sin, cos};
 use uefi::proto::console::text::Key;
 use crate::env::{AppInfo, Environment, Runnable};
@@ -47,10 +48,9 @@ impl Runnable for CubeApp {
     }
 
     fn draw(&self, graphics: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
-
         let points = [
-            [-1.0, -1.0,  1.0], [ 1.0, -1.0,  1.0], [ 1.0,  1.0,  1.0], [-1.0,  1.0,  1.0], // Front
-            [-1.0, -1.0, -1.0], [ 1.0, -1.0, -1.0], [ 1.0,  1.0, -1.0], [-1.0,  1.0, -1.0], // Back
+            [-1.0, -1.0, 1.0], [1.0, -1.0, 1.0], [1.0, 1.0, 1.0], [-1.0, 1.0, 1.0], // Front
+            [-1.0, -1.0, -1.0], [1.0, -1.0, -1.0], [1.0, 1.0, -1.0], [-1.0, 1.0, -1.0], // Back
         ];
 
         let faces = [
@@ -115,6 +115,14 @@ impl Runnable for CubeApp {
                 }
             }
         }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 impl AppInfo for CubeApp {

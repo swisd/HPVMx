@@ -17,6 +17,19 @@ use crate::apps::AppConstructor;
 use crate::hpvmlog::LOGGING_SILENCED;
 use crate::ui::pixel_graphics::icons::ICON32;
 use crate::ui::pixel_graphics::PixelGraphics;
+use crate::apps::x_overview::X_Overview;
+use crate::apps::x_vms::X_VMs;
+use crate::apps::x_storage::X_Storage;
+use crate::apps::x_resources::X_Resources;
+use crate::apps::x_apps::X_Apps;
+use crate::apps::x_console::X_Console;
+use crate::apps::x_network::X_Network;
+use crate::apps::x_devices::X_Devices;
+use crate::apps::x_settings::X_Settings;
+use crate::apps::x_packages::X_Packages;
+use crate::apps::x_test::X_Test;
+use crate::apps::x_createvm::X_CreateVM;
+use crate::apps::x_editor::X_Editor;
 
 
 pub type EnvironmentVariable = (String, String);
@@ -142,6 +155,8 @@ pub trait Runnable {
     fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment);
     /// Handles a single keyboard input event.
     fn input(&mut self, key: Key);
+    fn as_any(&self) -> &dyn core::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any;
 }
 
 /// Represents a task that runs in the background.
@@ -533,3 +548,270 @@ impl BackgroundSteppedApplicationContext {
 }
 /// Alias of Option\<T\>
 pub type Unknown<T> = Option<T>;
+
+
+
+
+pub struct XSteppedApplicationContext {
+    pub parent: Unknown<Application>,
+    pub application: Application,
+    pub background_tasks: Unknown<Vec<Box<dyn BackgroundTask>>>,
+    pub global: bool,
+    pub metadata: BTreeMap<String, String>,
+    pub environment: Environment,
+    pub local_vars: Vec<String>,
+    pub window: WindowState,
+    pub exit_requested: bool,
+
+    // UI-like environment recreation
+    pub selected_tab: u8, // Using u8 to avoid circular dependency with DashboardTab if possible, or we can use an int
+    pub status_line: String,
+    pub current_path: String,
+    pub cursor: (usize, usize),
+    pub scroll_offset: (usize, usize),
+    pub focused_idx: usize,
+    pub action_idx: usize,
+    pub selection_idx: usize,
+    pub edit_buffer: String,
+    pub search_query: String,
+    pub from_ui: bool,
+}
+
+impl XSteppedApplicationContext {
+    pub fn new(app: Application, background_tasks: Unknown<Vec<Box<dyn BackgroundTask>>>) -> Self {
+        let dims = app.dimensions;
+        Self {
+            parent: None,
+            application: app,
+            background_tasks,
+            global: false,
+            metadata: BTreeMap::new(),
+            environment: Environment::new(),
+            local_vars: Vec::new(),
+            window: WindowState::new(100, 100, dims.0, dims.1),
+            exit_requested: false,
+
+            selected_tab: 0,
+            status_line: String::new(),
+            current_path: String::from("\\"),
+            cursor: (0, 0),
+            scroll_offset: (0, 0),
+            focused_idx: 0,
+            action_idx: 0,
+            selection_idx: 0,
+            edit_buffer: String::new(),
+            search_query: String::new(),
+            from_ui: false,
+        }
+    }
+
+    pub fn with_window_position(mut self, x: usize, y: usize) -> Self {
+        self.window.x = x;
+        self.window.y = y;
+        self
+    }
+
+    pub fn step(&mut self, key: Option<Key>) -> bool {
+        let start_busy = unsafe { core::arch::x86_64::_rdtsc() };
+        if self.exit_requested {
+            return false;
+        }
+
+        // 1. Run application logic
+        self.application.logic(&mut self.local_vars, &mut self.environment);
+
+        // 2. Run background tasks
+        if let Some(tasks) = self.background_tasks.as_mut() {
+            tasks.retain_mut(|task| !task.tick(&mut self.local_vars, &mut self.environment));
+        }
+
+        // 3. Handle forwarded input
+        if let Some(k) = key {
+            self.handle_input(k);
+        }
+
+        let end_busy = unsafe { core::arch::x86_64::_rdtsc() };
+        unsafe {
+            crate::hpvmlog::BUSY_TSC = crate::hpvmlog::BUSY_TSC.saturating_add(end_busy.saturating_sub(start_busy));
+        }
+
+        !self.exit_requested
+    }
+
+    pub fn draw(&self, graphics_entity: &mut PixelGraphics) {
+        let (x, y) = self.window.content_origin();
+        self.application.draw(graphics_entity, &self.local_vars, x, y);
+    }
+
+    pub fn move_window_by(&mut self, dx: isize, dy: isize, bounds: (usize, usize)) {
+        self.window.move_by(dx, dy, bounds);
+    }
+
+    pub fn resize_window_by(&mut self, dw: isize, dh: isize, bounds: (usize, usize)) {
+        self.window.resize_by(dw, dh, bounds);
+    }
+
+    pub fn handle_input(&mut self, key: Key) {
+        use uefi::proto::console::text::ScanCode;
+        match key {
+            Key::Special(ScanCode::ESCAPE) => {
+                self.exit_requested = true;
+            }
+            _ => {
+                self.application.input(key);
+            }
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<XSteppedApplicationContext> {
+        let registry_entry = crate::apps::APP_REGISTRY.iter()
+            .find(|(app_id, _, _, _)| *app_id == name)?;
+
+        let constructor = registry_entry.1;
+        let (app_logic, dims) = constructor();
+
+        let mut app = Application::new(app_logic);
+        app.name = name.to_string();
+        app.dimensions = dims;
+
+        let mut ctx = XSteppedApplicationContext::new(app, None);
+        ctx.window = WindowState::new(100, 100, dims.0, dims.1);
+
+        Some(ctx)
+    }
+
+    pub fn from_name_custom_registry(name: &str, registry: &[(&str, AppConstructor, ICON32, &str)]) -> Option<XSteppedApplicationContext> {
+        let registry_entry = registry.iter()
+            .find(|(app_id, _, _, _)| *app_id == name)?;
+
+        let constructor = registry_entry.1;
+        let (app_logic, dims) = constructor();
+
+        let mut app = Application::new(app_logic);
+        app.name = name.to_string();
+        app.dimensions = dims;
+
+        let mut ctx = XSteppedApplicationContext::new(app, None);
+        ctx.window = WindowState::new(100, 100, dims.0, dims.1);
+
+        Some(ctx)
+    }
+
+    pub fn from_dashboard(ui: &crate::ui::DashboardUI, tab: crate::ui::DashboardTab) -> Self {
+        let name = match tab {
+            crate::ui::DashboardTab::Overview => "X_Overview",
+            crate::ui::DashboardTab::VirtualMachines => "X_VMs",
+            crate::ui::DashboardTab::Storage => "X_FileManager",
+            crate::ui::DashboardTab::Resources => "X_Resources",
+            crate::ui::DashboardTab::Apps => "X_Apps",
+            crate::ui::DashboardTab::Network => "X_Network",
+            crate::ui::DashboardTab::Console => "X_Console",
+            crate::ui::DashboardTab::Devices => "X_Devices",
+            crate::ui::DashboardTab::Settings => "X_Settings",
+            crate::ui::DashboardTab::Packages => "X_Packages",
+            crate::ui::DashboardTab::Test => "X_Test",
+            crate::ui::DashboardTab::CreateVM => "X_CreateVM",
+            crate::ui::DashboardTab::Editor => "X_Editor",
+            _ => "X_Overview",
+        };
+
+        let mut ctx = Self::from_name(name).unwrap_or_else(|| {
+            let (app_logic, dims) = crate::apps::error::ErrorApp::new("App not found");
+            let mut app = Application::new(app_logic);
+            app.name = name.to_string();
+            app.dimensions = dims;
+            XSteppedApplicationContext::new(app, None)
+        });
+
+        ctx.from_ui = true;
+        ctx.selected_tab = tab as u8;
+        ctx.current_path = ui.current_path.clone();
+        ctx.selection_idx = ui.selected_vm_idx;
+
+        match tab {
+            crate::ui::DashboardTab::Overview => {
+                if let Some(overview) = ctx.application.inner.as_any_mut().downcast_mut::<X_Overview>() {
+                    overview.cpu_count = ui.resources.cpu_count;
+                    overview.cpu_usage = ui.resources.cpu_usage;
+                    overview.used_memory_mb = ui.resources.used_memory_mb;
+                    overview.total_memory_mb = ui.resources.total_memory_mb;
+                    overview.disk_read_kbps = ui.resources.disk_read_kbps as u32;
+                    overview.disk_write_kbps = ui.resources.disk_write_kbps as u32;
+                    overview.net_rx_kbps = ui.resources.net_rx_kbps as u32;
+                    overview.net_tx_kbps = ui.resources.net_tx_kbps as u32;
+                    overview.running_vms = ui.vms.iter().filter(|v| v.state.contains("Running")).count();
+                    overview.total_vms = ui.vms.len();
+                    overview.files_count = ui.files.len();
+                    overview.categories_count = ui.categories.len();
+                }
+            }
+            crate::ui::DashboardTab::VirtualMachines => {
+                if let Some(vms_app) = ctx.application.inner.as_any_mut().downcast_mut::<X_VMs>() {
+                    vms_app.vms = ui.vms.clone();
+                    vms_app.selected_vm_idx = ui.selected_vm_idx;
+                    vms_app.vm_action_idx = ui.vm_action_idx;
+                }
+            }
+            crate::ui::DashboardTab::Storage => {
+                if let Some(storage) = ctx.application.inner.as_any_mut().downcast_mut::<X_Storage>() {
+                    storage.current_path = ui.current_path.clone();
+                    storage.files = ui.files.clone();
+                    storage.selected_file_idx = ui.selected_file_idx;
+                    storage.filesys_action_idx = ui.filesys_action_idx;
+                    storage.filesys_pending_action = ui.filesys_pending_action;
+                    storage.status_line = ui.status_line.clone();
+                    storage.filesys_new_counter = ui.filesys_new_counter;
+                }
+            }
+            crate::ui::DashboardTab::Apps => {
+                if let Some(apps) = ctx.application.inner.as_any_mut().downcast_mut::<X_Apps>() {
+                    apps.selected_app_idx = ui.selected_app_idx;
+                }
+            }
+            crate::ui::DashboardTab::Console => {
+                if let Some(console) = ctx.application.inner.as_any_mut().downcast_mut::<X_Console>() {
+                    console.term_buf = ui.term_buf.clone();
+                }
+            }
+            crate::ui::DashboardTab::Resources => {
+                if let Some(res) = ctx.application.inner.as_any_mut().downcast_mut::<X_Resources>() {
+                    res.resources = ui.resources.clone();
+                }
+            }
+            crate::ui::DashboardTab::Network => {
+                if let Some(net) = ctx.application.inner.as_any_mut().downcast_mut::<X_Network>() {
+                    net.selected_network_action_idx = ui.selected_network_action_idx;
+                    net.network_target = ui.network_target.clone();
+                }
+            }
+            crate::ui::DashboardTab::Devices => {
+                if let Some(dev) = ctx.application.inner.as_any_mut().downcast_mut::<X_Devices>() {
+                    dev.categories = ui.categories.clone();
+                    dev.selected_device_idx = ui.selected_device_idx;
+                }
+            }
+            crate::ui::DashboardTab::Settings => {
+                if let Some(settings) = ctx.application.inner.as_any_mut().downcast_mut::<X_Settings>() {
+                    settings.settings = ui.settings.clone();
+                    settings.selected_settings_idx = ui.selected_settings_idx;
+                }
+            }
+            crate::ui::DashboardTab::Packages => {
+                if let Some(pkg) = ctx.application.inner.as_any_mut().downcast_mut::<X_Packages>() {
+                    pkg.selected_package_idx = ui.selected_package_idx;
+                }
+            }
+            crate::ui::DashboardTab::CreateVM => {
+                if let Some(cvm) = ctx.application.inner.as_any_mut().downcast_mut::<X_CreateVM>() {
+                    cvm.new_vm_name = ui.new_vm_name.clone();
+                    cvm.new_vm_memory_mb = ui.new_vm_memory_mb;
+                    cvm.new_vm_vcpus = ui.new_vm_vcpus;
+                    cvm.create_vm_focus_idx = ui.create_vm_focus_idx;
+                }
+            }
+            _ => {}
+        }
+
+        ctx
+    }
+}

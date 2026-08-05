@@ -1,5 +1,6 @@
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::any::Any;
 use uefi::proto::console::text::Key;
 use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
@@ -110,5 +111,13 @@ impl Runnable for DoomApp {
         //         }
         //     }
         // }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

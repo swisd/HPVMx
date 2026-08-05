@@ -67,4 +67,6 @@ impl Runnable for ClockApp {
 
     fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {}
     fn input(&mut self, _key: uefi::proto::console::text::Key) {}
+    fn as_any(&self) -> &dyn core::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
 }

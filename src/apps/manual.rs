@@ -1,5 +1,6 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::any::Any;
 use uefi::proto::console::text::Key;
 use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
@@ -144,5 +145,13 @@ impl Runnable for InstructionManualApp {
             }
             _ => {}
         }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

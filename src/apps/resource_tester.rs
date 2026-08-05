@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use alloc::string::String;
+use core::any::Any;
 use libm::sqrt;
 use uefi::proto::console::text::Key;
 use uefi::prelude::*;
@@ -163,5 +164,13 @@ impl Runnable for SysTestApp {
         let text = if smblen/1000 < 1000 {alloc::format!("VEC: {}KB", (smblen)/1000)} else { alloc::format!("VEC: {}MB", (smblen)/1000/1000) };
         graphics.draw_text(x + 5, y + 230, &text, 0xAAAAAA);
         graphics.draw_text(x + 5, y + 245, &alloc::format!("ERR: {}", self.errors), 0xAAAAAA);
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

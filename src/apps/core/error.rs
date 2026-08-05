@@ -1,4 +1,5 @@
-use alloc::string::String;
+use alloc::boxed::Box;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::proto::console::text::Key;
 use crate::env::{AppInfo, Environment, Runnable};
@@ -6,6 +7,14 @@ use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 pub struct ErrorApp {
     pub(crate) error: String,
+}
+
+impl ErrorApp {
+    pub fn new(error: &str) -> (Box<dyn Runnable>, (usize, usize)) {
+        let app = ErrorApp { error: error.to_string() };
+        let dims = AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }
 }
 
 impl AppInfo for ErrorApp {
@@ -46,4 +55,7 @@ impl Runnable for ErrorApp {
     fn input(&mut self, key: Key) {
         //
     }
+
+    fn as_any(&self) -> &dyn core::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
 }

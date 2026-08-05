@@ -299,6 +299,10 @@ impl Runnable for X_Storage {
             _ => {}
         }
     }
+
+    fn as_any(&self) -> &dyn core::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+
     fn draw(&self, pg: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) {
 
         let content_top = y;

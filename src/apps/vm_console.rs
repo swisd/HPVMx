@@ -1,7 +1,7 @@
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-
+use core::any::Any;
 use uefi::proto::console::text::Key;
 
 use crate::env::{AppInfo, Environment, Runnable};
@@ -65,4 +65,12 @@ impl Runnable for VmConsoleApp {
     }
 
     fn input(&mut self, _key: Key) {}
+
+    fn as_any(&self) -> &dyn Any {
+        todo!()
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        todo!()
+    }
 }

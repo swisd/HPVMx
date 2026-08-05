@@ -1,5 +1,6 @@
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::any::Any;
 use libm::{sin, cos, sqrt};
 use uefi::proto::console::text::Key;
 use crate::env::{AppInfo, Environment, Runnable};
@@ -175,6 +176,14 @@ impl Runnable for MinecraftApp {
 
     fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
         // todo
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 impl AppInfo for MinecraftApp {
