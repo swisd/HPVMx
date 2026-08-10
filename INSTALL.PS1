@@ -4,6 +4,11 @@ $env:CC = "clang"
 Write-Output "Running Build Script..."
 ./build.bat
 
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "The build failed, stopping script.."
+    exit $LASTEXITCODE
+}
+
 
 Write-Output "Updating docs"
 #cargo +nightly rustdoc -p HPVMx -- -Z unstable-options --document-private-items

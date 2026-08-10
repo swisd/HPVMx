@@ -3,6 +3,7 @@
   <component name="JunieProjectTechnologies">
     <option name="explicitlyEnabledTechs">
       <set>
+        <option value="junie.js" />
         <option value="junie.python" />
       </set>
     </option>

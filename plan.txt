@@ -1,3 +1,10 @@
+- Start menu keybind to F1
+- header text to 4 below (4-8-4)
+
+
+
+
+
 - micro-c
   - jit compilability and live interpreting
 

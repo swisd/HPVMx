@@ -1,8 +1,10 @@
-use crate::{hpvm_error, hpvm_warn, Color};
+use crate::{hpvm_error, hpvm_warn, vdebug, Color};
 use crate::hpvm_log;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::{format, vec};
+use alloc::borrow::ToOwned;
+use alloc::fmt::format;
 use alloc::vec::Vec;
 use crate::filesystem::FileSystem;
 use serde::{Deserialize, Serialize};
@@ -227,7 +229,7 @@ impl PackageManager {
         }
 
         if missing.is_empty() {
-            crate::vdebug!("pm", "no missing packages for: {}", pkg_name);
+            vdebug!("pm", "no missing packages for: {}", pkg_name);
         } else {
             hpvm_warn!("pm", "Packages not found: {:?}", missing);
         }
@@ -235,19 +237,34 @@ impl PackageManager {
 
     pub fn load_registry(&mut self) {
         FileSystem::cd(&*self.package_path);
-        crate::vdebug!("pm", "loading packages from {}registry.prg", self.package_path);
-        let reg = FileSystem::read_file_to_string("registry.prg").expect("could not open registry");
-        let pkgs = reg.replace("\r", "");
-        let packages = pkgs.split("\n").collect::<Vec<&str>>();
-        for package in packages {
-            crate::vdebug!("pm", "found package '{}'", package.to_string());
-            let pack_path = self.package_path.clone() + "/" + package + "/";
-            FileSystem::cd(&*pack_path);
-            let json = FileSystem::read_file_to_string("package.json").unwrap();
-            let clean_json = json.trim_matches(char::from(0)).trim();
-            self.load_from_json_no_alloc(clean_json);
+        vdebug!("pm", "loading packages from {}registry.prg", self.package_path);
+        if let Ok(reg) = FileSystem::read_file_to_string("registry.prg") {
+            let pkgs = reg.replace("\r", "");
+            let packages = pkgs.split("\n").collect::<Vec<&str>>();
+            for package in packages {
+                vdebug!("pm", "found package '{}'", package.to_string());
+                let pack_path = self.package_path.clone() + "/" + package + "/";
+                FileSystem::cd(&*pack_path);
+                let json = FileSystem::read_file_to_string("package.json").unwrap();
+                let clean_json = json.trim_matches(char::from(0)).trim();
+                self.load_from_json_no_alloc(clean_json);
+            }
+            FileSystem::cd("/");
+        } else {
+            vdebug!("pm", "could not load registry from registry.prg");
+            vdebug!("pm", "creating empty regfile");
+            let mut fullpath: String = String::new();
+            for dir in self.package_path.split("/") {
+                fullpath += &*(dir.to_owned() + "/".as_str());
+                match FileSystem::mkdir(fullpath.as_str()) {
+                    Ok(_) => (),
+                    Err(e) => vdebug!("pm", "could not create package directory: {:?} :: {:#?}", fullpath, e),
+                }
+            }
+            FileSystem::touch("registry.prg");
+            FileSystem::cd("/");
         }
-        FileSystem::cd("/")
+
     }
 
     fn load_from_json(&mut self, json_data: &str) -> Result<(), &'static str> {

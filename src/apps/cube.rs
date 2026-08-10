@@ -1,9 +1,10 @@
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::any::Any;
 use libm::{sin, cos};
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Environment, Runnable};
+use crate::env::{AppInfo, Environment, Runnable, RunnableClone};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 pub struct CubeApp {
@@ -21,6 +22,12 @@ impl CubeApp {
             speed_x: 0.02, // Default slow rotation
             speed_y: 0.02,
         }
+    }
+}
+
+impl RunnableClone for CubeApp {
+    fn clone_box(&self) -> Box<dyn Runnable> {
+        todo!()
     }
 }
 

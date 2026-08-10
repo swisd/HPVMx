@@ -1,10 +1,11 @@
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::any::Any;
 use uefi::proto::console::text::{Key, ScanCode};
 
-use crate::env::{AppInfo, Environment, Runnable};
+use crate::env::{AppInfo, Environment, Runnable, RunnableClone};
 use crate::micro_c::compiler;
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
@@ -75,6 +76,12 @@ impl AppInfo for MicroIdeApp {
     fn version(&self) -> &str { "0.1.0" }
     fn icon(&self) -> [u32; 1024] { icons::SCRIPT_YELLOW_32_ICON_DATA }
     fn dimensions(&self) -> (usize, usize) { (820, 520) }
+}
+
+impl RunnableClone for MicroIdeApp {
+    fn clone_box(&self) -> Box<dyn Runnable> {
+        todo!()
+    }
 }
 
 impl Runnable for MicroIdeApp {

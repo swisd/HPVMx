@@ -50,11 +50,69 @@ impl X_Settings {
 impl Runnable for X_Settings {
     fn draw(&self, pg: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) {
         pg.draw_text(x + 20, y + 20, "System Settings", 0x00FF00);
-        pg.draw_text(x + 20, y + 50, &format!("Selected: {}", self.selected_settings_idx), 0xFFFFFF);
+        
+        let margin = 16usize;
+        let gutter = 12usize;
+        let line_h = 18usize;
+
+        let list_x = x + margin;
+        let list_y = y + 50;
+        let list_w = 240;
+        let list_h = 420;
+
+        // Categories
+        pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
+        let categories = ["General", "Boot", "Interface", "VM Policy", "Network", "Storage", "Packages", "Security", "Developer", "Experimental"];
+        
+        let mut curr_y = list_y + 10;
+        for (idx, cat) in categories.iter().enumerate() {
+            let color = if idx == 0 { 0xFFFF00 } else { 0xFFFFFF };
+            pg.draw_text(list_x + 10, curr_y, cat, color);
+            curr_y += line_h + 5;
+        }
+
+        let detail_x = list_x + list_w + gutter;
+        let detail_w = 500;
+        pg.draw_rect_outline(detail_x, list_y, detail_w, list_h, 0x888888);
+        
+        pg.draw_text(detail_x + 10, list_y + 10, "Settings for General", 0x00FFFF);
+        
+        let rows = [
+            ("HPVMX_PROFILE", "balanced"),
+            ("Extra Debug Info", if self.settings.extra_debug_info { "on" } else { "off" }),
+            ("HPVMX_USER", "operator"),
+            ("Experimental Mem Comp", if self.settings.experimental_mem_comp { "on" } else { "off" }),
+        ];
+
+        curr_y = list_y + 40;
+        for (idx, (name, val)) in rows.iter().enumerate() {
+            let color = if idx == self.selected_settings_idx { 0xFFFF00 } else { 0xFFFFFF };
+            pg.draw_text(detail_x + 10, curr_y, &format!("{:<25} : {}", name, val), color);
+            curr_y += line_h;
+        }
+
+        pg.draw_text(x + 20, list_y + list_h + 20, "UP/DOWN selects setting, ENTER toggles, S saves all to config.cfg", 0x888888);
     }
 
     fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {}
-    fn input(&mut self, key: Key) {}
+    fn input(&mut self, key: Key) {
+        match key {
+            Key::Special(ScanCode::UP) => {
+                if self.selected_settings_idx > 0 {
+                    self.selected_settings_idx -= 1;
+                }
+            }
+            Key::Special(ScanCode::DOWN) => {
+                if self.selected_settings_idx < 3 {
+                    self.selected_settings_idx += 1;
+                }
+            }
+            Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
+                // Toggle setting
+            }
+            _ => {}
+        }
+    }
     fn as_any(&self) -> &dyn core::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
 }

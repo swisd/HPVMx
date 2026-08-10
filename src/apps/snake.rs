@@ -1,7 +1,8 @@
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Environment, Runnable};
+use crate::env::{AppInfo, Environment, Runnable, RunnableClone};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -46,6 +47,12 @@ impl AppInfo for SnakeApp {
 
     fn dimensions(&self) -> (usize, usize) {
         (200, 200)
+    }
+}
+
+impl RunnableClone for SnakeApp {
+    fn clone_box(&self) -> Box<dyn Runnable> {
+        todo!()
     }
 }
 

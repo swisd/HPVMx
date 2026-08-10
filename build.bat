@@ -5,3 +5,7 @@ copy %cd%\src\hardware\vmx.rs %cd%\src\hardware\cpu\vmx.rs
 robocopy %cd%\..\Micro-C\src %cd%\src\micro_c\ /E /XF "error.rs" "main.rs" "fs.rs"
 echo building...
 cargo build --target x86_64-unknown-uefi --release
+if %errorlevel% neq 0 (
+    echo The build failed with code %errorlevel%
+    exit /b %errorlevel%
+)

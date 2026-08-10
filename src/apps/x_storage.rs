@@ -21,7 +21,7 @@ pub struct X_Storage {
 impl X_Storage {
     pub fn new() -> Self {
         X_Storage {
-            current_path: "".to_string(),
+            current_path: "/".to_string(),
             files: vec![],
             selected_file_idx: 0,
             filesys_action_idx: 0,
@@ -313,11 +313,11 @@ impl Runnable for X_Storage {
         let height = 500usize;
         // Title and path
         let base_y = content_top + margin;
-        pg.draw_text(margin, base_y - 4, "File Explorer", 0x00FF00);
-        pg.draw_text(margin, base_y + 8, &alloc::format!("Path: {}", self.current_path), 0xAAAAAA);
+        pg.draw_text(margin + x, base_y - 4, "File Explorer", 0x00FF00);
+        pg.draw_text(margin + x, base_y + 8, &alloc::format!("Path: {}", self.current_path), 0xAAAAAA);
 
         // Table area
-        let list_x = margin;
+        let list_x = margin + x;
         let list_y = base_y + 28;
         let list_w = core::cmp::min(width - margin * 2, 720);
         let list_h = core::cmp::min(height - list_y - 90, 460);
@@ -400,7 +400,7 @@ impl Runnable for X_Storage {
         let actions_y = list_h + margin*8;
         pg.draw_text(margin, actions_y, "Actions for Selected Item", 0xCCCCCC);
         let actions = ["Open", "Props", "New File", "New Dir", "Rename", "Copy", "Move", "Delete"];
-        let mut action_x = margin;
+        let mut action_x = margin + x;
         let action_y = actions_y + 20;
         for (idx, action) in actions.iter().enumerate() {
             let is_focused = idx == self.filesys_action_idx;
@@ -409,8 +409,8 @@ impl Runnable for X_Storage {
             pg.draw_text(action_x + 6, action_y + 4, action, 0xFFFFFF);
             action_x += 100;
         }
-        pg.draw_text(margin, action_y + 34, "LEFT/RIGHT chooses action, END runs it; rename/copy/move/delete ask for confirmation", 0x888888);
-        pg.draw_text(margin, action_y + 52, &self.status_line, 0xFFFF00);
+        pg.draw_text(margin + x, action_y + 34, "LEFT/RIGHT chooses action, END runs it; rename/copy/move/delete ask for confirmation", 0x888888);
+        pg.draw_text(margin + x, action_y + 52, &self.status_line, 0xFFFF00);
     }
 }
 
@@ -420,7 +420,7 @@ impl AppInfo for X_Storage {
     }
 
     fn version(&self) -> &str {
-        "same"
+        "1.0.0"
     }
 
     fn icon(&self) -> [u32; 1024] {

@@ -23,14 +23,44 @@ impl X_Devices {
 
 impl Runnable for X_Devices {
     fn draw(&self, pg: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) {
-        pg.draw_text(x + 20, y + 20, "Device Manager", 0x00FF00);
-        
+        let x_off = x + 20;
+        let mut y_off = y + 20;
+        pg.draw_text(x_off, y_off, "Device Manager", 0x00FF00);
+
         let mut curr_y = y + 50;
-        for (i, cat) in self.categories.iter().enumerate() {
-            let is_selected = i == self.selected_device_idx;
-            let color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
-            pg.draw_text(x + 20, curr_y, &format!("{}: {} devices", cat.name, cat.devices.len()), color);
+        let mut current_idx = 0;
+
+        for cat in &self.categories {
+            let expanded_icon = if cat.expanded { "[-] " } else { "[+] " };
+            let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xAAAAAA };
+            pg.draw_text(x_off, curr_y, &alloc::format!("{}{}{} ({})", expanded_icon, cat.icon, cat.name, cat.devices.len()), color);
             curr_y += 20;
+            current_idx += 1;
+
+            if cat.expanded {
+                for dev in &cat.devices {
+                    let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xFFFFFF };
+                    pg.draw_icon(x_off + 15, curr_y - 2, 16, 16, if cat.name == "Network Adapters" { &pixel_graphics::icons::PCI_GREEN_ICON_DATA } else { &pixel_graphics::icons::PCI_BLUE_ICON_DATA });
+
+                    let path = &dev.path;
+                    let mut slash_count = 0;
+                    let mut split_idx = None;
+                    for (i, c) in path.char_indices() {
+                        if c == '/' {
+                            slash_count += 1;
+                            if slash_count == 3 {
+                                split_idx = Some(i + 1);
+                                break;
+                            }
+                        }
+                    }
+
+                    let display_path = if let Some(idx) = split_idx { &path[idx..] } else { path };
+                    pg.draw_text(x_off + 35, curr_y, &alloc::format!("{:<12} {}", dev.name, display_path), color);
+                    curr_y += 18;
+                    current_idx += 1;
+                }
+            }
         }
     }
 
@@ -41,7 +71,15 @@ impl Runnable for X_Devices {
                 if self.selected_device_idx > 0 { self.selected_device_idx -= 1; }
             }
             Key::Special(ScanCode::DOWN) => {
-                if self.selected_device_idx + 1 < self.categories.len() { self.selected_device_idx += 1; }
+                let mut total = 0;
+                for cat in &self.categories {
+                    total += 1;
+                    if cat.expanded { total += cat.devices.len(); }
+                }
+                if self.selected_device_idx + 1 < total { self.selected_device_idx += 1; }
+            }
+            Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
+                // Toggle expansion logic needs to be handled
             }
             _ => {}
         }

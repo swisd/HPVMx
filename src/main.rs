@@ -111,7 +111,7 @@ static mut PAGEFILE: Pagefile = Pagefile { header: PagefileHeader::DefaultHeader
 
 
 
-static mut HYPERVISOR: Option<HypervisorManager> = None;
+pub static mut HYPERVISOR: Option<HypervisorManager> = None;
 static mut TOTAL_PHYSICAL_MEMORY_MB: u32 = 0;
 
 //noinspection RsUnreachableCode
@@ -215,7 +215,10 @@ fn main() -> Status {
 
     FileSystem::scan_and_map_devices("DEVICELIST").unwrap();
 
+    vdebug!("fs", "devicelist mapped");
+
     unsafe {
+        vdebug!("page", "creating pagefile");
         PAGEFILE.create_pagefile();
     }
 

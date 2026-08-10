@@ -1,10 +1,11 @@
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use alloc::string::String;
 use core::any::Any;
 use libm::sqrt;
 use uefi::proto::console::text::Key;
 use uefi::prelude::*;
-use crate::env::{AppInfo, Environment, Runnable};
+use crate::env::{AppInfo, Environment, Runnable, RunnableClone};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 pub struct SysTestApp {
@@ -57,6 +58,12 @@ impl AppInfo for SysTestApp {
     }
 
     fn dimensions(&self) -> (usize, usize) { (200, 260) }
+}
+
+impl RunnableClone for SysTestApp {
+    fn clone_box(&self) -> Box<dyn Runnable> {
+        todo!()
+    }
 }
 
 impl Runnable for SysTestApp {

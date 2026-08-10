@@ -1,8 +1,9 @@
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use uefi::prelude::*;
 use uefi::runtime::Time;
-use crate::env::{AppInfo, Environment, Runnable};
+use crate::env::{AppInfo, Environment, Runnable, RunnableClone};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 use libm::{sin, cos};
 
@@ -15,6 +16,12 @@ impl AppInfo for ClockApp {
 
     fn dimensions(&self) -> (usize, usize) {
         (200, 200)
+    }
+}
+
+impl RunnableClone for ClockApp {
+    fn clone_box(&self) -> Box<dyn Runnable> {
+        todo!()
     }
 }
 

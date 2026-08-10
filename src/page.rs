@@ -1,6 +1,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 use crate::filesystem::FileSystem;
+use crate::vdebug;
 
 static mut GLOBALPAGE: [u8; 134217728] = [0; 134217728]; // should be with capacity 134217728
 
@@ -55,14 +56,18 @@ pub struct Pagefile {
 impl Pagefile {
     pub fn create_pagefile(&mut self) {
         let mut page = vec![0u8; 134217728];
+        let mut zvec = [0u8; 256];
+
         FileSystem::cd("/");
-        if let Ok(pagefile) = FileSystem::read_file("PAGEFILE") {
-            if pagefile.len() > 2048 {} else {
+        match FileSystem::read_from_file_bytes_position("PAGEFILE", &mut zvec, 2048) {
+            Ok(r) => vdebug!("PAGE", "pagefile ok"),
+            Err(e) => {
+                vdebug!("PAGE", "cannot read pagefile: {:#?}", e);
+                vdebug!("PAGE", "creating new pagefile");
                 FileSystem::write_to_file_bytes("PAGEFILE", &*page, 'w');
             }
-        } else {
-            FileSystem::write_to_file_bytes("PAGEFILE", &*page, 'w');
         }
+        vdebug!("PAGE", "updating pagefile headers");
         // Header PAGE magic, header size, block size (00 10 is 4096 in hex LE), block count (32767) (80 7F)
         FileSystem::write_to_file_bytes_position("PAGEFILE", &self.header.to_hex_bytes(), 0x00);
     }

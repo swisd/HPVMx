@@ -30,7 +30,7 @@ use crate::apps::x_packages::X_Packages;
 use crate::apps::x_test::X_Test;
 use crate::apps::x_createvm::X_CreateVM;
 use crate::apps::x_editor::X_Editor;
-
+use crate::rng::XorShiftRng;
 
 pub type EnvironmentVariable = (String, String);
 
@@ -116,6 +116,7 @@ pub struct GlobalEnvironment {
 ///
 /// This structure holds the application's metadata and its core logic
 /// represented by the `Runnable` trait.
+#[derive(Clone)]
 pub struct Application {
     /// The name of the application.
     pub name: String,
@@ -130,7 +131,7 @@ pub struct Application {
     /// The preferred window dimensions (width, height).
     pub dimensions: (usize, usize),
 }
-
+#[derive(Clone)]
 pub struct Background {
     /// The name of the application.
     pub name: String,
@@ -144,11 +145,24 @@ pub struct Background {
     pub inner: Box<dyn BackgroundTask>,
 }
 
+pub trait RunnableClone {
+    fn clone_box(&self) -> Box<dyn Runnable>;
+}
+
+
+impl<T> RunnableClone for T
+where
+    T: 'static + Runnable + Clone,
+{
+    fn clone_box(&self) -> Box<dyn Runnable> {
+        Box::new(self.clone())
+    }
+}
 
 /// Core trait for application logic and rendering.
 ///
 /// Any application that wants to be managed by the system must implement this trait.
-pub trait Runnable {
+pub trait Runnable: RunnableClone {
     /// Renders the application to the provided `PixelGraphics` context.
     fn draw(&self, graphics_entity: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize); // Adjust types as needed
     /// Updates the application's internal state.
@@ -159,13 +173,41 @@ pub trait Runnable {
     fn as_any_mut(&mut self) -> &mut dyn core::any::Any;
 }
 
+impl Clone for Box<dyn Runnable> {
+    fn clone(&self) -> Box<dyn Runnable> {
+        self.clone_box()
+    }
+}
+
+
+pub trait BackgroundTaskClone {
+    fn clone_box(&self) -> Box<dyn BackgroundTask>;
+}
+
+
+impl<T> BackgroundTaskClone for T
+where
+    T: 'static + BackgroundTask + Clone,
+{
+    fn clone_box(&self) -> Box<dyn BackgroundTask> {
+        Box::new(self.clone())
+    }
+}
+
+
 /// Represents a task that runs in the background.
-pub trait BackgroundTask {
+pub trait BackgroundTask: BackgroundTaskClone {
     /// Performs a single tick of work.
     /// Drawing and input are not required
     /// Returns `true` if the task is finished and can be removed, 
     /// or `false` if it needs more processing time.
     fn tick(&mut self, vars: &mut Vec<String>, env: &mut Environment) -> bool;
+}
+
+impl Clone for Box<dyn BackgroundTask> {
+    fn clone(&self) -> Box<dyn BackgroundTask> {
+        self.clone_box()
+    }
 }
 
 /// Metadata and capability information about an application.
@@ -243,6 +285,7 @@ pub struct SteppedApplicationContext {
     pub local_vars: Vec<String>,
     pub window: WindowState,
     pub exit_requested: bool,
+    pub pid: usize,
 }
 
 pub enum AppOrBackground {
@@ -405,6 +448,11 @@ impl ApplicationContext {
 impl SteppedApplicationContext {
     pub fn new(app: Application, background_tasks: Unknown<Vec<Box<dyn BackgroundTask>>>) -> SteppedApplicationContext {
         let dimensions = app.dimensions;
+        let mut rng = XorShiftRng::new(12);
+        let mut id0 = rng.rand(5) as usize;
+        if id0 < 1000 {
+            id0 += 1000
+        }
         SteppedApplicationContext {
             parent: None,
             application: app,
@@ -415,6 +463,7 @@ impl SteppedApplicationContext {
             local_vars: Vec::new(),
             window: WindowState::new(100, 100, dimensions.0, dimensions.1),
             exit_requested: false,
+            pid: id0
         }
     }
 
@@ -551,7 +600,7 @@ pub type Unknown<T> = Option<T>;
 
 
 
-
+#[derive(Clone)]
 pub struct XSteppedApplicationContext {
     pub parent: Unknown<Application>,
     pub application: Application,
@@ -697,6 +746,83 @@ impl XSteppedApplicationContext {
         Some(ctx)
     }
 
+    pub fn sync_back_to_dashboard(&self, ui: &mut crate::ui::DashboardUI) {
+        if !self.from_ui { return; }
+        
+        let tab = crate::ui::DashboardTab::from_u8(self.selected_tab);
+        
+        match tab {
+            crate::ui::DashboardTab::Overview => {
+                // Overview usually doesn't push state back yet
+            }
+            crate::ui::DashboardTab::VirtualMachines => {
+                if let Some(vms_app) = self.application.inner.as_any().downcast_ref::<X_VMs>() {
+                    ui.selected_vm_idx = vms_app.selected_vm_idx;
+                    ui.vm_action_idx = vms_app.vm_action_idx;
+                }
+            }
+            crate::ui::DashboardTab::Storage => {
+                if let Some(storage) = self.application.inner.as_any().downcast_ref::<X_Storage>() {
+                    ui.current_path = storage.current_path.clone();
+                    ui.selected_file_idx = storage.selected_file_idx;
+                    ui.filesys_action_idx = storage.filesys_action_idx;
+                    ui.filesys_pending_action = storage.filesys_pending_action;
+                    ui.status_line = storage.status_line.clone();
+                    ui.filesys_new_counter = storage.filesys_new_counter;
+                }
+            }
+            crate::ui::DashboardTab::Apps => {
+                if let Some(apps) = self.application.inner.as_any().downcast_ref::<X_Apps>() {
+                    ui.selected_app_idx = apps.selected_app_idx;
+                }
+            }
+            crate::ui::DashboardTab::Resources => {
+                if let Some(resources) = self.application.inner.as_any().downcast_ref::<X_Resources>() {
+                    ui.resources = resources.resources.clone();
+                }
+            }
+            crate::ui::DashboardTab::Network => {
+                if let Some(network) = self.application.inner.as_any().downcast_ref::<X_Network>() {
+                    ui.selected_network_action_idx = network.selected_network_action_idx;
+                    ui.network_target = network.network_target.clone();
+                }
+            }
+            crate::ui::DashboardTab::Console => {
+                if let Some(console) = self.application.inner.as_any().downcast_ref::<X_Console>() {
+                    ui.term_buf = console.term_buf.clone();
+                }
+            }
+            crate::ui::DashboardTab::Devices => {
+                if let Some(devices) = self.application.inner.as_any().downcast_ref::<X_Devices>() {
+                    ui.categories = devices.categories.clone();
+                    ui.selected_device_idx = devices.selected_device_idx;
+                }
+            }
+            crate::ui::DashboardTab::Packages => {
+                if let Some(pkg) = self.application.inner.as_any().downcast_ref::<X_Packages>() {
+                    ui.selected_package_idx = pkg.selected_package_idx;
+                    ui.package_action_idx = pkg.package_action_idx;
+                    ui.status_line = pkg.status_line.clone();
+                }
+            }
+            crate::ui::DashboardTab::Settings => {
+                if let Some(settings) = self.application.inner.as_any().downcast_ref::<X_Settings>() {
+                    ui.settings = settings.settings.clone();
+                    ui.selected_settings_idx = settings.selected_settings_idx;
+                }
+            }
+            crate::ui::DashboardTab::CreateVM => {
+                if let Some(cvm) = self.application.inner.as_any().downcast_ref::<X_CreateVM>() {
+                    ui.new_vm_name = cvm.new_vm_name.clone();
+                    ui.new_vm_memory_mb = cvm.new_vm_memory_mb;
+                    ui.new_vm_vcpus = cvm.new_vm_vcpus;
+                    ui.create_vm_focus_idx = cvm.create_vm_focus_idx;
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn from_dashboard(ui: &crate::ui::DashboardUI, tab: crate::ui::DashboardTab) -> Self {
         let name = match tab {
             crate::ui::DashboardTab::Overview => "X_Overview",
@@ -725,6 +851,9 @@ impl XSteppedApplicationContext {
 
         ctx.from_ui = true;
         ctx.selected_tab = tab as u8;
+        // Tab applications render inside the dashboard content area rather
+        // than as independent movable windows.
+        ctx.window = WindowState::new(0, 80, ctx.application.dimensions.0, ctx.application.dimensions.1);
         ctx.current_path = ui.current_path.clone();
         ctx.selection_idx = ui.selected_vm_idx;
 
@@ -799,6 +928,9 @@ impl XSteppedApplicationContext {
             crate::ui::DashboardTab::Packages => {
                 if let Some(pkg) = ctx.application.inner.as_any_mut().downcast_mut::<X_Packages>() {
                     pkg.selected_package_idx = ui.selected_package_idx;
+                    pkg.package_action_idx = ui.package_action_idx;
+                    pkg.registry = ui.package_manager.registry.clone();
+                    pkg.status_line = ui.status_line.clone();
                 }
             }
             crate::ui::DashboardTab::CreateVM => {

@@ -1,8 +1,9 @@
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::any::Any;
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Environment, Runnable};
+use crate::env::{AppInfo, Environment, Runnable, RunnableClone};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 pub struct AppInstallerApp {
@@ -24,6 +25,12 @@ impl AppInfo for AppInstallerApp {
 
     fn dimensions(&self) -> (usize, usize) {
         (500, 500)
+    }
+}
+
+impl RunnableClone for AppInstallerApp {
+    fn clone_box(&self) -> Box<dyn Runnable> {
+        todo!()
     }
 }
 

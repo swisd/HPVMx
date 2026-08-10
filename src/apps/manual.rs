@@ -1,8 +1,9 @@
+use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::any::Any;
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Environment, Runnable};
+use crate::env::{AppInfo, Environment, Runnable, RunnableClone};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 pub struct InstructionManualApp {
@@ -64,6 +65,12 @@ impl AppInfo for InstructionManualApp {
     fn version(&self) -> &str { "0.3.0" }
     fn icon(&self) -> [u32; 1024] { icons::MANUAL_BOOK_32_ICON_DATA }
     fn dimensions(&self) -> (usize, usize) { (600, 500) }
+}
+
+impl RunnableClone for InstructionManualApp {
+    fn clone_box(&self) -> Box<dyn Runnable> {
+        todo!()
+    }
 }
 
 impl Runnable for InstructionManualApp {

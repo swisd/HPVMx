@@ -1,7 +1,8 @@
+use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::proto::console::text::Key;
-use crate::env::{AppInfo, Environment, Runnable};
+use crate::env::{AppInfo, Environment, Runnable, RunnableClone};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 use crate::devices::net_stack;
 use crate::devices::net;
@@ -89,6 +90,12 @@ impl AppInfo for BrowserApp {
 
     fn dimensions(&self) -> (usize, usize) {
         (600, 400)
+    }
+}
+
+impl RunnableClone for BrowserApp {
+    fn clone_box(&self) -> Box<dyn Runnable> {
+        todo!()
     }
 }
 

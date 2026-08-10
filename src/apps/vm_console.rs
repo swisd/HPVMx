@@ -1,11 +1,13 @@
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::any::Any;
 use uefi::proto::console::text::Key;
 
-use crate::env::{AppInfo, Environment, Runnable};
+use crate::env::{AppInfo, Environment, Runnable, RunnableClone};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
+
 
 pub struct VmConsoleApp {
     pub vm_id: u32,
@@ -40,6 +42,12 @@ impl AppInfo for VmConsoleApp {
 
     fn dimensions(&self) -> (usize, usize) {
         (520, 320)
+    }
+}
+
+impl RunnableClone for VmConsoleApp {
+    fn clone_box(&self) -> Box<dyn Runnable> {
+        todo!()
     }
 }
 

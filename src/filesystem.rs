@@ -17,7 +17,7 @@ use uefi::data_types::CStr16;
 use uefi::{Handle, Identify};
 use uefi::proto::device_path::DevicePath;
 use uefi::proto::device_path::text::{AllowShortcuts, DisplayOnly};
-use uefi::proto::media::file::{File, FileMode, FileAttribute, FileInfo};
+use uefi::proto::media::file::{File, FileMode, FileAttribute, FileInfo, FileHandle};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi_raw::protocol::device_path::{DeviceSubType, DeviceType};
 use crate::hpvmlog::LogEntry;
@@ -313,10 +313,28 @@ impl FileSystem {
         let mut root = Self::get_root(None)?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
-        root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
+        // 1. Open/create the file
+        let file: FileHandle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
             .map_err(|_| "Failed to create file")?;
+
+        // 2. Explicitly flush or close the file to save it to disk
+        // Note: Replace '.close()' with whatever method your crate uses (e.g., .flush())
+        file.close();
+
         Ok(())
     }
+
+    pub fn create(path: &str) -> Result<FileHandle, &'static str> {
+        let mut root = Self::get_root(None)?;
+        let path_cstr = Self::path_to_cstr16(path)?;
+
+        // Store the handle in a variable instead of discarding it
+        let file = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
+            .map_err(|_| "Failed to create file")?;
+
+        Ok(file)
+    }
+
 
     pub fn copy(src: &str, dst: &str) -> Result<(), &'static str> {
         let mut root = Self::get_root(None)?;

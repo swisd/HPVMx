@@ -22,18 +22,52 @@ impl X_Network {
 
 impl Runnable for X_Network {
     fn draw(&self, pg: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) {
-        pg.draw_text(x + 20, y + 20, "Network Manager", 0x00FF00);
-        pg.draw_text(x + 20, y + 50, &format!("Target: {}", self.network_target), 0xFFFFFF);
-        
-        let actions = ["SNP Init", "Ping", "Scan", "HTTP Start", "HTTP Stop"];
-        let mut curr_x = x + 20;
+        let x_off = x + 20;
+        let mut y_off = y + 20;
+        pg.draw_text(x_off, y_off, "Network Status", 0x00FF00);
+        let net_stats = crate::devices::net_stack::stats();
+        y_off += 30;
+        pg.draw_text(x_off, y_off, &alloc::format!("Backend: {}", crate::devices::net_stack::backend_name()), 0xFFFFFF);
+        y_off += 30;
+        pg.draw_text(x_off, y_off, "Statistics:", 0xAAAAAA);
+
+        let sub_x = x + 40;
+        let mut sub_y = y + 100;
+        pg.draw_text(sub_x, sub_y, &alloc::format!("RX Packets: {}", net_stats.rx_pkts), 0xCCCCCC);
+        sub_y += 20;
+        pg.draw_text(sub_x, sub_y, &alloc::format!("TX Packets: {}", net_stats.tx_pkts), 0xCCCCCC);
+        sub_y += 20;
+        pg.draw_text(sub_x, sub_y, &alloc::format!("RX Bytes:   {}", net_stats.rx_bytes), 0xCCCCCC);
+        sub_y += 20;
+        pg.draw_text(sub_x, sub_y, &alloc::format!("TX Bytes:   {}", net_stats.tx_bytes), 0xCCCCCC);
+
+        sub_y += 40;
+        let state = crate::devices::net_stack::get_state();
+        pg.draw_text(sub_x, sub_y, &alloc::format!("IP: {}.{}.{}.{}", state.ip_addr[0], state.ip_addr[1], state.ip_addr[2], state.ip_addr[3]), 0xCCCCCC);
+        sub_y += 20;
+        pg.draw_text(sub_x, sub_y, &alloc::format!("GW: {}.{}.{}.{}", state.gateway[0], state.gateway[1], state.gateway[2], state.gateway[3]), 0xCCCCCC);
+        sub_y += 20;
+        pg.draw_text(sub_x, sub_y, &alloc::format!("MASK: {}.{}.{}.{}", state.subnet_mask[0], state.subnet_mask[1], state.subnet_mask[2], state.subnet_mask[3]), 0xCCCCCC);
+        sub_y += 20;
+        pg.draw_text(sub_x, sub_y, &alloc::format!("MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", state.mac_addr[0], state.mac_addr[1], state.mac_addr[2], state.mac_addr[3], state.mac_addr[4], state.mac_addr[5]), 0xCCCCCC);
+        sub_y += 40;
+        let is_init = crate::devices::net_stack::is_initialized();
+        pg.draw_text(sub_x, sub_y, &alloc::format!("Initialized: {is_init}", ), 0xFFFFFF);
+        sub_y += 35;
+
+        pg.draw_text(sub_x, sub_y, &alloc::format!("Target: {}", self.network_target), 0xCCCCCC);
+        sub_y += 28;
+
+        let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off"];
+        let mut action_x = sub_x;
         for (idx, action) in actions.iter().enumerate() {
             let is_focused = idx == self.selected_network_action_idx;
-            let color = if is_focused { 0x00AA00 } else { 0x444444 };
-            pg.fill_rect(curr_x, y + 80, 100, 24, color);
-            pg.draw_text(curr_x + 5, y + 84, action, 0xFFFFFF);
-            curr_x += 110;
+            pg.fill_rect(action_x, sub_y, 88, 24, if is_focused { 0x00AA00 } else { 0x444444 });
+            pg.draw_text(action_x + 8, sub_y + 4, action, 0xFFFFFF);
+            action_x += 96;
         }
+        sub_y += 36;
+        pg.draw_text(sub_x, sub_y, "LEFT/RIGHT chooses action, ENTER runs it, +/- cycles ping target", 0x888888);
     }
 
     fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {}
@@ -43,7 +77,18 @@ impl Runnable for X_Network {
                 if self.selected_network_action_idx > 0 { self.selected_network_action_idx -= 1; }
             }
             Key::Special(ScanCode::RIGHT) => {
-                if self.selected_network_action_idx < 4 { self.selected_network_action_idx += 1; }
+                if self.selected_network_action_idx < 5 { self.selected_network_action_idx += 1; }
+            }
+            Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
+                // Execute action
+            }
+            Key::Printable(c) => {
+                let ch = char::from(c);
+                if ch == '+' || ch == '=' {
+                    // cycle target
+                } else if ch == '-' || ch == '_' {
+                    // cycle target
+                }
             }
             _ => {}
         }

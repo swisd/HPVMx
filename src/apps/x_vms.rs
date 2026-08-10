@@ -131,6 +131,31 @@ impl Runnable for X_VMs {
             Key::Special(ScanCode::RIGHT) => {
                 if self.vm_action_idx < 7 { self.vm_action_idx += 1; }
             }
+            Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
+                // Enter: Execute action
+                if let Some(vm) = self.vms.get(self.selected_vm_idx) {
+                    let vm_id = vm.id;
+                    unsafe {
+                        if let Some(hv) = crate::HYPERVISOR.as_mut() {
+                            match self.vm_action_idx {
+                                0 => { let _ = hv.start_vm(vm_id); }
+                                1 => { let _ = hv.stop_vm(vm_id); }
+                                2 => { let _ = hv.reset_vm(vm_id); }
+                                3 => { let _ = hv.zero_vm(vm_id); }
+                                4 => { let _ = hv.delete_vm(vm_id); }
+                                5 => { let _ = hv.save_vm_metadata("/VMSTATE"); }
+                                6 => { let _ = hv.restore_vm_metadata("/VMSTATE"); }
+                                7 => {
+                                    // Console - this needs to be handled by the UI/Shell
+                                    // For now we might need a way to signal this.
+                                    // We'll use a hack: set a special var.
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }

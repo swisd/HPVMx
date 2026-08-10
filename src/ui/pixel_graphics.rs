@@ -1,5 +1,7 @@
+use crate::Vec;
+use alloc::format;
 use uefi::proto::console::gop::GraphicsOutput;
-use uefi::boot;
+use uefi::{boot, runtime};
 use core::ptr;
 use alloc::string::{String, ToString};
 use embedded_graphics::Pixel;
@@ -496,17 +498,33 @@ impl PixelGraphics {
         let color = 0xFFFFFF;
         let outline = 0x000000;
         
-        // Simple arrow cursor
-        for i in 0..12 {
-            for j in 0..i {
-                self.draw_pixel(x + j, y + i, color);
-            }
-            self.draw_pixel(x + i, y + i, outline);
-            self.draw_pixel(x, y + i, outline);
-        }
-        for j in 0..12 {
-            self.draw_pixel(x + j, y + 12, outline);
-        }
+        // // Simple arrow cursor
+        // for i in 0..12 {
+        //     for j in 0..i {
+        //         self.draw_pixel(x + j, y + i, color);
+        //     }
+        //     self.draw_pixel(x + i, y + i, outline);
+        //     self.draw_pixel(x, y + i, outline);
+        // }
+        // for j in 0..12 {
+        //     self.draw_pixel(x + j, y + 12, outline);
+        // }
+
+        // Define the 4 vertices defining the outer perimeter of the dart
+        let vertices = [
+            (x, y),          // Top point (tip)
+            (x, y + 12),     // Bottom-left corner
+            (x + 4, y + 8),  // Inner notch point
+            (x + 12, y + 12) // Bottom-right tip
+        ];
+
+        // Fill the shape interior first
+        self.polygon_fill(&vertices, color);
+
+        // Overlay the 4-edged black outline around the vertices
+        self.polygon_outline(&vertices, outline);
+
+
     }
 
     pub fn resolution(&self) -> (usize, usize) {
@@ -549,7 +567,7 @@ impl PixelGraphics {
         }
     }
 
-    pub fn draw_table_view(&mut self, x: usize, y: usize, width: usize, height: usize, headers: &[&str], rows: &[&[&str]]) {
+    pub fn draw_table_view(&mut self, x: usize, y: usize, width: usize, height: usize, headers: &[&str], rows: Vec<&[&str]>) {
         self.draw_rect_outline(x, y, width, height, 0x888888);
         let col_width = width / headers.len().max(1);
         let row_height = 20;
@@ -1079,6 +1097,40 @@ impl PixelGraphics {
 
         self.draw_line(x + 10, y + h - 28, x + w - 10, y + h - 28, 0x333333);
         self.draw_text(x + 15, y + h - 20, "Enter execute  Esc close  $ terminal mode", 0x777777);
+    }
+
+    pub fn draw_header(&mut self, x: usize, y: usize, width: usize, height: usize, TSC_PER_US_: usize, modes: [bool; 3], resources: [usize; 4]) {
+        // Draw header
+        self.fill_rect(0, 0, width, 32, 0x608080); // Cyan-ish
+        // pg.draw_text(width / 2 - 160, 16, "HPVMx - Hypervisor Management Console", 0xFFFFFF);
+
+        // Draw clock in top right
+        if let Ok(time) = runtime::get_time() {
+            let time_str = alloc::format!("{:02}:{:02}", time.hour(), time.minute());
+            self.draw_text(width - 50, 12, &time_str, 0xFFFF00); // Yellow clock
+        }
+
+        self.draw_text(width - 150, 8, &format!("{} fps", resources[0]), 0xFFFFFF);
+        self.draw_text(width - 212, 8, &format!("{} ms", resources[1]), 0xFFFFFF);
+        self.draw_text(width - 250, 8, &format!("{}%", resources[2]), 0xFFFFFF);
+        self.draw_text(width - 165, 19, &format!("{} MHz", TSC_PER_US_), 0xFFFFFF);
+        self.draw_text(width - 250, 19, &format!("{} MB", resources[3]), 0xFFFFFF);
+
+        self.draw_text(width - 100, 2, if modes[0] { "ctrl" } else { "" }, 0xFFFFFF);
+        self.draw_text((width - 100) + 33, 2, if modes[1] { "alt" } else { "" }, 0xFFFFFF);
+        self.draw_text((width - 100) + 60, 2, if modes[2] { "fn" } else { "" }, 0xFFFFFF);
+
+        // pg.draw_text(40, 1, "   __ _____ _   ____  ___", 0xFFFFFF);
+        // pg.draw_text(40, 11, "  / // / _ \\ | / /  |/  /_ __", 0xFFFFFF);
+        // pg.draw_text(40, 21, " / _  / ___/ |/ / /|_/ /\\ \\ /", 0xFFFFFF);
+        // pg.draw_text(40, 31, "/_//_/_/   |___/_/  /_//_\\_\\", 0xFFFFFF);
+
+        self.draw_icon(5, 5, 128, 128, &icons::HPVMX_128_CLR_ICON_DATA);
+
+        // Draw navigation
+        self.fill_rect(0, 32, width, 16, 0x444444); // Dark Gray
+        let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
+        self.draw_text(10, 36, nav_text, 0xFFFFFF);
     }
 
 
