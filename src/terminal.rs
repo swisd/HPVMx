@@ -999,32 +999,36 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
             last_refresh = 0;
         }
 
+        let draw_tsc_begin = unsafe { core::arch::x86_64::_rdtsc() };
         dashboard.draw();
+        let draw_tsc_end = unsafe { core::arch::x86_64::_rdtsc() };
 
-        dashboard.active_apps.retain_mut(|ctx| {
-            // Logic: Give the app CPU time
-            let mut vars = Vec::new();
-            let mut env = Environment::new();
-            ctx.application.logic(&mut vars, &mut env);
+        dashboard.cycles = draw_tsc_end.saturating_sub(draw_tsc_begin) as usize;
 
-
-            // Draw: Give the app a reference to the screen
-            // Note: You can pass a 'Viewport' or 'Offset' here so
-            // the app knows where its "window" is located.
-            // if let Some(pg) = PixelGraphics::new() {
-            //     let mut pg = pg.with_backbuffer();
-            //     let (width, height) = pg.resolution();
-            //     ctx.application.draw(&mut pg, &vars, 200, 200);
-            //     pg.app_context_border(&ctx.application.name);
-            // }
-
-            // Input: Forward the key if this app is focused
-            // This reads key from stdin, which might consume it for others.
-            // But we only do it if the app is focused.
-            // For now, let's keep it simple.
-            
-            !ctx.exit_requested
-        });
+        // dashboard.active_apps.retain_mut(|ctx| {
+        //     // Logic: Give the app CPU time
+        //     // let mut vars = Vec::new();
+        //     // let mut env = Environment::new();
+        //     // ctx.application.logic(&mut vars, &mut env);
+        //
+        //
+        //     // Draw: Give the app a reference to the screen
+        //     // Note: You can pass a 'Viewport' or 'Offset' here so
+        //     // the app knows where its "window" is located.
+        //     // if let Some(pg) = PixelGraphics::new() {
+        //     //     let mut pg = pg.with_backbuffer();
+        //     //     let (width, height) = pg.resolution();
+        //     //     ctx.application.draw(&mut pg, &vars, 200, 200);
+        //     //     pg.app_context_border(&ctx.application.name);
+        //     // }
+        //
+        //     // Input: Forward the key if this app is focused
+        //     // This reads key from stdin, which might consume it for others.
+        //     // But we only do it if the app is focused.
+        //     // For now, let's keep it simple.
+        //
+        //     !ctx.exit_requested
+        // });
 
 
         let key = system::with_stdin(|i| {

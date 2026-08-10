@@ -12,6 +12,7 @@ use core::fmt::Write;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 use uefi::proto::console::text::Key;
+use uefi_raw::protocol::hii::config::HiiTime;
 use crate::apps;
 use crate::apps::AppConstructor;
 use crate::hpvmlog::LOGGING_SILENCED;
@@ -286,6 +287,8 @@ pub struct SteppedApplicationContext {
     pub window: WindowState,
     pub exit_requested: bool,
     pub pid: usize,
+    pub ui_time: usize,
+    pub cpu_time: usize,
 }
 
 pub enum AppOrBackground {
@@ -300,6 +303,8 @@ pub struct BackgroundSteppedApplicationContext {
     pub environment: Environment,
     pub local_vars: Vec<String>,
     pub exit_requested: bool,
+    pub pid: usize,
+    pub cpu_time: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -449,10 +454,7 @@ impl SteppedApplicationContext {
     pub fn new(app: Application, background_tasks: Unknown<Vec<Box<dyn BackgroundTask>>>) -> SteppedApplicationContext {
         let dimensions = app.dimensions;
         let mut rng = XorShiftRng::new(12);
-        let mut id0 = rng.rand(5) as usize;
-        if id0 < 1000 {
-            id0 += 1000
-        }
+        let mut id0 = rng.rand_range(2000, 9000) as usize;
         SteppedApplicationContext {
             parent: None,
             application: app,
@@ -463,7 +465,9 @@ impl SteppedApplicationContext {
             local_vars: Vec::new(),
             window: WindowState::new(100, 100, dimensions.0, dimensions.1),
             exit_requested: false,
-            pid: id0
+            pid: id0,
+            ui_time: 0,
+            cpu_time: 0,
         }
     }
 
@@ -566,6 +570,8 @@ impl SteppedApplicationContext {
 
 impl BackgroundSteppedApplicationContext {
     pub fn new(background: Background) -> Self {
+        let mut rng = XorShiftRng::new(12);
+        let mut id0 = rng.rand_range(9001, 15000) as usize;
         Self {
             parent: None,
             background,
@@ -573,6 +579,8 @@ impl BackgroundSteppedApplicationContext {
             environment: Environment::new(),
             local_vars: Vec::new(),
             exit_requested: false,
+            pid: id0,
+            cpu_time: 0,
         }
     }
 
@@ -624,11 +632,16 @@ pub struct XSteppedApplicationContext {
     pub edit_buffer: String,
     pub search_query: String,
     pub from_ui: bool,
+    pub pid: usize,
+    pub ui_time: usize,
+    pub cpu_time: usize,
 }
 
 impl XSteppedApplicationContext {
     pub fn new(app: Application, background_tasks: Unknown<Vec<Box<dyn BackgroundTask>>>) -> Self {
         let dims = app.dimensions;
+        let mut rng = XorShiftRng::new(12);
+        let mut id0 = rng.rand_range(1000, 1999) as usize;
         Self {
             parent: None,
             application: app,
@@ -651,6 +664,9 @@ impl XSteppedApplicationContext {
             edit_buffer: String::new(),
             search_query: String::new(),
             from_ui: false,
+            pid: id0,
+            ui_time: 0,
+            cpu_time: 0,
         }
     }
 

@@ -66,7 +66,6 @@ pub enum FilePendingAction {
 ///
 /// Handles the dashboard, windowing system for applications,
 /// and user input routing.
-
 pub struct DashboardUI {
     selected_tab: DashboardTab,
     pub vms: Vec<VmDisplayInfo>,
@@ -129,6 +128,7 @@ pub struct DashboardUI {
     pub pci_devices: Vec<crate::hardware::pci::PciDeviceInfo>,
     pub tab_apps: BTreeMap<DashboardTab, crate::env::XSteppedApplicationContext>,
     pub resmon_tab: ResourceMonitorTab,
+    pub cycles: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -530,6 +530,7 @@ impl DashboardUI {
             pci_devices: Vec::new(),
             tab_apps: BTreeMap::new(),
             resmon_tab: ResourceMonitorTab::Resources,
+            cycles: 0,
         };
         ui.ensure_tab_app(DashboardTab::Overview);
         ui
@@ -1047,12 +1048,17 @@ impl DashboardUI {
                                 let hm_y = right_y + 500;
                                 pg.draw_text(right_x + 10, hm_y, "CPU Heatmap (Real-time Core Stress):", 0xFFFFFF);
                                 let mut hm_data = [0.0f32; 16];
-                                for i in 0..core::cmp::min(self.resources.cpu_core_usage.len(), 16) {
+                                for i in 0..core::cmp::min(self.resources.cpu_core_usage.len(), 1) {
                                     hm_data[i] = self.resources.cpu_core_usage[i] as f32 / 100.0;
                                 }
                                 pg.draw_heatmap(right_x + 10, hm_y + 20, right_w - 20, 80, 4, 4, &hm_data);
 
                                 // draw u64 le text for all stats
+
+                                pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.cpu_usage as u64, 0xFFFFFF);
+                                pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.used_memory_mb as u64, 0xFFFFFF);
+                                pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.frame_ms as u64, 0xFFFFFF);
+                                pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.gpu_usage as u64, 0xFFFFFF);
                             }
                             ResourceMonitorTab::Processes => {
                                 pg.draw_text(margin, content_top - 6, "| Resources |  [ Processes ]", 0xFFFFFF);
@@ -1063,11 +1069,12 @@ impl DashboardUI {
                                 let panel_h = 480usize;
 
                                 pg.draw_text_bg(panel_x, panel_y - 4, "Process Monitor", 0x20FF20, 0x222222);
-                                let headers: &[&str] = &["name", "pid", "cycles"];
-
+                                let headers: &[&str] = &["name", "pid", "cycles", "cpu time"];
+                                let cycles_string = format!("{:#?}", self.cycles);
+                                let cycles_str = cycles_string.as_str();
                                 let mut rows: Vec<&[&str]> = vec![
-                                    &["system", "0", "x"],
-                                    &["hardware", "9", "x"],
+                                    &["system", "0", "x", "x"],
+                                    &["hardware", "9", "x", "x"],
                                 ];
 
                                 // // 1. Store actual fixed-size String arrays in memory
@@ -1095,8 +1102,8 @@ impl DashboardUI {
 
                                 // 2. Hoist the backing storage variables OUTSIDE the fallback scope
                                 // These must stay alive as long as `rows` is being used
-                                let mut row_storage: Vec<[String; 3]> = Vec::new();
-                                let mut row_refs: Vec<[&str; 3]> = Vec::new();
+                                let mut row_storage: Vec<[String; 4]> = Vec::new();
+                                let mut row_refs: Vec<[&str; 4]> = Vec::new();
 
                                 // Wrap the logic in a closure or function that returns an Option/Result
                                 // 3. Fallible logic scope (your "try" block)
@@ -1136,39 +1143,62 @@ impl DashboardUI {
                                 // }
 
                                 // 2. Use a labeled loop as a "try" block that we can break out of early
+                                vdebug!("ui", "[TRY] Entering 'try_block loop...");
+
                                 'try_block: loop {
+                                    vdebug!("ui", "[TRY] Checking capacity for row_storage...");
                                     // Fallibly allocate capacity for strings
                                     if row_storage.try_reserve(self.active_apps.len()).is_err() {
-                                        break 'try_block; // "Except" branch: exit early if out of memory
+                                        vdebug!("ui", "[FAIL] Allocation failed inside row_storage.try_reserve!");
+                                        break 'try_block;
                                     }
+                                    vdebug!("ui", "[SUCCESS] row_storage memory reserved.");
 
-                                    for app in &self.active_apps {
+                                    vdebug!("ui", "[TRY] Beginning active_apps iteration loop...");
+
+                                    row_storage.push([String::from("dashboard"), String::from("14"), format!("{:#?}", self.cycles), format!("{:#?}", ((self.resources.fps as u64 * self.cycles as u64) / (TSC_PER_US * 1000000)) * 100)]);
+
+                                    for (index, app) in self.active_apps.iter().enumerate() {
+                                        // NOTE: If your UEFI app freezes right here, one of these three allocations is failing.
+                                        // Rust's default allocator will panic on OOM here unless custom catch mechanics are present.
                                         let name = app.application.name.to_string();
                                         let pid = format!("{:#?}", app.pid);
-                                        let cycles = "x".to_string();
+                                        let total_cyc = app.ui_time + app.cpu_time;
+                                        let cycles = format!("{:#?}", total_cyc);
 
-                                        row_storage.push([name, pid, cycles]);
+                                        row_storage.push([name, pid, cycles, format!("{:#?}", ((self.resources.fps as u64 * app.cpu_time as u64) / TSC_PER_US * 1000000) * 100)]);
                                     }
+                                    vdebug!("ui", "[SUCCESS] Finished active_apps loop. row_storage populated.");
 
+                                    vdebug!("ui", "[TRY] Checking capacity for row_refs...");
                                     // Fallibly allocate capacity for the slice references
                                     if row_refs.try_reserve(self.active_apps.len()).is_err() {
-                                        break 'try_block; // Exit early if allocation fails
+                                        vdebug!("ui", "[FAIL] Allocation failed inside row_refs.try_reserve!");
+                                        break 'try_block;
                                     }
+                                    vdebug!("ui", "[SUCCESS] row_refs memory reserved.");
 
+                                    vdebug!("ui", "[TRY] Extending row_refs mapping...");
                                     // Build views using references pointing directly to row_storage strings
                                     row_refs.extend(
                                         row_storage
                                             .iter()
-                                            .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str()])
+                                            .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str(), row[3].as_str()])
                                     );
+                                    vdebug!("ui", "[SUCCESS] row_refs extended successfully.");
 
+                                    vdebug!("ui", "[TRY] Pushing slice views into rows vector...");
                                     // Safely push slice views into rows
                                     for row in &row_refs {
-                                        rows.push(row);
+                                        rows.push(&row[..]);
                                     }
+                                    vdebug!("ui", "[SUCCESS] All elements safely integrated into rows.");
 
-                                    break 'try_block; // End of the successful "try" block
+                                    break 'try_block;
                                 }
+
+                                vdebug!("ui", "[EXIT] Left the 'try_block loop.");
+
 
                                 pg.draw_table_view(panel_x, panel_y + 4, panel_w, panel_h, headers, rows);
                             }
@@ -2004,11 +2034,22 @@ impl DashboardUI {
                     pg.draw_text(win_x + win_w - 15, win_y + 2, "X", 0xFFFFFF);
                     pg.draw_text(win_x + 5, win_y + 2, &app_ctx.application.name, 0xFFFFFF);
 
+
+
+                    let step_tsc_begin = unsafe { core::arch::x86_64::_rdtsc() };
                     if !app_ctx.step(None) {
                         apps_to_remove.push(idx);
                     }
+                    let step_tsc_end = unsafe { core::arch::x86_64::_rdtsc() };
 
+                    let draw_tsc_begin = unsafe { core::arch::x86_64::_rdtsc() };
                     app_ctx.draw(&mut pg);
+                    let draw_tsc_end = unsafe { core::arch::x86_64::_rdtsc() };
+
+                    app_ctx.ui_time = draw_tsc_end.saturating_sub(draw_tsc_begin) as usize;
+                    app_ctx.cpu_time = step_tsc_end.saturating_sub(step_tsc_begin) as usize;
+
+
                 }
 
                 for idx in apps_to_remove.into_iter().rev() {
