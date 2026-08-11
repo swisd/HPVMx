@@ -3,6 +3,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::proto::console::text::{Key, ScanCode};
 use crate::env::{AppInfo, Environment, Runnable};
+use crate::GLOBALENV;
 use crate::ui::pixel_graphics::PixelGraphics;
 
 #[derive(Clone)]
@@ -53,7 +54,10 @@ impl Runnable for X_Apps {
         }
     }
 
-    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {}
+    fn logic(&mut self, _vars: &mut Vec<String>, _env: &mut Environment) {
+        // Selection belongs to this window.  Pulling the dashboard selection
+        // every frame erased keyboard navigation immediately after input().
+    }
 
     fn input(&mut self, key: Key) {
         let cols = (800 - 32) / (100 + 12); // Approximate

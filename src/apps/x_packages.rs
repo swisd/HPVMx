@@ -138,7 +138,12 @@ impl Runnable for X_Packages {
         pg.draw_text(x + 20, action_y + 60, &self.status_line, 0xFFFF00);
     }
 
-    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {}
+    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
+        if let Some(data) = env.global_data.as_ref() {
+            self.registry = data.package_manager.registry.clone();
+            self.selected_package_idx = self.selected_package_idx.min(self.registry.len().saturating_sub(1));
+        }
+    }
 
     fn input(&mut self, key: Key) {
         match key {
@@ -163,21 +168,7 @@ impl Runnable for X_Packages {
                 }
             }
             Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
-                // Execute action
-                match self.package_action_idx {
-                    0 => {
-                        self.status_line = String::from("Refreshing registry...");
-                        // This needs to trigger a real refresh in DashboardUI
-                    }
-                    1 => {
-                        if let Some(name) = self.selected_package_name() {
-                            self.status_line = format!("Verifying {}...", name);
-                        }
-                    }
-                    _ => {
-                        self.status_line = format!("Action {} not implemented in App yet", self.package_action_idx);
-                    }
-                }
+                // Dashboard will execute action after sync
             }
             _ => {}
         }

@@ -36,15 +36,17 @@ impl Runnable for X_Console {
         if self.term_selected {
             pg.draw_rect_outline_adv(x + MARGIN - 1, input_y - 1, WIDTH - MARGIN * 8 + 2, 37, 0x888844, 3, 0x0F0F0F0F);
         }
-        pg.draw_text(x + MARGIN + 5, y + HEIGHT - 60, "ENTER sends, END edits, ESC leaves edit mode", 0x888888);
+        pg.draw_text(x + MARGIN + 5, y + HEIGHT - 60, "TAB edits, ENTER sends, ESC leaves edit mode", 0x888888);
         pg.draw_text(x + MARGIN + 5, y + HEIGHT - 85, &alloc::format!("HPVMx> {}", self.term_buf), 0xDDDDDD);
     }
 
-    fn logic(&mut self, _vars: &mut Vec<String>, _env: &mut Environment) {}
+    fn logic(&mut self, _vars: &mut Vec<String>, _env: &mut Environment) {
+        // The console buffer is editable local window state.
+    }
 
     fn input(&mut self, key: Key) {
         match key {
-            Key::Special(ScanCode::END) => self.term_selected = true,
+            Key::Printable(c) if char::from(c) == '\t' => self.term_selected = !self.term_selected,
             Key::Special(ScanCode::ESCAPE) => self.term_selected = false,
             Key::Special(ScanCode::UP) if self.term_selected && !self.command_history.is_empty() => {
                 let idx = self.history_idx.unwrap_or(self.command_history.len()).saturating_sub(1);

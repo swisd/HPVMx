@@ -1,4 +1,5 @@
 use alloc::{format, vec};
+use alloc::fmt::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::proto::console::text::{Key, ScanCode};
@@ -119,26 +120,49 @@ impl X_Storage {
 }
 
 fn ui_error(err: usize) {
-    vdebug!("X_Storage", "error: {:?}", err);
+    // vdebug!("X_Storage", "error: {:?}", err);
 }
 
 impl Runnable for X_Storage {
     fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
-        if self.current_path.is_empty() {
-            self.current_path = "/".parse().unwrap();
+        if let Some(data) = env.global_data.as_ref() {
+            if self.current_path.is_empty() {
+                self.current_path = data.current_path.clone();
+            }
+            self.files = data.files.clone();
+            self.selected_file_idx = self.selected_file_idx.min(self.files.len().saturating_sub(1));
         }
+
+        if self.current_path.is_empty() {
+            self.current_path = String::from("/");
+        }
+        self.filesys_new_counter += 1;
     }
     fn input(&mut self, key: Key) {
         match key {
+            Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
+                // Enter navigates directories without changing the selected
+                // file action.  End remains the explicit action key.
+                if self.files.get(self.selected_file_idx).map(|entry| entry.is_dir).unwrap_or(false) {
+                    let selected_action = self.filesys_action_idx;
+                    self.filesys_action_idx = 0; // "Open" enters a directory.
+                    self.input(Key::Special(ScanCode::END));
+                    self.filesys_action_idx = selected_action;
+                }
+            }
+            Key::Special(ScanCode::UP) => {
+                self.selected_file_idx = self.selected_file_idx.saturating_sub(1);
+            }
+            Key::Special(ScanCode::DOWN) => {
+                if !self.files.is_empty() {
+                    self.selected_file_idx = (self.selected_file_idx + 1).min(self.files.len() - 1);
+                }
+            }
             Key::Special(ScanCode::LEFT) => {
                 if self.filesys_action_idx >= 1 {self.filesys_action_idx -= 1 } else { self.filesys_action_idx = 0 }
             }
             Key::Special(ScanCode::RIGHT) => {
                 if self.filesys_action_idx < 7 {self.filesys_action_idx += 1 } else { self.filesys_action_idx = 7 }
-            }
-            Key::Special(ScanCode::ESCAPE) => {
-                self.filesys_pending_action = None;
-                self.status_line = String::from("File operation canceled");
             }
             Key::Special(ScanCode::END) => {
                 if self.files.is_empty() {
@@ -232,24 +256,10 @@ impl Runnable for X_Storage {
                         if (entry.name == "PAGEFILE") || (entry.name == "BOOTX64.EFI") {
                             ui_error(25);
                         } else {
-                            match crate::FileSystem::read_file(&full_path) {
-                                // Ok(data) => {
-                                //     let is_hex = core::str::from_utf8(&data).is_err();
-                                //
-                                //     self.editor = Some(TextEditor {
-                                //         file_path: full_path,
-                                //         buffer: data,
-                                //         cursor_pos: (0, 0),
-                                //         scroll_offset: 0,
-                                //         mode: EditorMode::Normal,
-                                //         is_hex,
-                                //         command_buffer: "".to_string(),
-                                //     });
-                                //     self.selected_tab = DashboardTab::Editor;
-                                // }
-                                // Err(_) => self.ui_error(29),
-                                _ => {}
-                            }
+                            // Dashboard will handle editor opening when it sees we're on the Storage tab
+                            // and selected_file_idx is what it is, and we've "requested" an action.
+                            // For now, we'll just set the status line and rely on sync.
+                            self.status_line = format!("Opening {}...", entry.name);
                         }
                     }
                     1 => {
@@ -305,6 +315,7 @@ impl Runnable for X_Storage {
 
     fn draw(&self, pg: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) {
 
+
         let content_top = y;
         let margin = 16usize;
         let gutter = 12usize; // space between widgets/rows
@@ -313,14 +324,17 @@ impl Runnable for X_Storage {
         let height = 500usize;
         // Title and path
         let base_y = content_top + margin;
-        pg.draw_text(margin + x, base_y - 4, "File Explorer", 0x00FF00);
+        let strx = format!("File Explorer ({:#?})", self.filesys_new_counter);
+        pg.draw_text(margin + x, base_y - 4, strx.as_str(), 0x00FF00);
         pg.draw_text(margin + x, base_y + 8, &alloc::format!("Path: {}", self.current_path), 0xAAAAAA);
 
         // Table area
         let list_x = margin + x;
         let list_y = base_y + 28;
         let list_w = core::cmp::min(width - margin * 2, 720);
-        let list_h = core::cmp::min(height - list_y - 90, 460);
+        // `list_y` is screen-space; keep the layout calculation local to the
+        // 500px content area so window placement cannot underflow it.
+        let list_h = core::cmp::min(height.saturating_sub(margin + 28 + 90), 460);
         pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
 
         // Header row with better spacing and column guides
@@ -338,7 +352,8 @@ impl Runnable for X_Storage {
             let icon = if entry.is_dir { pixel_graphics::icons::FOLDER_ICON_DATA } else {
                 let dec_syn = ["json", "xml", "toml", "yaml", "yml"];
                 let sys_syn = ["sys", "efi", "asm"];
-                let prog_syn = ["micro", "ufe", "dmx", "bin", "rs"];
+                let prog_syn = ["micro", "module", "dmx", "bin", "rs"];
+                let exec_syn = ["cxf", "cxp"];
 
 
                 let ext = entry.name.split(".").last().unwrap();
@@ -348,6 +363,8 @@ impl Runnable for X_Storage {
                     pixel_graphics::icons::EXECUTABLE_ICON_DATA
                 } else if prog_syn.contains(&ext) {
                     pixel_graphics::icons::CODE_ICON_DATA
+                } else if exec_syn.contains(&ext) {
+                    pixel_graphics::icons::EXECUTABLE_ICON_DATA
                 } else {
                     pixel_graphics::icons::FILE_ICON_DATA
                 }
@@ -409,7 +426,7 @@ impl Runnable for X_Storage {
             pg.draw_text(action_x + 6, action_y + 4, action, 0xFFFFFF);
             action_x += 100;
         }
-        pg.draw_text(margin + x, action_y + 34, "LEFT/RIGHT chooses action, END runs it; rename/copy/move/delete ask for confirmation", 0x888888);
+        pg.draw_text(margin + x, action_y + 34, "UP/DOWN selects, ENTER opens folders, END runs the selected action", 0x888888);
         pg.draw_text(margin + x, action_y + 52, &self.status_line, 0xFFFF00);
     }
 }

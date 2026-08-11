@@ -64,7 +64,11 @@ impl Runnable for X_Devices {
         }
     }
 
-    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {}
+    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
+        if let Some(data) = env.global_data.as_ref() {
+            self.categories = data.categories.clone();
+        }
+    }
     fn input(&mut self, key: Key) {
         match key {
             Key::Special(ScanCode::UP) => {
@@ -79,7 +83,7 @@ impl Runnable for X_Devices {
                 if self.selected_device_idx + 1 < total { self.selected_device_idx += 1; }
             }
             Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
-                // Toggle expansion logic needs to be handled
+                // Dashboard handles expansion toggling after sync
             }
             _ => {}
         }

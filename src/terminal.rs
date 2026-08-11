@@ -15,7 +15,7 @@ use uefi::{boot, runtime, system};
 use uefi_raw::Status;
 use uefi_raw::table::runtime::ResetType;
 use crate::filesystem::FileSystem;
-use crate::{hpvm_error, hpvm_info, hpvm_warn, hpvm_log, message, read_line, ui, HYPERVISOR, devices, loader, logiclang_int, read_line_int, env, apps, TSC_PER_US};
+use crate::{hpvm_error, hpvm_info, hpvm_warn, hpvm_log, message, read_line, ui, HYPERVISOR, devices, loader, logiclang_int, read_line_int, env, apps, TSC_PER_US, GLOBALENV};
 use crate::kernel::KernelLoader;
 use crate::rng::XorShiftRng;
 use crate::ui::DashboardUI;
@@ -1118,6 +1118,12 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                     //pg.exit()
                 }
                 break;
+            }
+        }
+
+        unsafe {
+            if let Some(env) = GLOBALENV.as_mut() {
+                dashboard = env.data.pull_from_ui_thru(dashboard);
             }
         }
 

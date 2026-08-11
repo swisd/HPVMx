@@ -4,7 +4,7 @@
 //!
 //! This module contains the core UI logic, including the `DashboardUI`
 //! which manages the main display, active applications, and system status.
-pub static DASH_BACK_ENABLED: bool = true;
+pub static DASH_BACK_ENABLED: bool = false;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use crate::{hpvm_error, hpvm_info, hpvm_log, vdebug, TSC_PER_US};
@@ -67,20 +67,20 @@ pub enum FilePendingAction {
 /// Handles the dashboard, windowing system for applications,
 /// and user input routing.
 pub struct DashboardUI {
-    selected_tab: DashboardTab,
+    pub selected_tab: DashboardTab,
     pub vms: Vec<VmDisplayInfo>,
     pub resources: SystemResources,
-    scroll_offset: usize,
-    console_scroll_offset: usize,
-    console_h_scroll_offset: usize,
-    cursor: crate::graphics::Cursor,
+    pub scroll_offset: usize,
+    pub console_scroll_offset: usize,
+    pub console_h_scroll_offset: usize,
+    pub cursor: crate::graphics::Cursor,
     pub current_path: String,
     pub files: Vec<FileEntry>,
     pub selected_file_idx: usize,
     pub categories: Vec<DeviceCategory>,
     pub selected_device_idx: usize,
     pub device_action_idx: usize,
-    exit_requested: bool,
+    pub exit_requested: bool,
 
     // Fields for Create VM UI
     pub new_vm_name: String,
@@ -126,7 +126,7 @@ pub struct DashboardUI {
 
     pub glitch_y: usize,
     pub pci_devices: Vec<crate::hardware::pci::PciDeviceInfo>,
-    pub tab_apps: BTreeMap<DashboardTab, crate::env::XSteppedApplicationContext>,
+    pub tab_apps: BTreeMap<DashboardTab, XSteppedApplicationContext>,
     pub resmon_tab: ResourceMonitorTab,
     pub cycles: usize,
 }
@@ -344,18 +344,20 @@ const UI_PALETTE_COMMANDS: &[&str] = &[
     "Help: Misc Help",
 ];
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum EditorMode {
     Normal,
     Insert,
     Command,
 }
 
+#[derive(Clone)]
 pub enum ResourceMonitorTab {
     Resources,
     Processes,
 }
 
+#[derive(Clone)]
 pub struct TextEditor {
     pub file_path: String,
     pub buffer: Vec<u8>,
@@ -747,6 +749,7 @@ impl DashboardUI {
             // for app_ctx in self.active_apps.iter_mut() {
             //     app_ctx.step(None);
             // }
+            pg.draw_icon(0, 0, 1440, 1440, &crate::backgrounds::win_snowtree::ICON_DATA);
 
             pg.draw_header(0, 0, width, 32, TSC_PER_US as usize,
                            [self.ctrl_mode, self.alt_mode, self.fn_mode],
@@ -767,1235 +770,1241 @@ impl DashboardUI {
             // The dashboard surface remains the authoritative tab renderer.
             // X contexts are launched as independent windows; they must not
             // suppress the proven dashboard layout below.
-            match self.selected_tab {
-                    DashboardTab::Overview => {
-                        pg.draw_text(20, 100, "System Overview", 0x00FF00);
+            // self.ensure_tab_app(self.selected_tab);
+            // if let Some(app_ctx) = self.tab_apps.get_mut(&self.selected_tab) {
+            //     app_ctx.step(None);
+            //     app_ctx.sync_back_to_dashboard(self);
+            //     app_ctx.application.draw(&mut pg, &app_ctx.local_vars, 0, content_top);
+            // } else {
+                if DASH_BACK_ENABLED {
+                    match self.selected_tab {
+                        DashboardTab::Overview => {
+                            pg.draw_text(20, 100, "System Overview", 0x00FF00);
 
-                        let mut y = 130;
-                        pg.draw_text(20, y, "System Health: OK", 0x00FF00);
-                        y += 30;
-                        pg.draw_text(20, y, &alloc::format!("CPU:   {} Cores, {}% Usage", self.resources.cpu_count, self.resources.cpu_usage), 0xFFFFFF);
-                        y += 20;
-                        pg.draw_text(20, y, &alloc::format!("Memory: {} / {} MB", self.resources.used_memory_mb, self.resources.total_memory_mb), 0xFFFFFF);
-                        y += 30;
+                            let mut y = 130;
+                            pg.draw_text(20, y, "System Health: OK", 0x00FF00);
+                            y += 30;
+                            pg.draw_text(20, y, &alloc::format!("CPU:   {} Cores, {}% Usage", self.resources.cpu_count, self.resources.cpu_usage), 0xFFFFFF);
+                            y += 20;
+                            pg.draw_text(20, y, &alloc::format!("Memory: {} / {} MB", self.resources.used_memory_mb, self.resources.total_memory_mb), 0xFFFFFF);
+                            y += 30;
 
-                        pg.draw_text(20, y, "I/O Performance:", 0xAAAAAA);
-                        y += 20;
-                        pg.draw_text(40, y, &alloc::format!("Disk:   Read {} KB/s, Write {} KB/s", self.resources.disk_read_kbps, self.resources.disk_write_kbps), 0xCCCCCC);
-                        y += 20;
-                        pg.draw_text(40, y, &alloc::format!("Network: RX {} KB/s, TX {} KB/s", self.resources.net_rx_kbps, self.resources.net_tx_kbps), 0xCCCCCC);
-                        y += 30;
+                            pg.draw_text(20, y, "I/O Performance:", 0xAAAAAA);
+                            y += 20;
+                            pg.draw_text(40, y, &alloc::format!("Disk:   Read {} KB/s, Write {} KB/s", self.resources.disk_read_kbps, self.resources.disk_write_kbps), 0xCCCCCC);
+                            y += 20;
+                            pg.draw_text(40, y, &alloc::format!("Network: RX {} KB/s, TX {} KB/s", self.resources.net_rx_kbps, self.resources.net_tx_kbps), 0xCCCCCC);
+                            y += 30;
 
-                        pg.draw_text(20, y, &alloc::format!("Virtualization: {} VMs Running", self.vms.iter().filter(|v| v.state.contains("Running")).count()), 0xFFFFFF);
-                        y += 20;
-                        pg.draw_text(20, y, &alloc::format!("Total VMs: {}", self.vms.len()), 0xCCCCCC);
-                        y += 30;
+                            pg.draw_text(20, y, &alloc::format!("Virtualization: {} VMs Running", self.vms.iter().filter(|v| v.state.contains("Running")).count()), 0xFFFFFF);
+                            y += 20;
+                            pg.draw_text(20, y, &alloc::format!("Total VMs: {}", self.vms.len()), 0xCCCCCC);
+                            y += 30;
 
-                        pg.draw_text(20, y, "Hardware Categories:", 0xAAAAAA);
-                        y += 20;
-                        pg.draw_text(40, y, &alloc::format!("Storage: {} Files in current path", self.files.len()), 0xCCCCCC);
-                        y += 20;
-                        pg.draw_text(40, y, &alloc::format!("Devices: {} Categories detected", self.categories.len()), 0xCCCCCC);
-                        y += 60;
-                        pg.draw_text_bg(40, y, "STATE BACKUP", 0xFF7700, 0x444444);
-                        y += 20;
-                        pg.fill_rect(40, y, 70, 30, 0x553333);
-                        pg.draw_text(42, y + 2, "SAVE [/]", 0xBBBBAA);
-
-
-                        y = 100;
-                        //pg.draw_rect_outline(420, y, 320, 420, 0xCCCCCC);
-                        let time_data_0 = format!("{:?}", runtime::get_time_and_caps().unwrap().0);
-                        let time_data_1 = format!("{:?}", runtime::get_time_and_caps().unwrap().1);
-                        pg.draw_text(420, y, &*time_data_0, 0xFFFFFF);
-                        y += 10;
-                        pg.draw_text(420, y, &*time_data_1, 0xFFFFFF);
+                            pg.draw_text(20, y, "Hardware Categories:", 0xAAAAAA);
+                            y += 20;
+                            pg.draw_text(40, y, &alloc::format!("Storage: {} Files in current path", self.files.len()), 0xCCCCCC);
+                            y += 20;
+                            pg.draw_text(40, y, &alloc::format!("Devices: {} Categories detected", self.categories.len()), 0xCCCCCC);
+                            y += 60;
+                            pg.draw_text_bg(40, y, "STATE BACKUP", 0xFF7700, 0x444444);
+                            y += 20;
+                            pg.fill_rect(40, y, 70, 30, 0x553333);
+                            pg.draw_text(42, y + 2, "SAVE [/]", 0xBBBBAA);
 
 
-                        // let text_new_0 = format!("{:?}", uefi::runtime::get_variable(VariableKey::));
-                    }
-                    DashboardTab::Apps => {
-                        pg.draw_text(margin, content_top + margin, "Application Registry", 0x00FF00);
-                        pg.draw_text(margin, content_top + margin + 20, "Select an app to launch it in a stepped context", 0xAAAAAA);
+                            y = 100;
+                            //pg.draw_rect_outline(420, y, 320, 420, 0xCCCCCC);
+                            let time_data_0 = format!("{:?}", runtime::get_time_and_caps().unwrap().0);
+                            let time_data_1 = format!("{:?}", runtime::get_time_and_caps().unwrap().1);
+                            pg.draw_text(420, y, &*time_data_0, 0xFFFFFF);
+                            y += 10;
+                            pg.draw_text(420, y, &*time_data_1, 0xFFFFFF);
 
-                        let start_y = content_top + margin + 60;
-                        let card_w = 100usize;
-                        let card_h = 75usize;
-                        let cols = (width - margin * 2) / (card_w + gutter);
-                        let cols = if cols == 0 { 1 } else { cols };
 
-                        for (idx, (name, _, icon, version)) in crate::apps::APP_REGISTRY.iter().enumerate() {
-                            let row = idx / cols;
-                            let col = idx % cols;
-                            let x = margin + col * (card_w + gutter);
-                            let y = start_y + row * (card_h + gutter);
-
-                            let is_selected = idx == self.selected_app_idx;
-                            let border_color = if is_selected { 0x00FF00 } else { 0x666666 };
-                            let bg_color = if is_selected { 0x334433 } else { 0x333333 };
-
-                            pg.fill_rect(x, y, card_w, card_h, bg_color);
-                            pg.draw_rect_outline(x, y, card_w, card_h, border_color);
-
-                            // Icon placeholder
-                            pg.draw_icon(x + card_w / 2 - 20, y + 20, 32, 32, icon);
-                            pg.draw_text(x + 10, y + card_h - 20, name, 0xFFFFFF);
-
-                            // Grid position info
-                            let pos_info = alloc::format!("v{}", version);
-                            pg.draw_text(x + 10, y + 5, &pos_info, 0x888888);
-
-                            if is_selected {
-                                pg.draw_text(x + card_w - 30, y + 5, "[*]", 0xFFFF00);
-                            }
+                            // let text_new_0 = format!("{:?}", uefi::runtime::get_variable(VariableKey::));
                         }
+                        DashboardTab::Apps => {
+                            pg.draw_text(margin, content_top + margin, "Application Registry", 0x00FF00);
+                            pg.draw_text(margin, content_top + margin + 20, "Select an app to launch it in a stepped context", 0xAAAAAA);
 
-                        pg.draw_text(margin, height - 40, "Use ARROWS to navigate | ENTER to Launch | ESC to close Apps", 0x888888);
-                    }
-                    DashboardTab::VirtualMachines => {
-                        // Title
-                        pg.draw_text(margin, content_top + margin + 4, "Virtual Machines", 0x00FF00);
+                            let start_y = content_top + margin + 60;
+                            let card_w = 100usize;
+                            let card_h = 75usize;
+                            let cols = (width - margin * 2) / (card_w + gutter);
+                            let cols = if cols == 0 { 1 } else { cols };
 
-                        // New VM Button
-                        let create_btn_x = width - margin - 120;
-                        let create_btn_y = content_top + margin;
-                        pg.fill_rect(create_btn_x, create_btn_y, 120, 24, 0x008000);
-                        pg.draw_text(create_btn_x + 10, create_btn_y + 4, "[+] Create VM", 0xFFFFFF);
+                            for (idx, (name, _, icon, version)) in crate::apps::APP_REGISTRY.iter().enumerate() {
+                                let row = idx / cols;
+                                let col = idx % cols;
+                                let x = margin + col * (card_w + gutter);
+                                let y = start_y + row * (card_h + gutter);
 
-                        // Table frame
-                        let table_x = margin;
-                        let table_y = content_top + margin + 32;
-                        let table_w = core::cmp::min(width - margin * 2, 760);
-                        let table_h = core::cmp::min(height - table_y - 120, 260);
-                        pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0x888888);
+                                let is_selected = idx == self.selected_app_idx;
+                                let border_color = if is_selected { 0x00FF00 } else { 0x666666 };
+                                let bg_color = if is_selected { 0x334433 } else { 0x333333 };
 
-                        // Header background
-                        pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
-                        pg.draw_text(table_x + 8, table_y + 4, "ID  NAME             STATE       CPU  MEM    UPTIME", 0xCCCCCC);
+                                pg.fill_rect(x, y, card_w, card_h, bg_color);
+                                pg.draw_rect_outline(x, y, card_w, card_h, border_color);
 
-                        // Rows
-                        let mut y = table_y + line_h + gutter;
-                        for (idx, vm) in self.vms.iter().enumerate() {
-                            if y + line_h > table_y + table_h - 2 { break; }
-                            let is_selected = idx == self.selected_vm_idx;
-                            let text_color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
-                            if is_selected {
-                                pg.fill_rect(table_x + 2, y - 2, table_w - 4, line_h, 0x444400);
+                                // Icon placeholder
+                                pg.draw_icon(x + card_w / 2 - 20, y + 20, 32, 32, icon);
+                                pg.draw_text(x + 10, y + card_h - 20, name, 0xFFFFFF);
+
+                                // Grid position info
+                                let pos_info = alloc::format!("v{}", version);
+                                pg.draw_text(x + 10, y + 5, &pos_info, 0x888888);
+
+                                if is_selected {
+                                    pg.draw_text(x + card_w - 30, y + 5, "[*]", 0xFFFF00);
+                                }
                             }
-                            let uptime = if vm.uptime_seconds < 60 {
-                                alloc::format!("{}s", vm.uptime_seconds)
-                            } else if vm.uptime_seconds < 3600 {
-                                alloc::format!("{}m {}s", vm.uptime_seconds / 60, vm.uptime_seconds % 60)
+
+                            pg.draw_text(margin, height - 40, "Use ARROWS to navigate | ENTER to Launch | ESC to close Apps", 0x888888);
+                        }
+                        DashboardTab::VirtualMachines => {
+                            // Title
+                            pg.draw_text(margin, content_top + margin + 4, "Virtual Machines", 0x00FF00);
+
+                            // New VM Button
+                            let create_btn_x = width - margin - 120;
+                            let create_btn_y = content_top + margin;
+                            pg.fill_rect(create_btn_x, create_btn_y, 120, 24, 0x008000);
+                            pg.draw_text(create_btn_x + 10, create_btn_y + 4, "[+] Create VM", 0xFFFFFF);
+
+                            // Table frame
+                            let table_x = margin;
+                            let table_y = content_top + margin + 32;
+                            let table_w = core::cmp::min(width - margin * 2, 760);
+                            let table_h = core::cmp::min(height - table_y - 120, 260);
+                            pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0x888888);
+
+                            // Header background
+                            pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
+                            pg.draw_text(table_x + 8, table_y + 4, "ID  NAME             STATE       CPU  MEM    UPTIME", 0xCCCCCC);
+
+                            // Rows
+                            let mut y = table_y + line_h + gutter;
+                            for (idx, vm) in self.vms.iter().enumerate() {
+                                if y + line_h > table_y + table_h - 2 { break; }
+                                let is_selected = idx == self.selected_vm_idx;
+                                let text_color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
+                                if is_selected {
+                                    pg.fill_rect(table_x + 2, y - 2, table_w - 4, line_h, 0x444400);
+                                }
+                                let uptime = if vm.uptime_seconds < 60 {
+                                    alloc::format!("{}s", vm.uptime_seconds)
+                                } else if vm.uptime_seconds < 3600 {
+                                    alloc::format!("{}m {}s", vm.uptime_seconds / 60, vm.uptime_seconds % 60)
+                                } else {
+                                    alloc::format!("{}h {}m", vm.uptime_seconds / 3600, (vm.uptime_seconds % 3600) / 60)
+                                };
+                                let info = alloc::format!("{:<3} {:<16} {:<11} {:>3}% {:>5}MB  {:>10}",
+                                                          vm.id, vm.name, vm.state, vm.cpu_usage, vm.memory_usage_mb, uptime);
+                                pg.draw_text(table_x + 8, y, &info, text_color);
+                                y += line_h;
+                            }
+
+                            // VM Details / Properties Panel
+                            let props_x = table_x + table_w + gutter;
+                            let props_w = width.saturating_sub(props_x + margin);
+                            if props_w > 150 {
+                                let props_h = table_h;
+                                pg.draw_rect_outline(props_x, table_y, props_w, props_h, 0x888888);
+                                pg.draw_text_bg(props_x + 10, table_y - 4, "VM Properties", 0x00FF00, 0x222222);
+
+                                if let Some(vm) = self.vms.get(self.selected_vm_idx) {
+                                    let mut py = table_y + 10;
+                                    pg.draw_text(props_x + 10, py, &alloc::format!("Name: {}", vm.name), 0xFFFFFF);
+                                    py += 20;
+                                    pg.draw_text(props_x + 10, py, &alloc::format!("ID:   {}", vm.id), 0xCCCCCC);
+                                    py += 20;
+                                    pg.draw_text(props_x + 10, py, &alloc::format!("State: {}", vm.state), if vm.state.contains("Running") { 0x00FF00 } else { 0xFFFFFF });
+                                    py += 20;
+                                    pg.draw_text(props_x + 10, py, &alloc::format!("vCPUs: {}", vm.cpu_usage), 0xCCCCCC); // Actually usage, but good to show
+                                    py += 20;
+                                    pg.draw_text(props_x + 10, py, &alloc::format!("RAM:   {} MB", vm.memory_usage_mb), 0xCCCCCC);
+                                    py += 20;
+                                    pg.draw_text(props_x + 10, py, &alloc::format!("Disk:  {} MB", vm.disk_usage_mb), 0xCCCCCC);
+                                    py += 20;
+                                    pg.draw_text(props_x + 10, py, &alloc::format!("Uptime: {}s", vm.uptime_seconds), 0x888888);
+                                } else {
+                                    pg.draw_text(props_x + 10, table_y + 10, "No VM selected", 0x888888);
+                                }
+                            }
+
+                            // VM Actions Bar
+                            if !self.vms.is_empty() {
+                                let actions_y = table_y + table_h + gutter;
+                                pg.draw_text(margin, actions_y, "Actions for Selected VM:", 0xCCCCCC);
+                                let actions = ["Start", "Stop", "Reset", "Zero", "Delete", "Save", "Restore", "Console"];
+                                let mut action_x = margin;
+                                let action_y = actions_y + 20;
+                                for (idx, action) in actions.iter().enumerate() {
+                                    let is_focused = idx == self.vm_action_idx;
+                                    let color = if is_focused { 0x00AA00 } else { 0x444444 };
+                                    pg.fill_rect(action_x, action_y, 78, 24, color);
+                                    pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
+                                    action_x += 88;
+                                }
+                                pg.draw_text(margin, action_y + 32, "Press ENTER to execute action | SPACE to Create VM", 0x888888);
                             } else {
-                                alloc::format!("{}h {}m", vm.uptime_seconds / 3600, (vm.uptime_seconds % 3600) / 60)
-                            };
-                            let info = alloc::format!("{:<3} {:<16} {:<11} {:>3}% {:>5}MB  {:>10}",
-                                                      vm.id, vm.name, vm.state, vm.cpu_usage, vm.memory_usage_mb, uptime);
-                            pg.draw_text(table_x + 8, y, &info, text_color);
-                            y += line_h;
-                        }
-
-                        // VM Details / Properties Panel
-                        let props_x = table_x + table_w + gutter;
-                        let props_w = width.saturating_sub(props_x + margin);
-                        if props_w > 150 {
-                            let props_h = table_h;
-                            pg.draw_rect_outline(props_x, table_y, props_w, props_h, 0x888888);
-                            pg.draw_text_bg(props_x + 10, table_y - 4, "VM Properties", 0x00FF00, 0x222222);
-
-                            if let Some(vm) = self.vms.get(self.selected_vm_idx) {
-                                let mut py = table_y + 10;
-                                pg.draw_text(props_x + 10, py, &alloc::format!("Name: {}", vm.name), 0xFFFFFF);
-                                py += 20;
-                                pg.draw_text(props_x + 10, py, &alloc::format!("ID:   {}", vm.id), 0xCCCCCC);
-                                py += 20;
-                                pg.draw_text(props_x + 10, py, &alloc::format!("State: {}", vm.state), if vm.state.contains("Running") { 0x00FF00 } else { 0xFFFFFF });
-                                py += 20;
-                                pg.draw_text(props_x + 10, py, &alloc::format!("vCPUs: {}", vm.cpu_usage), 0xCCCCCC); // Actually usage, but good to show
-                                py += 20;
-                                pg.draw_text(props_x + 10, py, &alloc::format!("RAM:   {} MB", vm.memory_usage_mb), 0xCCCCCC);
-                                py += 20;
-                                pg.draw_text(props_x + 10, py, &alloc::format!("Disk:  {} MB", vm.disk_usage_mb), 0xCCCCCC);
-                                py += 20;
-                                pg.draw_text(props_x + 10, py, &alloc::format!("Uptime: {}s", vm.uptime_seconds), 0x888888);
-                            } else {
-                                pg.draw_text(props_x + 10, table_y + 10, "No VM selected", 0x888888);
+                                pg.draw_text(margin, table_y + table_h + gutter, "No VMs. Press SPACE to Create VM", 0x888888);
                             }
                         }
+                        DashboardTab::CreateVM => {
+                            pg.draw_text(margin, content_top + margin, "Create New Virtual Machine", 0x00FF00);
 
-                        // VM Actions Bar
-                        if !self.vms.is_empty() {
-                            let actions_y = table_y + table_h + gutter;
-                            pg.draw_text(margin, actions_y, "Actions for Selected VM:", 0xCCCCCC);
-                            let actions = ["Start", "Stop", "Reset", "Zero", "Delete", "Save", "Restore", "Console"];
+                            let form_x = margin + 20;
+                            let mut form_y = content_top + margin + 40;
+
+                            // Name Field
+                            pg.draw_text(form_x, form_y, "Name:", 0xFFFFFF);
+                            let name_focus = self.create_vm_focus_idx == 0;
+                            pg.draw_rect_outline(form_x + 100, form_y - 4, 200, 24, if name_focus { 0xFFFF00 } else { 0x888888 });
+                            pg.draw_text(form_x + 105, form_y, &self.new_vm_name, 0xFFFFFF);
+
+                            form_y += 40;
+                            // CPU Cores Field
+                            pg.draw_text(form_x, form_y, "vCPUs:", 0xFFFFFF);
+                            let cpu_focus = self.create_vm_focus_idx == 1;
+                            pg.draw_rect_outline(form_x + 100, form_y - 4, 100, 24, if cpu_focus { 0xFFFF00 } else { 0x888888 });
+                            pg.draw_text(form_x + 105, form_y, &alloc::format!("{}", self.new_vm_vcpus), 0xFFFFFF);
+                            pg.draw_text(form_x + 210, form_y, "(Use + / - to change)", 0x888888);
+
+                            form_y += 40;
+                            // Memory Field
+                            pg.draw_text(form_x, form_y, "Memory (MB):", 0xFFFFFF);
+                            let mem_focus = self.create_vm_focus_idx == 2;
+                            pg.draw_rect_outline(form_x + 100, form_y - 4, 100, 24, if mem_focus { 0xFFFF00 } else { 0x888888 });
+                            pg.draw_text(form_x + 105, form_y, &alloc::format!("{}", self.new_vm_memory_mb), 0xFFFFFF);
+                            pg.draw_text(form_x + 210, form_y, "(Use + / - to change)", 0x888888);
+
+                            form_y += 60;
+                            // Buttons
+                            let create_focused = self.create_vm_focus_idx == 3;
+                            pg.fill_rect(form_x, form_y, 120, 32, if create_focused { 0x00AA00 } else { 0x006600 });
+                            pg.draw_text(form_x + 20, form_y + 8, "CREATE", 0xFFFFFF);
+
+                            let cancel_focused = self.create_vm_focus_idx == 4;
+                            pg.fill_rect(form_x + 140, form_y, 120, 32, if cancel_focused { 0xAA0000 } else { 0x660000 });
+                            pg.draw_text(form_x + 20 + 140, form_y + 8, "CANCEL", 0xFFFFFF);
+
+                            pg.draw_text(margin, form_y + 50, "TAB to switch fields | ENTER to confirm | ESC to cancel", 0x888888);
+                        }
+                        DashboardTab::Resources => {
+                            match self.resmon_tab {
+                                ResourceMonitorTab::Resources => {
+                                    pg.draw_text(margin, content_top - 6, "[ Resources ]  | Processes |", 0xFFFFFF);
+
+                                    // Left info panel
+                                    let panel_x = margin;
+                                    let panel_y = content_top + margin;
+                                    let panel_w = 360usize;
+                                    let panel_h = 480usize;
+                                    pg.draw_rect_outline(panel_x, panel_y, panel_w, panel_h, 0x888888);
+                                    pg.draw_text_bg(panel_x, panel_y - 4, "Resource Monitor", 0x20FF20, 0x222222);
+
+                                    pg.draw_text(panel_x + 10, panel_y + 16, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
+                                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
+                                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h * 2, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
+
+                                    // Memory usage bar and graph
+                                    let bar_y = panel_y + 16 + line_h * 3 + gutter;
+                                    pg.draw_text(panel_x + 10, bar_y, "Memory History (10s):", 0xCCCCCC);
+                                    pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00, 60);
+
+                                    // I/O Stats and Graphs
+                                    let io_y = bar_y + 80 + gutter * 2;
+                                    pg.draw_text(panel_x + 10, io_y, "Net Traffic (RX:Cyan TX:Yellow)", 0xCCCCCC);
+                                    pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF, 60);
+                                    pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00, 60);
+
+                                    let disk_y = io_y + 80;
+                                    pg.draw_text(panel_x + 10, disk_y, "Disk I/O (Read:White Write:Red)", 0xCCCCCC);
+                                    pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF, 60);
+                                    pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000, 60);
+
+                                    let gpu_y = disk_y + 80;
+                                    pg.draw_text(panel_x + 10, gpu_y, "GPU Usage:", 0xCCCCCC);
+                                    pg.draw_line_graph(panel_x + 10, gpu_y + 20, 165, 50, &self.resources.gpu_history, 100, 0xFF7700, 60);
+
+
+                                    // Right CPU core list panel or Total CPU Graph
+                                    let right_x = panel_x + panel_w + gutter * 2;
+                                    let right_y = panel_y;
+                                    let right_w = core::cmp::min(width - right_x - margin, 360);
+                                    let right_h = core::cmp::min(height - right_y - 100, 260);
+                                    pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
+                                    pg.draw_text_bg(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF, 0x222222);
+                                    pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00, 60);
+
+                                    pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
+                                    for i in 0..self.resources.cpu_count {
+                                        let row_y = right_y + 120 + (i as usize * (line_h + 4));
+                                        if row_y + line_h > right_y + right_h - 8 { break; }
+                                        let usage = if i < self.resources.cpu_core_usage.len() as u32 { self.resources.cpu_core_usage[i as usize] } else { 0 };
+                                        pg.draw_text(right_x + 10, row_y, &alloc::format!("C{}:{:>2}%", i, usage), 0xCCCCCC);
+                                        pg.draw_progress_bar(right_x + 70, row_y, right_w - 80, 12, usage as usize, 100, 0x00FF00);
+                                    }
+
+                                    pg.draw_text_bg(right_x + 10, right_y + 300, "FPS History:", 0xFFFFFF, 0x222222);
+                                    pg.draw_line_graph(right_x + 10, right_y + 300, right_w - 20, 80, &self.resources.fps_history, 75, 0xFF44FF, 60);
+                                    pg.draw_text_bg(right_x + 10, right_y + 400, "Frame MS History:", 0xFFFFFF, 0x222222);
+                                    pg.draw_line_graph(right_x + 10, right_y + 400, right_w - 20, 80, &self.resources.ft_ms_history, 750, 0xFFAAFF, 60);
+
+                                    // Heatmap for CPU Core usage
+                                    let hm_y = right_y + 500;
+                                    pg.draw_text(right_x + 10, hm_y, "CPU Heatmap (Real-time Core Stress):", 0xFFFFFF);
+                                    let mut hm_data = [0.0f32; 16];
+                                    for i in 0..core::cmp::min(self.resources.cpu_core_usage.len(), 1) {
+                                        hm_data[i] = self.resources.cpu_core_usage[i] as f32 / 100.0;
+                                    }
+                                    pg.draw_heatmap(right_x + 10, hm_y + 20, right_w - 20, 80, 4, 4, &hm_data);
+
+                                    // draw u64 le text for all stats
+
+                                    pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.cpu_usage as u64, 0xFFFFFF);
+                                    pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.used_memory_mb as u64, 0xFFFFFF);
+                                    pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.frame_ms as u64, 0xFFFFFF);
+                                    pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.gpu_usage as u64, 0xFFFFFF);
+                                }
+                                ResourceMonitorTab::Processes => {
+                                    pg.draw_text(margin, content_top - 6, "| Resources |  [ Processes ]", 0xFFFFFF);
+
+                                    let panel_x = margin;
+                                    let panel_y = content_top + margin;
+                                    let panel_w = 600usize;
+                                    let panel_h = 480usize;
+
+                                    pg.draw_text_bg(panel_x, panel_y - 4, "Process Monitor", 0x20FF20, 0x222222);
+                                    let headers: &[&str] = &["name", "pid", "cycles", "cpu time"];
+                                    let cycles_string = format!("{:#?}", self.cycles);
+                                    let cycles_str = cycles_string.as_str();
+                                    let mut rows: Vec<&[&str]> = vec![
+                                        &["system", "0", "x", "x"],
+                                        &["hardware", "9", "x", "x"],
+                                    ];
+
+                                    // // 1. Store actual fixed-size String arrays in memory
+                                    // let mut row_storage: Vec<[String; 3]> = Vec::with_capacity(self.active_apps.len());
+                                    //
+                                    // for app in &self.active_apps {
+                                    //     let name = app.application.name.to_string();
+                                    //     let pid = format!("{:#?}", app.pid);
+                                    //     let cycles = "x".to_string();
+                                    //
+                                    //     row_storage.push([name, pid, cycles]);
+                                    // }
+                                    //
+                                    // // 2. Build slice references into the stored arrays
+                                    // // Constructing &[&str] views referencing the backing String data
+                                    // let row_refs: Vec<[&str; 3]> = row_storage
+                                    //     .iter()
+                                    //     .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str()])
+                                    //     .collect();
+                                    //
+                                    // // 3. Push slice views into rows
+                                    // for row in &row_refs {
+                                    //     rows.push(row);
+                                    // }
+
+                                    // 2. Hoist the backing storage variables OUTSIDE the fallback scope
+                                    // These must stay alive as long as `rows` is being used
+                                    let mut row_storage: Vec<[String; 4]> = Vec::new();
+                                    let mut row_refs: Vec<[&str; 4]> = Vec::new();
+
+                                    // Wrap the logic in a closure or function that returns an Option/Result
+                                    // 3. Fallible logic scope (your "try" block)
+                                    // let mut allocate_rows = || -> Option<()> {
+                                    //     // Safely allocate room for the strings
+                                    //     row_storage.try_reserve(self.active_apps.len()).ok()?;
+                                    //
+                                    //     for app in &self.active_apps {
+                                    //         let name = app.application.name.to_string();
+                                    //         let pid = format!("{:#?}", app.pid);
+                                    //         let cycles = "x".to_string();
+                                    //
+                                    //         row_storage.push([name, pid, cycles]);
+                                    //     }
+                                    //
+                                    //     // Safely reserve room for the slice references
+                                    //     row_refs.try_reserve(self.active_apps.len()).ok()?;
+                                    //
+                                    //     // Build the string views into the outer row_refs
+                                    //     row_refs.extend(
+                                    //         row_storage
+                                    //             .iter()
+                                    //             .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str()])
+                                    //     );
+                                    //
+                                    //     // Push slice views into rows
+                                    //     for row in &row_refs {
+                                    //         rows.push(row);
+                                    //     }
+                                    //
+                                    //     Some(())
+                                    // };
+                                    //
+                                    // // "Try/Except" wrapper: If it returns None, execution safely skips the rest
+                                    // if allocate_rows().is_none() {
+                                    //     vdebug!("ui", "OOM alloc error DashboardTab::Resources.ResourceMonitorTab::Processes.var:rows")
+                                    // }
+
+                                    // 2. Use a labeled loop as a "try" block that we can break out of early
+                                    vdebug!("ui", "[TRY] Entering 'try_block loop...");
+
+                                    'try_block: loop {
+                                        vdebug!("ui", "[TRY] Checking capacity for row_storage...");
+                                        // Fallibly allocate capacity for strings
+                                        if row_storage.try_reserve(self.active_apps.len()).is_err() {
+                                            vdebug!("ui", "[FAIL] Allocation failed inside row_storage.try_reserve!");
+                                            break 'try_block;
+                                        }
+                                        vdebug!("ui", "[SUCCESS] row_storage memory reserved.");
+
+                                        vdebug!("ui", "[TRY] Beginning active_apps iteration loop...");
+
+                                        row_storage.push([String::from("dashboard"), String::from("14"), format!("{:#?}", self.cycles), format!("{:#?}", ((self.resources.fps as u64 * self.cycles as u64) / (TSC_PER_US * 1000000)) * 100)]);
+
+                                        for (index, app) in self.active_apps.iter().enumerate() {
+                                            // NOTE: If your UEFI app freezes right here, one of these three allocations is failing.
+                                            // Rust's default allocator will panic on OOM here unless custom catch mechanics are present.
+                                            let name = app.application.name.to_string();
+                                            let pid = format!("{:#?}", app.pid);
+                                            let total_cyc = app.ui_time + app.cpu_time;
+                                            let cycles = format!("{:#?}", total_cyc);
+
+                                            row_storage.push([name, pid, cycles, format!("{:#?}", ((self.resources.fps as u64 * app.cpu_time as u64) / TSC_PER_US * 1000000) * 100)]);
+                                        }
+                                        vdebug!("ui", "[SUCCESS] Finished active_apps loop. row_storage populated.");
+
+                                        vdebug!("ui", "[TRY] Checking capacity for row_refs...");
+                                        // Fallibly allocate capacity for the slice references
+                                        if row_refs.try_reserve(self.active_apps.len()).is_err() {
+                                            vdebug!("ui", "[FAIL] Allocation failed inside row_refs.try_reserve!");
+                                            break 'try_block;
+                                        }
+                                        vdebug!("ui", "[SUCCESS] row_refs memory reserved.");
+
+                                        vdebug!("ui", "[TRY] Extending row_refs mapping...");
+                                        // Build views using references pointing directly to row_storage strings
+                                        row_refs.extend(
+                                            row_storage
+                                                .iter()
+                                                .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str(), row[3].as_str()])
+                                        );
+                                        vdebug!("ui", "[SUCCESS] row_refs extended successfully.");
+
+                                        vdebug!("ui", "[TRY] Pushing slice views into rows vector...");
+                                        // Safely push slice views into rows
+                                        for row in &row_refs {
+                                            rows.push(&row[..]);
+                                        }
+                                        vdebug!("ui", "[SUCCESS] All elements safely integrated into rows.");
+
+                                        break 'try_block;
+                                    }
+
+                                    vdebug!("ui", "[EXIT] Left the 'try_block loop.");
+
+
+                                    pg.draw_table_view(panel_x, panel_y + 4, panel_w, panel_h, headers, rows);
+                                }
+                            }
+                        }
+                        DashboardTab::Network => {
+                            let x = 20;
+                            let mut y = 100;
+                            pg.draw_text(x, y, "Network Status", 0x00FF00);
+                            let net_stats = crate::devices::net_stack::stats();
+                            y += 30;
+                            pg.draw_text(x, y, &alloc::format!("Backend: {}", crate::devices::net_stack::backend_name()), 0xFFFFFF);
+                            y += 30;
+                            pg.draw_text(x, y, "Statistics:", 0xAAAAAA);
+
+                            let x = 40;
+                            let mut y = 180;
+                            pg.draw_text(x, y, &alloc::format!("RX Packets: {}", net_stats.rx_pkts), 0xCCCCCC);
+                            y += 20;
+                            pg.draw_text(x, y, &alloc::format!("TX Packets: {}", net_stats.tx_pkts), 0xCCCCCC);
+                            y += 20;
+                            pg.draw_text(x, y, &alloc::format!("RX Bytes:   {}", net_stats.rx_bytes), 0xCCCCCC);
+                            y += 20;
+                            pg.draw_text(x, y, &alloc::format!("TX Bytes:   {}", net_stats.tx_bytes), 0xCCCCCC);
+
+                            y += 100;
+                            let state = crate::devices::net_stack::get_state();
+                            pg.draw_text(x, y, &alloc::format!("IP: {}.{}.{}.{}", state.ip_addr[0], state.ip_addr[1], state.ip_addr[2], state.ip_addr[3]), 0xCCCCCC);
+                            y += 20;
+                            pg.draw_text(x, y, &alloc::format!("GW: {}.{}.{}.{}", state.gateway[0], state.gateway[1], state.gateway[2], state.gateway[3]), 0xCCCCCC);
+                            y += 20;
+                            pg.draw_text(x, y, &alloc::format!("MASK: {}.{}.{}.{}", state.subnet_mask[0], state.subnet_mask[1], state.subnet_mask[2], state.subnet_mask[3]), 0xCCCCCC);
+                            y += 20;
+                            pg.draw_text(x, y, &alloc::format!("MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", state.mac_addr[0], state.mac_addr[1], state.mac_addr[2], state.mac_addr[3], state.mac_addr[4], state.mac_addr[5]), 0xCCCCCC);
+                            y += 40;
+                            let is_init = crate::devices::net_stack::is_initialized();
+                            pg.draw_text(x, y, &alloc::format!("Initialized: {is_init}", ), 0xFFFFFF);
+                            y += 35;
+
+                            pg.draw_text(x, y, &alloc::format!("Target: {}", self.network_target), 0xCCCCCC);
+                            y += 28;
+
+                            pg.draw_text(x, y, "Traffic Monitor (10s):", 0x00FFFF);
+                            y += 20;
+                            pg.draw_text(x, y, &alloc::format!("RX: {} KB/s", self.resources.net_rx_kbps), 0x00FF00);
+                            pg.draw_line_graph(x + 120, y - 10, 200, 40, &self.resources.net_rx_history, 1024, 0x00FF00, 60);
+                            y += 50;
+                            pg.draw_text(x, y, &alloc::format!("TX: {} KB/s", self.resources.net_tx_kbps), 0xFF0000);
+                            pg.draw_line_graph(x + 120, y - 10, 200, 40, &self.resources.net_tx_history, 1024, 0xFF0000, 60);
+                            y += 60;
+
+                            let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off"];
+                            let mut action_x = x;
+                            for (idx, action) in actions.iter().enumerate() {
+                                let is_focused = idx == self.selected_network_action_idx;
+                                pg.fill_rect(action_x, y, 88, 24, if is_focused { 0x00AA00 } else { 0x444444 });
+                                pg.draw_text(action_x + 8, y + 4, action, 0xFFFFFF);
+                                action_x += 96;
+                            }
+                            y += 36;
+                            pg.draw_text(x, y, "LEFT/RIGHT chooses action, ENTER runs it, +/- cycles ping target", 0x888888);
+                            y += 20;
+                            pg.draw_text(x, y, &self.status_line, 0xFFFF00);
+                        }
+                        DashboardTab::Console => {
+                            pg.draw_text(20, 100, "Hypervisor Real-time Log", 0x00FF00);
+                            let logs = crate::hpvmlog::get_logs();
+                            pg.draw_log_viewer(
+                                margin,
+                                130,
+                                width - margin * 2,
+                                height - 135 - margin * 8,
+                                &logs,
+                                self.console_scroll_offset,
+                                self.console_h_scroll_offset,
+                            );
+
+                            let y_msg = height - margin * 6;
+                            pg.draw_text(margin, y_msg, "Use PgUp/PgDn to scroll logs, LEFT/RIGHT to scroll text, C to clear", 0x888888);
+
+                            pg.draw_rect_outline(margin, height - 95, width - margin * 8, 35, 0x999999);
+                            if self.term_selected {
+                                pg.draw_rect_outline_adv(margin - 1, height - 96, (width - margin * 8) + 2, 37, 0x888844, 3, 0x0F0F0F0F);
+                            }
+                            pg.draw_text(margin + 5, height - 60, "press enter to send, end to enter type mode, and esc to exit", 0x888888);
+                            pg.draw_text(margin + 5, height - 85, alloc::format!("HPVMx> {}", self.term_buf).as_str(), 0xDDDDDD);
+                        }
+                        DashboardTab::Devices => {
+                            pg.draw_text(20, 100, "Device Manager", 0x00FF00);
+
+                            let mut y = 130;
+                            let mut current_idx = 0;
+
+                            for cat in &self.categories {
+                                let expanded_icon = if cat.expanded { "[-] " } else { "[+] " };
+                                let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xAAAAAA };
+                                pg.draw_text(20, y, &alloc::format!("{}{}{} ({})", expanded_icon, cat.icon, cat.name, cat.devices.len()), color);
+                                y += 20;
+                                current_idx += 1;
+
+                                if cat.expanded {
+                                    for dev in &cat.devices {
+                                        let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xFFFFFF };
+                                        pg.draw_icon(35, y - 2, 16, 16, if cat.name == "Network Adapters" { &pixel_graphics::icons::PCI_GREEN_ICON_DATA } else { &pixel_graphics::icons::PCI_BLUE_ICON_DATA });
+
+                                        // Split path after third '/' for the list view as well
+                                        let path = &dev.path;
+                                        let mut slash_count = 0;
+                                        let mut split_idx = None;
+                                        for (i, c) in path.char_indices() {
+                                            if c == '/' {
+                                                slash_count += 1;
+                                                if slash_count == 3 {
+                                                    split_idx = Some(i + 1);
+                                                    break;
+                                                }
+                                            }
+                                        }
+
+                                        if let Some(idx) = split_idx {
+                                            pg.draw_text(45, y, &alloc::format!(" {}: {}", dev.name, &path[..idx]), color);
+                                            y += 18;
+                                            pg.draw_text(65, y, &path[idx..], 0x888888);
+                                            y += 22;
+                                        } else {
+                                            pg.draw_text(45, y, &alloc::format!(" {}: {}", dev.name, dev.path), color);
+                                            y += 20;
+                                        }
+
+                                        current_idx += 1;
+                                        if y > height - 60 { break; }
+                                    }
+                                }
+                                if y > height - 60 { break; }
+                            }
+
+                            // Device Details Panel
+                            let detail_x = width / 2;
+                            let detail_y = 130;
+                            let detail_w = (width / 2) - 20;
+                            let detail_h = height - 200;
+                            pg.draw_rect_outline(detail_x, detail_y, detail_w, detail_h, 0x888888);
+                            pg.draw_text_bg(detail_x + 10, detail_y - 4, "Device Properties", 0x00FF00, 0x222222);
+
+                            let mut current_search_idx = 0;
+                            let mut selected_device = None;
+                            for cat in &self.categories {
+                                if current_search_idx == self.selected_device_idx {
+                                    // Category selected, not a device
+                                    break;
+                                }
+                                current_search_idx += 1;
+                                if cat.expanded {
+                                    for dev in &cat.devices {
+                                        if current_search_idx == self.selected_device_idx {
+                                            selected_device = Some((dev, &cat.name));
+                                            break;
+                                        }
+                                        current_search_idx += 1;
+                                    }
+                                }
+                                if selected_device.is_some() { break; }
+                            }
+
+                            if let Some((dev, cat_name)) = selected_device {
+                                let mut dy = detail_y + 10;
+                                pg.draw_text(detail_x + 10, dy, &alloc::format!("Name: {}", dev.name), 0xFFFFFF);
+                                dy += 20;
+                                pg.draw_text(detail_x + 10, dy, &alloc::format!("Category: {}", cat_name), 0xCCCCCC);
+                                dy += 20;
+                                pg.draw_text(detail_x + 10, dy, "UEFI Path:", 0xAAAAAA);
+                                dy += 15;
+
+                                // Shorten, wrap and indent path after the third '/'
+                                let path = &dev.path;
+                                let mut parts = alloc::vec::Vec::new();
+
+                                let mut slash_count = 0;
+                                let mut last_split = 0;
+                                for (i, c) in path.char_indices() {
+                                    if c == '/' {
+                                        slash_count += 1;
+                                        if slash_count == 3 {
+                                            parts.push(&path[..i + 1]);
+                                            last_split = i + 1;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if last_split > 0 {
+                                    parts.push(&path[last_split..]);
+                                } else {
+                                    parts.push(path);
+                                }
+
+                                let chunk_size = (detail_w - 30) / 8; // slightly smaller to account for indentation
+                                if chunk_size > 0 {
+                                    for (i, part) in parts.iter().enumerate() {
+                                        let indent = if i > 0 { 20 } else { 0 };
+                                        let current_chunk_size = if i > 0 { chunk_size.saturating_sub(3) } else { chunk_size };
+
+                                        if part.len() <= current_chunk_size {
+                                            pg.draw_text(detail_x + 10 + indent, dy, part, 0x888888);
+                                            dy += 15;
+                                        } else {
+                                            for chunk in part.as_bytes().chunks(current_chunk_size) {
+                                                if let Ok(s) = core::str::from_utf8(chunk) {
+                                                    pg.draw_text(detail_x + 10 + indent, dy, s, 0x888888);
+                                                    dy += 15;
+                                                }
+                                                if dy > detail_y + detail_h - 20 { break; }
+                                            }
+                                        }
+                                        if dy > detail_y + detail_h - 20 { break; }
+                                    }
+                                }
+
+                                dy += 20;
+                                if cat_name.contains("PCI") {
+                                    pg.draw_text(detail_x + 10, dy, "PCI Information:", 0x00FFFF);
+                                    dy += 20;
+                                    // Search for more detailed info in self.pci_devices
+                                    if let Some(pci) = self.pci_devices.iter().find(|p| {
+                                        format!("{:02X}:{:02X}.{}", p.bus, p.device, p.function) == dev.name
+                                    }) {
+                                        pg.draw_text(detail_x + 10, dy, &format!("Vendor:   {}", pci.vendor_name()), 0xFFFFFF);
+                                        dy += 16;
+                                        pg.draw_text(detail_x + 10, dy, &format!("Device:   0x{:04X}", pci.device_id), 0xFFFFFF);
+                                        dy += 16;
+                                        pg.draw_text(detail_x + 10, dy, &format!("Class:    {}", pci.class_name()), 0xFFFFFF);
+                                        dy += 16;
+                                        pg.draw_text(detail_x + 10, dy, &format!("Revision: 0x{:02X}", pci.revision_id), 0xCCCCCC);
+                                        dy += 16;
+                                        pg.draw_text(detail_x + 10, dy, &format!("Interface: 0x{:02X}", pci.interface_id), 0xCCCCCC);
+                                        dy += 20;
+                                        pg.draw_text(detail_x + 10, dy, "Hardware Status: Online", 0x55FF55);
+                                    } else {
+                                        pg.draw_text(detail_x + 10, dy, "Scanning for PCI Vendor/Device IDs...", 0x666666);
+                                    }
+                                }
+                            } else {
+                                pg.draw_text(detail_x + 10, detail_y + 10, "Select a device to view properties", 0x888888);
+                            }
+
+                            // Device Actions
+                            let action_y = detail_y + detail_h + 20;
+                            let actions = ["Refresh List", "Scan PCI Bus", "Diagnostics", "Toggle Expanded"];
+                            let mut ax = 20;
+                            for (idx, action) in actions.iter().enumerate() {
+                                let is_focused = idx == self.device_action_idx && !self.term_selected;
+                                pg.fill_rect(ax, action_y, 140, 26, if is_focused { 0x00AA00 } else { 0x444444 });
+                                pg.draw_text(ax + 8, action_y + 5, action, 0xFFFFFF);
+                                ax += 150;
+                            }
+                            if self.device_action_idx == 1 {
+                                pg.draw_text(20, action_y + 35, "Scans the PCI bus using Port IO (0xCF8/0xCFC) to detect hardware", 0x00AAAA);
+                            }
+                        }
+                        DashboardTab::Storage => {
+                            // Title and path
+                            let base_y = content_top + margin;
+                            pg.draw_text(margin, base_y - 4, "File Explorer", 0x00FF00);
+                            pg.draw_text(margin, base_y + 8, &alloc::format!("Path: {}", self.current_path), 0xAAAAAA);
+
+                            // Table area
+                            let list_x = margin;
+                            let list_y = base_y + 28;
+                            let list_w = core::cmp::min(width - margin * 2, 720);
+                            let list_h = core::cmp::min(height - list_y - 90, 460);
+                            pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
+
+                            // Header row with better spacing and column guides
+                            pg.fill_rect(list_x + 1, list_y + 1, list_w - 2, line_h, 0x333333);
+                            pg.draw_text(list_x + 8, list_y + 4, "TYPE  NAME                                 SIZE (BYTES)  ATTR", 0xCCCCCC);
+                            // Optional column separators
+                            pg.draw_line(list_x + 48, list_y + 1, list_x + 48, list_y + list_h - 1, 0x444444);
+                            pg.draw_line(list_x + 340, list_y + 1, list_x + 340, list_y + list_h - 1, 0x444444);
+
+                            // Rows
+                            let mut y = list_y + line_h + gutter;
+                            for (i, entry) in self.files.iter().enumerate() {
+                                if y + line_h > list_y + list_h - 2 { break; }
+                                let color = if i == self.selected_file_idx { 0xFFFF00 } else { 0xFFFFFF };
+                                let icon = if entry.is_dir { pixel_graphics::icons::FOLDER_ICON_DATA } else {
+                                    let dec_syn = ["json", "xml", "toml", "yaml", "yml"];
+                                    let sys_syn = ["sys", "efi", "asm"];
+                                    let prog_syn = ["micro", "ufe", "dmx", "bin", "rs"];
+
+
+                                    let ext = entry.name.split(".").last().unwrap();
+                                    if dec_syn.contains(&ext) {
+                                        pixel_graphics::icons::JSON_ICON_DATA
+                                    } else if sys_syn.contains(&ext) {
+                                        pixel_graphics::icons::EXECUTABLE_ICON_DATA
+                                    } else if prog_syn.contains(&ext) {
+                                        pixel_graphics::icons::CODE_ICON_DATA
+                                    } else {
+                                        pixel_graphics::icons::FILE_ICON_DATA
+                                    }
+                                };
+
+                                let size: String = if entry.size < 10000 {
+                                    format!("{}", entry.size)
+                                } else if entry.size / 1024 < 10000 {
+                                    format!("{}K", (entry.size / 1024))
+                                } else {
+                                    format!("{}M", (entry.size / 1024) / 1024)
+                                };
+
+
+                                let background = if i == self.selected_file_idx { 0x333333 } else { 0x222222 };
+                                pg.draw_icon(list_x + 16, y, 16, 16, &icon);
+                                pg.draw_text_bg(list_x + 56, y, &alloc::format!("{:<32}", entry.name), color, background);
+                                pg.draw_text_bg(list_x + 348, y, &alloc::format!("{:>12}", size), 0xCCCCCC, background);
+                                pg.draw_text_bg(list_x + 470, y, if entry.is_dir { "DIR" } else { "FILE" }, 0x6666FF, background);
+                                y += line_h;
+                            }
+
+                            let props_x = list_x + list_w + gutter;
+                            let props_w = core::cmp::min(width.saturating_sub(props_x + margin), 360);
+                            if props_w > 120 {
+                                pg.draw_rect_outline(props_x, list_y, props_w, list_h, 0x777777);
+                                pg.draw_text(props_x + 10, list_y + 10, "Properties", 0x00FF00);
+                                if let Some(entry) = self.files.get(self.selected_file_idx) {
+                                    let sep = if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" };
+                                    let full_path = format!("{}{}{}", self.current_path, sep, entry.name);
+                                    pg.draw_text(props_x + 10, list_y + 40, &format!("Name: {}", entry.name), 0xFFFFFF);
+                                    pg.draw_text(props_x + 10, list_y + 60, &format!("Type: {}", if entry.is_dir { "Directory" } else { "File" }), 0xCCCCCC);
+                                    pg.draw_text(props_x + 10, list_y + 80, &format!("Size: {} bytes", entry.size), 0xCCCCCC);
+                                    pg.draw_text(props_x + 10, list_y + 100, &format!("Path: {}", full_path), 0x888888);
+                                    pg.draw_text(props_x + 10, list_y + 130, &format!("Index: {} / {}", self.selected_file_idx + 1, self.files.len()), 0x888888);
+                                } else {
+                                    pg.draw_text(props_x + 10, list_y + 40, "No item selected", 0x888888);
+                                }
+
+                                if let Some(action) = self.filesys_pending_action {
+                                    let confirm_y = list_y + list_h - 90;
+                                    pg.fill_rect(props_x + 8, confirm_y, props_w - 16, 72, 0x332222);
+                                    pg.draw_rect_outline(props_x + 8, confirm_y, props_w - 16, 72, 0xFFAA00);
+                                    pg.draw_text(props_x + 16, confirm_y + 10, "Confirm Operation", 0xFFAA00);
+                                    pg.draw_text(props_x + 16, confirm_y + 30, &format!("{:?}", action), 0xFFFFFF);
+                                    pg.draw_text(props_x + 16, confirm_y + 50, "END confirms, ESC cancels", 0xCCCCCC);
+                                }
+                            }
+
+                            let actions_y = list_h + margin * 8;
+                            pg.draw_text(margin, actions_y, "Actions for Selected Item", 0xCCCCCC);
+                            let actions = ["Open", "Props", "New File", "New Dir", "Rename", "Copy", "Move", "Delete"];
                             let mut action_x = margin;
                             let action_y = actions_y + 20;
                             for (idx, action) in actions.iter().enumerate() {
-                                let is_focused = idx == self.vm_action_idx;
+                                let is_focused = idx == self.filesys_action_idx;
                                 let color = if is_focused { 0x00AA00 } else { 0x444444 };
-                                pg.fill_rect(action_x, action_y, 78, 24, color);
-                                pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
-                                action_x += 88;
+                                pg.fill_rect(action_x, action_y, 92, 24, color);
+                                pg.draw_text(action_x + 6, action_y + 4, action, 0xFFFFFF);
+                                action_x += 100;
                             }
-                            pg.draw_text(margin, action_y + 32, "Press ENTER to execute action | SPACE to Create VM", 0x888888);
-                        } else {
-                            pg.draw_text(margin, table_y + table_h + gutter, "No VMs. Press SPACE to Create VM", 0x888888);
+                            pg.draw_text(margin, action_y + 34, "LEFT/RIGHT chooses action, END runs it; rename/copy/move/delete ask for confirmation", 0x888888);
+                            pg.draw_text(margin, action_y + 52, &self.status_line, 0xFFFF00);
                         }
-                    }
-                    DashboardTab::CreateVM => {
-                        pg.draw_text(margin, content_top + margin, "Create New Virtual Machine", 0x00FF00);
+                        DashboardTab::Test => {
+                            pg.draw_text(20, 100, &alloc::format!("UI Components Test Bed (Qt6 Style)  res: {}x{}", width, height), 0x00FF00);
 
-                        let form_x = margin + 20;
-                        let mut form_y = content_top + margin + 40;
+                            // Column 1
+                            let mut y = 130;
+                            pg.draw_text(20, y, "Buttons & Inputs:", 0xAAAAAA);
+                            y += 25;
+                            pg.fill_rect(20, y, 100, 25, 0x444444);
+                            pg.draw_text(25, y + 5, "Push Button", 0xFFFFFF);
+                            pg.fill_rect(130, y, 30, 25, 0x444444);
+                            pg.draw_text(138, y + 5, "?", 0xFFFFFF); // ToolButton
+                            y += 35;
 
-                        // Name Field
-                        pg.draw_text(form_x, form_y, "Name:", 0xFFFFFF);
-                        let name_focus = self.create_vm_focus_idx == 0;
-                        pg.draw_rect_outline(form_x + 100, form_y - 4, 200, 24, if name_focus { 0xFFFF00 } else { 0x888888 });
-                        pg.draw_text(form_x + 105, form_y, &self.new_vm_name, 0xFFFFFF);
+                            pg.draw_checkbox(20, y, true, false, false, "CheckBox (Checked)");
+                            y += 25;
+                            pg.draw_checkbox(20, y, false, false, false, "CheckBox (Unchecked)");
+                            y += 25;
+                            pg.draw_checkbox(20, y, false, true, false, "CheckBox (Blocked/Denied)");
+                            y += 25;
+                            pg.draw_checkbox(20, y, true, false, true, "CheckBox (Disabled)");
+                            y += 25;
 
-                        form_y += 40;
-                        // CPU Cores Field
-                        pg.draw_text(form_x, form_y, "vCPUs:", 0xFFFFFF);
-                        let cpu_focus = self.create_vm_focus_idx == 1;
-                        pg.draw_rect_outline(form_x + 100, form_y - 4, 100, 24, if cpu_focus { 0xFFFF00 } else { 0x888888 });
-                        pg.draw_text(form_x + 105, form_y, &alloc::format!("{}", self.new_vm_vcpus), 0xFFFFFF);
-                        pg.draw_text(form_x + 210, form_y, "(Use + / - to change)", 0x888888);
+                            pg.draw_radio_button(20, y, true);
+                            pg.draw_text(40, y, "RadioButton 1", 0xFFFFFF);
+                            y += 25;
+                            pg.draw_radio_button(20, y, false);
+                            pg.draw_text(40, y, "RadioButton 2", 0xFFFFFF);
+                            y += 35;
 
-                        form_y += 40;
-                        // Memory Field
-                        pg.draw_text(form_x, form_y, "Memory (MB):", 0xFFFFFF);
-                        let mem_focus = self.create_vm_focus_idx == 2;
-                        pg.draw_rect_outline(form_x + 100, form_y - 4, 100, 24, if mem_focus { 0xFFFF00 } else { 0x888888 });
-                        pg.draw_text(form_x + 105, form_y, &alloc::format!("{}", self.new_vm_memory_mb), 0xFFFFFF);
-                        pg.draw_text(form_x + 210, form_y, "(Use + / - to change)", 0x888888);
-
-                        form_y += 60;
-                        // Buttons
-                        let create_focused = self.create_vm_focus_idx == 3;
-                        pg.fill_rect(form_x, form_y, 120, 32, if create_focused { 0x00AA00 } else { 0x006600 });
-                        pg.draw_text(form_x + 20, form_y + 8, "CREATE", 0xFFFFFF);
-
-                        let cancel_focused = self.create_vm_focus_idx == 4;
-                        pg.fill_rect(form_x + 140, form_y, 120, 32, if cancel_focused { 0xAA0000 } else { 0x660000 });
-                        pg.draw_text(form_x + 20 + 140, form_y + 8, "CANCEL", 0xFFFFFF);
-
-                        pg.draw_text(margin, form_y + 50, "TAB to switch fields | ENTER to confirm | ESC to cancel", 0x888888);
-                    }
-                    DashboardTab::Resources => {
-
-                        match self.resmon_tab {
-                            ResourceMonitorTab::Resources => {
-                                pg.draw_text(margin, content_top - 6, "[ Resources ]  | Processes |", 0xFFFFFF);
-
-                                // Left info panel
-                                let panel_x = margin;
-                                let panel_y = content_top + margin;
-                                let panel_w = 360usize;
-                                let panel_h = 480usize;
-                                pg.draw_rect_outline(panel_x, panel_y, panel_w, panel_h, 0x888888);
-                                pg.draw_text_bg(panel_x, panel_y - 4, "Resource Monitor", 0x20FF20, 0x222222);
-
-                                pg.draw_text(panel_x + 10, panel_y + 16, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
-                                pg.draw_text(panel_x + 10, panel_y + 16 + line_h, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
-                                pg.draw_text(panel_x + 10, panel_y + 16 + line_h * 2, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
-
-                                // Memory usage bar and graph
-                                let bar_y = panel_y + 16 + line_h * 3 + gutter;
-                                pg.draw_text(panel_x + 10, bar_y, "Memory History (10s):", 0xCCCCCC);
-                                pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00, 60);
-
-                                // I/O Stats and Graphs
-                                let io_y = bar_y + 80 + gutter * 2;
-                                pg.draw_text(panel_x + 10, io_y, "Net Traffic (RX:Cyan TX:Yellow)", 0xCCCCCC);
-                                pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF, 60);
-                                pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00, 60);
-
-                                let disk_y = io_y + 80;
-                                pg.draw_text(panel_x + 10, disk_y, "Disk I/O (Read:White Write:Red)", 0xCCCCCC);
-                                pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF, 60);
-                                pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000, 60);
-
-                                let gpu_y = disk_y + 80;
-                                pg.draw_text(panel_x + 10, gpu_y, "GPU Usage:", 0xCCCCCC);
-                                pg.draw_line_graph(panel_x + 10, gpu_y + 20, 165, 50, &self.resources.gpu_history, 100, 0xFF7700, 60);
-
-
-                                // Right CPU core list panel or Total CPU Graph
-                                let right_x = panel_x + panel_w + gutter * 2;
-                                let right_y = panel_y;
-                                let right_w = core::cmp::min(width - right_x - margin, 360);
-                                let right_h = core::cmp::min(height - right_y - 100, 260);
-                                pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
-                                pg.draw_text_bg(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF, 0x222222);
-                                pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00, 60);
-
-                                pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
-                                for i in 0..self.resources.cpu_count {
-                                    let row_y = right_y + 120 + (i as usize * (line_h + 4));
-                                    if row_y + line_h > right_y + right_h - 8 { break; }
-                                    let usage = if i < self.resources.cpu_core_usage.len() as u32 { self.resources.cpu_core_usage[i as usize] } else { 0 };
-                                    pg.draw_text(right_x + 10, row_y, &alloc::format!("C{}:{:>2}%", i, usage), 0xCCCCCC);
-                                    pg.draw_progress_bar(right_x + 70, row_y, right_w - 80, 12, usage as usize, 100, 0x00FF00);
-                                }
-
-                                pg.draw_text_bg(right_x + 10, right_y + 300, "FPS History:", 0xFFFFFF, 0x222222);
-                                pg.draw_line_graph(right_x + 10, right_y + 300, right_w - 20, 80, &self.resources.fps_history, 75, 0xFF44FF, 60);
-                                pg.draw_text_bg(right_x + 10, right_y + 400, "Frame MS History:", 0xFFFFFF, 0x222222);
-                                pg.draw_line_graph(right_x + 10, right_y + 400, right_w - 20, 80, &self.resources.ft_ms_history, 750, 0xFFAAFF, 60);
-
-                                // Heatmap for CPU Core usage
-                                let hm_y = right_y + 500;
-                                pg.draw_text(right_x + 10, hm_y, "CPU Heatmap (Real-time Core Stress):", 0xFFFFFF);
-                                let mut hm_data = [0.0f32; 16];
-                                for i in 0..core::cmp::min(self.resources.cpu_core_usage.len(), 1) {
-                                    hm_data[i] = self.resources.cpu_core_usage[i] as f32 / 100.0;
-                                }
-                                pg.draw_heatmap(right_x + 10, hm_y + 20, right_w - 20, 80, 4, 4, &hm_data);
-
-                                // draw u64 le text for all stats
-
-                                pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.cpu_usage as u64, 0xFFFFFF);
-                                pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.used_memory_mb as u64, 0xFFFFFF);
-                                pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.frame_ms as u64, 0xFFFFFF);
-                                pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.gpu_usage as u64, 0xFFFFFF);
-                            }
-                            ResourceMonitorTab::Processes => {
-                                pg.draw_text(margin, content_top - 6, "| Resources |  [ Processes ]", 0xFFFFFF);
-
-                                let panel_x = margin;
-                                let panel_y = content_top + margin;
-                                let panel_w = 600usize;
-                                let panel_h = 480usize;
-
-                                pg.draw_text_bg(panel_x, panel_y - 4, "Process Monitor", 0x20FF20, 0x222222);
-                                let headers: &[&str] = &["name", "pid", "cycles", "cpu time"];
-                                let cycles_string = format!("{:#?}", self.cycles);
-                                let cycles_str = cycles_string.as_str();
-                                let mut rows: Vec<&[&str]> = vec![
-                                    &["system", "0", "x", "x"],
-                                    &["hardware", "9", "x", "x"],
-                                ];
-
-                                // // 1. Store actual fixed-size String arrays in memory
-                                // let mut row_storage: Vec<[String; 3]> = Vec::with_capacity(self.active_apps.len());
-                                //
-                                // for app in &self.active_apps {
-                                //     let name = app.application.name.to_string();
-                                //     let pid = format!("{:#?}", app.pid);
-                                //     let cycles = "x".to_string();
-                                //
-                                //     row_storage.push([name, pid, cycles]);
-                                // }
-                                //
-                                // // 2. Build slice references into the stored arrays
-                                // // Constructing &[&str] views referencing the backing String data
-                                // let row_refs: Vec<[&str; 3]> = row_storage
-                                //     .iter()
-                                //     .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str()])
-                                //     .collect();
-                                //
-                                // // 3. Push slice views into rows
-                                // for row in &row_refs {
-                                //     rows.push(row);
-                                // }
-
-                                // 2. Hoist the backing storage variables OUTSIDE the fallback scope
-                                // These must stay alive as long as `rows` is being used
-                                let mut row_storage: Vec<[String; 4]> = Vec::new();
-                                let mut row_refs: Vec<[&str; 4]> = Vec::new();
-
-                                // Wrap the logic in a closure or function that returns an Option/Result
-                                // 3. Fallible logic scope (your "try" block)
-                                // let mut allocate_rows = || -> Option<()> {
-                                //     // Safely allocate room for the strings
-                                //     row_storage.try_reserve(self.active_apps.len()).ok()?;
-                                //
-                                //     for app in &self.active_apps {
-                                //         let name = app.application.name.to_string();
-                                //         let pid = format!("{:#?}", app.pid);
-                                //         let cycles = "x".to_string();
-                                //
-                                //         row_storage.push([name, pid, cycles]);
-                                //     }
-                                //
-                                //     // Safely reserve room for the slice references
-                                //     row_refs.try_reserve(self.active_apps.len()).ok()?;
-                                //
-                                //     // Build the string views into the outer row_refs
-                                //     row_refs.extend(
-                                //         row_storage
-                                //             .iter()
-                                //             .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str()])
-                                //     );
-                                //
-                                //     // Push slice views into rows
-                                //     for row in &row_refs {
-                                //         rows.push(row);
-                                //     }
-                                //
-                                //     Some(())
-                                // };
-                                //
-                                // // "Try/Except" wrapper: If it returns None, execution safely skips the rest
-                                // if allocate_rows().is_none() {
-                                //     vdebug!("ui", "OOM alloc error DashboardTab::Resources.ResourceMonitorTab::Processes.var:rows")
-                                // }
-
-                                // 2. Use a labeled loop as a "try" block that we can break out of early
-                                vdebug!("ui", "[TRY] Entering 'try_block loop...");
-
-                                'try_block: loop {
-                                    vdebug!("ui", "[TRY] Checking capacity for row_storage...");
-                                    // Fallibly allocate capacity for strings
-                                    if row_storage.try_reserve(self.active_apps.len()).is_err() {
-                                        vdebug!("ui", "[FAIL] Allocation failed inside row_storage.try_reserve!");
-                                        break 'try_block;
-                                    }
-                                    vdebug!("ui", "[SUCCESS] row_storage memory reserved.");
-
-                                    vdebug!("ui", "[TRY] Beginning active_apps iteration loop...");
-
-                                    row_storage.push([String::from("dashboard"), String::from("14"), format!("{:#?}", self.cycles), format!("{:#?}", ((self.resources.fps as u64 * self.cycles as u64) / (TSC_PER_US * 1000000)) * 100)]);
-
-                                    for (index, app) in self.active_apps.iter().enumerate() {
-                                        // NOTE: If your UEFI app freezes right here, one of these three allocations is failing.
-                                        // Rust's default allocator will panic on OOM here unless custom catch mechanics are present.
-                                        let name = app.application.name.to_string();
-                                        let pid = format!("{:#?}", app.pid);
-                                        let total_cyc = app.ui_time + app.cpu_time;
-                                        let cycles = format!("{:#?}", total_cyc);
-
-                                        row_storage.push([name, pid, cycles, format!("{:#?}", ((self.resources.fps as u64 * app.cpu_time as u64) / TSC_PER_US * 1000000) * 100)]);
-                                    }
-                                    vdebug!("ui", "[SUCCESS] Finished active_apps loop. row_storage populated.");
-
-                                    vdebug!("ui", "[TRY] Checking capacity for row_refs...");
-                                    // Fallibly allocate capacity for the slice references
-                                    if row_refs.try_reserve(self.active_apps.len()).is_err() {
-                                        vdebug!("ui", "[FAIL] Allocation failed inside row_refs.try_reserve!");
-                                        break 'try_block;
-                                    }
-                                    vdebug!("ui", "[SUCCESS] row_refs memory reserved.");
-
-                                    vdebug!("ui", "[TRY] Extending row_refs mapping...");
-                                    // Build views using references pointing directly to row_storage strings
-                                    row_refs.extend(
-                                        row_storage
-                                            .iter()
-                                            .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str(), row[3].as_str()])
-                                    );
-                                    vdebug!("ui", "[SUCCESS] row_refs extended successfully.");
-
-                                    vdebug!("ui", "[TRY] Pushing slice views into rows vector...");
-                                    // Safely push slice views into rows
-                                    for row in &row_refs {
-                                        rows.push(&row[..]);
-                                    }
-                                    vdebug!("ui", "[SUCCESS] All elements safely integrated into rows.");
-
-                                    break 'try_block;
-                                }
-
-                                vdebug!("ui", "[EXIT] Left the 'try_block loop.");
-
-
-                                pg.draw_table_view(panel_x, panel_y + 4, panel_w, panel_h, headers, rows);
-                            }
-                        }
-
-                    }
-                    DashboardTab::Network => {
-                        let x = 20;
-                        let mut y = 100;
-                        pg.draw_text(x, y, "Network Status", 0x00FF00);
-                        let net_stats = crate::devices::net_stack::stats();
-                        y += 30;
-                        pg.draw_text(x, y, &alloc::format!("Backend: {}", crate::devices::net_stack::backend_name()), 0xFFFFFF);
-                        y += 30;
-                        pg.draw_text(x, y, "Statistics:", 0xAAAAAA);
-
-                        let x = 40;
-                        let mut y = 180;
-                        pg.draw_text(x, y, &alloc::format!("RX Packets: {}", net_stats.rx_pkts), 0xCCCCCC);
-                        y += 20;
-                        pg.draw_text(x, y, &alloc::format!("TX Packets: {}", net_stats.tx_pkts), 0xCCCCCC);
-                        y += 20;
-                        pg.draw_text(x, y, &alloc::format!("RX Bytes:   {}", net_stats.rx_bytes), 0xCCCCCC);
-                        y += 20;
-                        pg.draw_text(x, y, &alloc::format!("TX Bytes:   {}", net_stats.tx_bytes), 0xCCCCCC);
-
-                        y += 100;
-                        let state = crate::devices::net_stack::get_state();
-                        pg.draw_text(x, y, &alloc::format!("IP: {}.{}.{}.{}", state.ip_addr[0], state.ip_addr[1], state.ip_addr[2], state.ip_addr[3]), 0xCCCCCC);
-                        y += 20;
-                        pg.draw_text(x, y, &alloc::format!("GW: {}.{}.{}.{}", state.gateway[0], state.gateway[1], state.gateway[2], state.gateway[3]), 0xCCCCCC);
-                        y += 20;
-                        pg.draw_text(x, y, &alloc::format!("MASK: {}.{}.{}.{}", state.subnet_mask[0], state.subnet_mask[1], state.subnet_mask[2], state.subnet_mask[3]), 0xCCCCCC);
-                        y += 20;
-                        pg.draw_text(x, y, &alloc::format!("MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", state.mac_addr[0], state.mac_addr[1], state.mac_addr[2], state.mac_addr[3], state.mac_addr[4], state.mac_addr[5]), 0xCCCCCC);
-                        y += 40;
-                        let is_init = crate::devices::net_stack::is_initialized();
-                        pg.draw_text(x, y, &alloc::format!("Initialized: {is_init}", ), 0xFFFFFF);
-                        y += 35;
-
-                        pg.draw_text(x, y, &alloc::format!("Target: {}", self.network_target), 0xCCCCCC);
-                        y += 28;
-
-                        pg.draw_text(x, y, "Traffic Monitor (10s):", 0x00FFFF);
-                        y += 20;
-                        pg.draw_text(x, y, &alloc::format!("RX: {} KB/s", self.resources.net_rx_kbps), 0x00FF00);
-                        pg.draw_line_graph(x + 120, y - 10, 200, 40, &self.resources.net_rx_history, 1024, 0x00FF00, 60);
-                        y += 50;
-                        pg.draw_text(x, y, &alloc::format!("TX: {} KB/s", self.resources.net_tx_kbps), 0xFF0000);
-                        pg.draw_line_graph(x + 120, y - 10, 200, 40, &self.resources.net_tx_history, 1024, 0xFF0000, 60);
-                        y += 60;
-
-                        let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off"];
-                        let mut action_x = x;
-                        for (idx, action) in actions.iter().enumerate() {
-                            let is_focused = idx == self.selected_network_action_idx;
-                            pg.fill_rect(action_x, y, 88, 24, if is_focused { 0x00AA00 } else { 0x444444 });
-                            pg.draw_text(action_x + 8, y + 4, action, 0xFFFFFF);
-                            action_x += 96;
-                        }
-                        y += 36;
-                        pg.draw_text(x, y, "LEFT/RIGHT chooses action, ENTER runs it, +/- cycles ping target", 0x888888);
-                        y += 20;
-                        pg.draw_text(x, y, &self.status_line, 0xFFFF00);
-                    }
-                    DashboardTab::Console => {
-                        pg.draw_text(20, 100, "Hypervisor Real-time Log", 0x00FF00);
-                        let logs = crate::hpvmlog::get_logs();
-                        pg.draw_log_viewer(
-                            margin,
-                            130,
-                            width - margin * 2,
-                            height - 135 - margin * 8,
-                            &logs,
-                            self.console_scroll_offset,
-                            self.console_h_scroll_offset,
-                        );
-
-                        let y_msg = height - margin * 6;
-                        pg.draw_text(margin, y_msg, "Use PgUp/PgDn to scroll logs, LEFT/RIGHT to scroll text, C to clear", 0x888888);
-
-                        pg.draw_rect_outline(margin, height - 95, width - margin * 8, 35, 0x999999);
-                        if self.term_selected {
-                            pg.draw_rect_outline_adv(margin - 1, height - 96, (width - margin * 8) + 2, 37, 0x888844, 3, 0x0F0F0F0F);
-                        }
-                        pg.draw_text(margin + 5, height - 60, "press enter to send, end to enter type mode, and esc to exit", 0x888888);
-                        pg.draw_text(margin + 5, height - 85, alloc::format!("HPVMx> {}", self.term_buf).as_str(), 0xDDDDDD);
-                    }
-                    DashboardTab::Devices => {
-                        pg.draw_text(20, 100, "Device Manager", 0x00FF00);
-
-                        let mut y = 130;
-                        let mut current_idx = 0;
-
-                        for cat in &self.categories {
-                            let expanded_icon = if cat.expanded { "[-] " } else { "[+] " };
-                            let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xAAAAAA };
-                            pg.draw_text(20, y, &alloc::format!("{}{}{} ({})", expanded_icon, cat.icon, cat.name, cat.devices.len()), color);
+                            pg.draw_text(20, y, "LineEdit:", 0xAAAAAA);
                             y += 20;
-                            current_idx += 1;
+                            pg.draw_rect_outline(20, y, 150, 20, 0x888888);
+                            pg.fill_rect(21, y + 1, 148, 18, 0xFFFFFF);
+                            pg.draw_text(25, y + 2, "Editable text..ſ", 0x000000);
+                            y += 30;
 
-                            if cat.expanded {
-                                for dev in &cat.devices {
-                                    let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xFFFFFF };
-                                    pg.draw_icon(35, y - 2, 16, 16, if cat.name == "Network Adapters" { &pixel_graphics::icons::PCI_GREEN_ICON_DATA } else { &pixel_graphics::icons::PCI_BLUE_ICON_DATA });
+                            pg.draw_text(20, y, "SpinBox / DoubleSpinBox:", 0xAAAAAA);
+                            y += 15;
+                            pg.draw_spinbox(20, y, 60, 42, "int");
+                            pg.draw_double_spinbox(120, y, 60, 3.14, 2);
 
-                                    // Split path after third '/' for the list view as well
-                                    let path = &dev.path;
-                                    let mut slash_count = 0;
-                                    let mut split_idx = None;
-                                    for (i, c) in path.char_indices() {
-                                        if c == '/' {
-                                            slash_count += 1;
-                                            if slash_count == 3 {
-                                                split_idx = Some(i + 1);
-                                                break;
-                                            }
+                            y += 30;
+
+                            // Column 2
+                            let mut y = 130;
+                            let x2 = 250;
+                            pg.draw_text(x2, y, "Sliders & Progress:", 0xAAAAAA);
+                            y += 25;
+                            pg.draw_slider(x2, y, 150, 40, 100, false);
+                            y += 25; // Horizontal Slider
+                            pg.draw_slider(x2 + 160, 130, 100, 30, 100, true); // Vertical Slider
+
+                            pg.draw_text(x2, y, "Progress Bar:", 0xAAAAAA);
+                            y += 20;
+                            pg.draw_progress_bar(x2, y, 150, 20, 65, 100, 0x00FF00);
+                            y += 35;
+
+                            pg.draw_text(x2, y, "LCD Number:", 0xAAAAAA);
+                            y += 20;
+                            pg.draw_lcd_number(x2, y, "123.45");
+                            y += 40;
+
+                            pg.draw_text(x2, y, "ScrollBars:", 0xAAAAAA);
+                            y += 20;
+                            pg.draw_rect_outline(x2, y, 150, 15, 0x444444);
+                            pg.fill_rect(x2 + 40, y + 1, 30, 13, 0x888888); // H Scroll
+                            y += 25;
+
+                            pg.draw_text(x2, y, "Date/Time Edits:", 0xAAAAAA);
+                            y += 20;
+                            pg.draw_text(x2, y, "2026-02-23 10:25", 0x00FFFF); //y += 30;
+
+                            // Column 3
+                            let mut y = 130;
+                            let x3 = 500;
+                            pg.draw_text(x3, y, "Complex Views (Mock):", 0xAAAAAA);
+                            y += 25;
+                            pg.draw_rect_outline(x3, y, 200, 60, 0x888888); // ListView
+                            pg.draw_text(x3 + 5, y + 5, "ListView Item A", 0xFFFFFF);
+                            pg.draw_text(x3 + 5, y + 25, "ListView Item B", 0xFFFF00);
+                            pg.draw_text(x3 + 5, y + 45, "ListView Item C", 0xFFFFFF);
+                            y += 70;
+
+                            pg.draw_rect_outline(x3, y, 200, 60, 0x888888); // TreeView
+                            pg.draw_text(x3 + 5, y + 5, "[-] Root", 0xFFFFFF);
+                            pg.draw_text(x3 + 20, y + 25, " └─ Child 1", 0xAAAAAA);
+                            pg.draw_text(x3 + 20, y + 45, " └─ Child 2", 0xAAAAAA);
+                            y += 70;
+
+                            pg.draw_rect_outline(x3, y, 200, 60, 0x888888); // TableView
+                            pg.draw_line(x3, y + 20, x3 + 200, y + 20, 0x888888);
+                            pg.draw_line(x3 + 60, y, x3 + 60, y + 60, 0x888888);
+                            pg.draw_text(x3 + 5, y + 2, "H1", 0xAAAAAA);
+                            pg.draw_text(x3 + 65, y + 2, "Header 2", 0xAAAAAA);
+                            pg.draw_text(x3 + 5, y + 25, "Val 1", 0xFFFFFF);
+                            pg.draw_text(x3 + 65, y + 25, "Data 2", 0xFFFFFF);
+                            //y += 70;
+
+
+                            // Group Box & ToolBox
+                            let y = 450;
+                            pg.draw_rect_outline(20, y, 200, 100, 0x888888);
+                            pg.fill_rect(30, y - 8, 80, 16, 0x222222);
+                            pg.draw_text(35, y - 8, "GroupBox", 0xAAAAAA);
+                            pg.draw_text(40, y + 20, "Internal content", 0x888888);
+
+                            pg.draw_rect_outline(240, y, 200, 100, 0x888888);
+                            pg.fill_rect(240, y, 200, 20, 0x444444);
+                            pg.draw_text(245, y + 2, "ToolBox Tab 1 [v]", 0xFFFFFF);
+                            pg.fill_rect(240, y + 80, 200, 20, 0x444444);
+                            pg.draw_text(245, y + 82, "ToolBox Tab 2 [>]", 0xFFFFFF);
+
+                            pg.draw_rect_outline(460, y, 200, 100, 0x888888); // ScrollArea
+                            pg.draw_rect_outline(645, y, 15, 100, 0x444444);
+                            pg.fill_rect(646, y + 10, 13, 30, 0x888888); // V Scroll
+                            pg.draw_text(470, y + 10, "Scroll Area Content...", 0xFFFFFF);
+                            pg.draw_text(470, y + 30, "That is clipped", 0xFFFFFF);
+
+                            // Lines
+
+                            let y = 600;
+                            pg.draw_line(20, y, 780, y, 0x555555); // Horizontal Line
+                            pg.draw_line(400, y + 5, 400, y + 50, 0x555555); // Vertical Line
+
+                            pg.draw_text(20, y + 10, "Labels & Browser:", 0xAAAAAA);
+                            pg.draw_text(20, y + 30, "Standard Label", 0xFFFFFF);
+                            pg.draw_rect_outline(150, y + 10, 230, 40, 0x444444);
+                            pg.draw_text(155, y + 15, "Text Browser with <b>rich</b> content", 0xAAAAAA);
+
+                            pg.draw_text(420, y + 10, "Dial & Key Sequence:", 0xAAAAAA);
+                            // Mock Dial
+                            pg.draw_dial(420, y + 30, 12, 25, 100);
+                            pg.draw_rect_outline(550, y + 30, 100, 20, 0x888888);
+                            pg.draw_text(555, y + 32, "Ctrl+Alt+Del", 0xFFFF00);
+
+
+                            let y = 130;
+                            let x = 750;
+
+                            // Table Data (3D setup)
+                            let headers = ["ID", "Name", "Status"];
+                            let mut rows: Vec<&[&str]> = vec![];
+                            rows.push(&["01", "Kernel", "Running"]);
+                            rows.push(&["02", "GOP", "Active"]);
+                            pg.draw_table_view(x, y, 250, 100, &headers, rows);
+
+                            // Tree Data (Nested JSON-style)
+                            let children = [
+                                TreeViewNode { label: "bin", children: &[], expanded: false },
+                                TreeViewNode { label: "boot", children: &[], expanded: false },
+                            ];
+                            let root = TreeViewNode {
+                                label: "Root (/) ",
+                                children: &children,
+                                expanded: true,
+                            };
+                            pg.draw_tree_view(x, y + 200, 200, 150, &root);
+
+                            pg.draw_icon(x, y + 400, 16, 16, &pixel_graphics::icons::RAM_ICON_DATA);
+                            pg.draw_icon(x + 24, y + 400, 16, 16, &pixel_graphics::icons::PCI_GREEN_ICON_DATA);
+                            pg.draw_icon(x + 48, y + 400, 16, 16, &pixel_graphics::icons::PCI_BLUE_ICON_DATA);
+                            pg.draw_icon(x + 72, y + 400, 16, 16, &pixel_graphics::icons::CPU_ICON_DATA);
+                            pg.draw_icon(x + 96, y + 400, 16, 16, &pixel_graphics::icons::HOURGLASS_ICON_DATA);
+                            pg.draw_icon(x + 120, y + 400, 16, 16, &pixel_graphics::icons::ETHERNET_ICON_DATA);
+                            pg.draw_icon(x + 144, y + 400, 16, 16, &pixel_graphics::icons::HDD_INTERNAL_ICON_DATA);
+                            pg.draw_icon(x + 168, y + 400, 16, 16, &pixel_graphics::icons::SETTINGS_ICON_DATA);
+                            pg.draw_icon(x + 200, y + 400, 32, 32, &pixel_graphics::icons::GTK_CUBE_32_ICON_DATA);
+                            pg.draw_icon(x, y + 450, 32, 32, &pixel_graphics::icons::CD_DISK_32_ICON_DATA);
+                            pg.draw_icon(x + 50, y + 450, 32, 32, &pixel_graphics::icons::SCRIPT_YELLOW_32_ICON_DATA);
+                            pg.draw_icon(x + 100, y + 450, 32, 32, &pixel_graphics::icons::TAPE_WRITE_32_ICON_DATA);
+                            pg.draw_icon(x + 150, y + 450, 32, 32, &pixel_graphics::icons::CUBE_TREE_32_ICON_DATA);
+                            pg.draw_icon(x + 200, y + 450, 32, 32, &pixel_graphics::icons::GEAR_WINDOW_SETTINGS_32_ICON_DATA);
+                            pg.draw_icon(x + 250, y + 450, 32, 32, &pixel_graphics::icons::GRAPHICS_2D_32_ICON_DATA);
+                            pg.draw_icon(x, y + 500, 32, 32, &pixel_graphics::icons::BLADE_NETWORK_32_ICON_DATA);
+                            pg.draw_icon(x + 50, y + 500, 32, 32, &pixel_graphics::icons::INTEGRATED_CIRCUIT_32_ICON_DATA);
+                            pg.draw_icon(x + 100, y + 500, 32, 32, &pixel_graphics::icons::WINOBJ_SEMAPHORE_32_ICON_DATA);
+                            pg.draw_icon(x + 150, y + 500, 32, 32, &pixel_graphics::icons::REGEDIT_CUBES_32_ICON_DATA);
+                            pg.draw_icon(x + 200, y + 500, 32, 32, &pixel_graphics::icons::REGISTRY_HIVE_32_ICON_DATA);
+                            pg.draw_icon(x + 250, y + 500, 32, 32, &pixel_graphics::icons::DATABASE_CLUSTER_32_ICON_DATA);
+                        }
+                        DashboardTab::Editor => {
+                            if let Some(ref ed) = self.editor {
+                                // Draw Header with Mode
+                                let mode_text = if ed.mode == EditorMode::Insert { "-- INSERT --" } else if ed.mode == EditorMode::Command { "-- COMMAND --" } else { "-- NORMAL --" };
+                                let view_type = if ed.is_hex { "[HEX VIEW]" } else { "[TEXT VIEW]" };
+                                pg.draw_text(margin, content_top + 5, &format!("Editing: {} {}", ed.file_path, view_type), 0x00FF00);
+                                pg.draw_text(width - 150, content_top + 5, mode_text, 0xFFFF00);
+
+                                let edit_y_start = content_top + 30;
+                                let visible_lines = (height - edit_y_start - 60) / 20;
+
+                                if ed.is_hex {
+                                    let mut y = content_top + 40;
+                                    let line_height = 20;
+                                    let hex_start_x = margin + 110;
+                                    let ascii_start_x = margin + 600;
+
+                                    for (i, chunk) in ed.buffer.chunks(16).enumerate().skip(ed.scroll_offset) {
+                                        if y > height - 80 { break; }
+
+                                        let offset = i * 16;
+                                        // Draw Offset in Gray
+                                        pg.draw_text(margin + 10, y, &format!("{:08X}", offset), 0x888888);
+
+                                        for (j, &byte) in chunk.iter().enumerate() {
+                                            let color = match byte {
+                                                0..=31 | 127 => 0x5555FF,   // Blue: Control
+                                                32..=126 => 0xFFFFFF,      // White: ASCII
+                                                _ => 0xFF00FF,             // Purple: Other/Extended
+                                            };
+
+                                            // Draw Hex Byte
+                                            pg.draw_text(hex_start_x + (j * 30), y, &format!("{:02X}", byte), color);
+
+                                            // Draw ASCII Char on the side
+                                            let ascii_char = if byte >= 32 && byte <= 126 { byte as char } else { '.' };
+                                            pg.draw_text(ascii_start_x + (j * 12), y, &ascii_char.to_string(), color);
+                                        }
+                                        y += line_height;
+                                    }
+                                } else {
+                                    // Text Editor Rendering
+                                    let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                                    for (i, line) in content.lines().skip(ed.scroll_offset).enumerate() {
+                                        if i >= visible_lines { break; }
+                                        pg.draw_text(margin + 40, edit_y_start + (i * 20), line, 0xFFFFFF);
+                                        // Line numbers
+                                        pg.draw_text(margin, edit_y_start + (i * 20), &format!("{:3}", ed.scroll_offset + i + 1), 0x666666);
+                                    }
+                                }
+
+                                pg.draw_text(margin, height - 70, ":w - Save | :q - Quit | i - Insert | Esc - Normal", 0x888888);
+                                pg.draw_text(margin + 600, height - 70, &*format!(":{}", ed.command_buffer), 0xFFFFFF);
+                            }
+                        }
+                        DashboardTab::Settings => {
+                            pg.draw_text(10, page_y - 15, "SYSTEM SETTINGS", 0x00FF00);
+
+
+                            let left_x = 10;
+                            let left_y = page_y + 2;
+                            let left_w = (width / 3) - 20;
+                            let left_h = height - left_y - 20;
+                            pg.draw_rect_outline(left_x, left_y, left_w, left_h, 0x444444);
+                            pg.fill_rect(left_x + 1, left_y + 1, left_w - 2, 28, 0x222222);
+                            pg.draw_text(left_x + 10, left_y + 8, "Categories", 0xAAAAAA);
+
+                            let categories = [
+                                ("General", "Runtime defaults and global behavior"),
+                                ("Boot", "Startup, watchdog, and state restore"),
+                                ("Interface", "Dashboard display and visual features"),
+                                ("Virtual Machines", "VM lifecycle and safety defaults"),
+                                ("Network", "NIC, ping, LAN scan, and HTTP controls"),
+                                ("Storage", "File explorer and filesystem behavior"),
+                                ("Packages", "Package index and verification policy"),
+                                ("Developer", "Language, debug, and toolchain flags"),
+                                ("Security", "Protected and experimental ring0 options"),
+                                ("About", "Build and environment information"),
+                            ];
+
+                            let mut left_row_y = left_y + 38;
+                            for (idx, (name, summary)) in categories.iter().enumerate() {
+                                if left_row_y + 35 > left_y + left_h - 8 { break; }
+                                let selected = idx == self.selected_settings_category_idx;
+                                if selected {
+                                    pg.fill_rect(left_x + 4, left_row_y - 4, left_w - 8, 32, 0x334433);
+                                    pg.draw_rect_outline(left_x + 4, left_row_y - 4, left_w - 8, 32, 0x00AA00);
+                                }
+                                pg.draw_text(left_x + 12, left_row_y, name, if selected { 0xFFFF00 } else { 0xFFFFFF });
+                                pg.draw_text(left_x + 12, left_row_y + 14, summary, 0x666666);
+                                left_row_y += 38;
+                            }
+
+                            let right_x = (width / 3) + 5;
+                            let right_y = page_y + 2;
+                            let right_w = (width * 2 / 3) - 15;
+                            let right_h = height - right_y - 20;
+
+                            pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x444444);
+                            pg.fill_rect(right_x + 1, right_y + 1, right_w - 2, 28, 0x222222);
+
+                            let selected_category = categories
+                                .get(self.selected_settings_category_idx)
+                                .map(|(name, _)| *name)
+                                .unwrap_or("General");
+                            pg.draw_text(right_x + 15, right_y + 8, selected_category, 0xFFFFFF);
+
+                            let mut x = right_x + 20;
+                            let mut y = right_y + 45;
+
+                            let settings = self.settings_rows();
+                            for (idx, (label, value, blocked, disabled)) in settings.iter().enumerate() {
+                                if idx == self.selected_settings_idx {
+                                    pg.fill_rect(right_x + 5, y - 4, right_w - 10, 24, 0x333333);
+                                }
+
+                                let label_color = if *disabled { 0x555555 } else if idx == self.selected_settings_idx { 0xFFFF00 } else { 0xDDDDDD };
+
+                                if value.as_str() == "on" || value.as_str() == "off" {
+                                    pg.draw_checkbox(x, y, value.as_str() == "on", *blocked, *disabled, label);
+                                } else {
+                                    pg.draw_text(x, y, label, label_color);
+                                    let val_color = if *blocked { 0xAA5555 } else { 0x00DCDC };
+                                    pg.draw_text(right_x + (right_w / 2), y, value, val_color);
+                                }
+                                y += 28;
+                            }
+
+                            // Bottom info bar
+                            let info_y = right_y + right_h - 140;
+                            pg.draw_rect_outline(right_x + 10, info_y, right_w - 20, 100, 0x333333);
+
+                            pg.draw_text(right_x + 20, info_y + 10, "NAVIGATION", 0x888888);
+                            pg.draw_text(right_x + 20, info_y + 30, "UP/DOWN: Select setting   LEFT/RIGHT: Change category", 0x666666);
+                            pg.draw_text(right_x + 20, info_y + 50, "ENTER:   Toggle or cycle through options", 0x666666);
+
+                            if !self.status_line.is_empty() {
+                                pg.draw_text(right_x + 20, info_y + 75, &format!("STATUS: {}", self.status_line), 0x00AAAA);
+                            }
+
+                            if selected_category == "About" {
+                                let env_y = right_y + 180;
+                                pg.draw_text(right_x + 20, env_y, "ENVIRONMENT SNAPSHOT", 0xAAAAAA);
+                                let mut ey = env_y + 25;
+                                for (key, value) in crate::env::global_vars_snapshot().iter().rev().take(8) {
+                                    pg.draw_text(right_x + 30, ey, &format!("{:<20} = {}", key, value), 0x777777);
+                                    ey += 18;
+                                }
+                            }
+                        }
+                        DashboardTab::Packages => {
+                            pg.draw_text(20, 100, "Packages", 0x00FF00);
+
+                            let package_names = self.package_names();
+                            let list_x = 40;
+                            let list_y = 140;
+                            let list_w = 360;
+                            let list_h = 420;
+                            pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
+                            pg.fill_rect(list_x + 1, list_y + 1, list_w - 2, 18, 0x333333);
+                            pg.draw_text(list_x + 8, list_y + 4, "NAME                         TYPE", 0xCCCCCC);
+
+                            let mut y = list_y + 28;
+                            for (idx, name) in package_names.iter().enumerate() {
+                                if y > list_y + list_h - 20 { break; }
+                                let Some(pkg) = self.package_manager.registry.get(name) else { continue; };
+                                if idx == self.selected_package_idx {
+                                    pg.fill_rect(list_x + 2, y - 2, list_w - 4, 16, 0x444400);
+                                }
+                                pg.draw_text(list_x + 8, y, &format!("{:<28} {:?}", pkg.name, pkg.package_type), if idx == self.selected_package_idx { 0xFFFF00 } else { 0xFFFFFF });
+                                pg.draw_package_icon(list_x + list_w - 24, y - 1, true);
+                                y += 18;
+                            }
+
+                            let detail_x = list_x + list_w + 30;
+                            let detail_w = 520;
+                            pg.draw_rect_outline(detail_x, list_y, detail_w, 420, 0x888888);
+                            pg.fill_rect(detail_x + 1, list_y + 1, detail_w - 2, 18, 0x333333);
+                            pg.draw_text(detail_x + 8, list_y + 4, "PACKAGE DETAILS", 0x00FF00);
+
+                            if let Some(name) = self.selected_package_name() {
+                                if let Some(pkg) = self.package_manager.registry.get(&name) {
+                                    let mut dy = list_y + 30;
+                                    pg.draw_text(detail_x + 10, dy, &format!("Name:      {}", pkg.name), 0xFFFFFF);
+                                    dy += 20;
+                                    pg.draw_text(detail_x + 10, dy, &format!("Version:   {}", pkg.version), 0x00FFFF);
+                                    dy += 20;
+                                    pg.draw_text(detail_x + 10, dy, &format!("Type:      {:?}", pkg.package_type), 0xAAAAAA);
+                                    dy += 20;
+                                    pg.draw_text(detail_x + 10, dy, &format!("Author:    {}", pkg.author), 0xFFFFFF);
+                                    dy += 20;
+
+                                    if let Some(ref url) = pkg.repo_url {
+                                        pg.draw_text(detail_x + 10, dy, &format!("Repo:      {}", url), 0x5555FF);
+                                        dy += 20;
+                                    }
+
+                                    let status_color = if pkg.has_compilation_issues { 0xFF5555 } else { 0x55FF55 };
+                                    let status_text = if pkg.has_compilation_issues { "FAILED / ISSUES" } else { "READY / OK" };
+                                    pg.draw_text(detail_x + 10, dy, &format!("Status:    {}", status_text), status_color);
+                                    dy += 30;
+
+                                    pg.draw_text(detail_x + 10, dy, "Dependencies:", 0x00FF00);
+                                    dy += 20;
+                                    if pkg.deps.is_empty() {
+                                        pg.draw_text(detail_x + 20, dy, "none", 0x888888);
+                                        dy += 20;
+                                    } else {
+                                        for dep in &pkg.deps {
+                                            pg.draw_text(detail_x + 20, dy, &format!("- {}", dep), 0xCCCCCC);
+                                            dy += 16;
                                         }
                                     }
+                                    dy += 10;
 
-                                    if let Some(idx) = split_idx {
-                                        pg.draw_text(45, y, &alloc::format!(" {}: {}", dev.name, &path[..idx]), color);
-                                        y += 18;
-                                        pg.draw_text(65, y, &path[idx..], 0x888888);
-                                        y += 22;
-                                    } else {
-                                        pg.draw_text(45, y, &alloc::format!(" {}: {}", dev.name, dev.path), color);
-                                        y += 20;
-                                    }
-
-                                    current_idx += 1;
-                                    if y > height - 60 { break; }
-                                }
-                            }
-                            if y > height - 60 { break; }
-                        }
-
-                        // Device Details Panel
-                        let detail_x = width / 2;
-                        let detail_y = 130;
-                        let detail_w = (width / 2) - 20;
-                        let detail_h = height - 200;
-                        pg.draw_rect_outline(detail_x, detail_y, detail_w, detail_h, 0x888888);
-                        pg.draw_text_bg(detail_x + 10, detail_y - 4, "Device Properties", 0x00FF00, 0x222222);
-
-                        let mut current_search_idx = 0;
-                        let mut selected_device = None;
-                        for cat in &self.categories {
-                            if current_search_idx == self.selected_device_idx {
-                                // Category selected, not a device
-                                break;
-                            }
-                            current_search_idx += 1;
-                            if cat.expanded {
-                                for dev in &cat.devices {
-                                    if current_search_idx == self.selected_device_idx {
-                                        selected_device = Some((dev, &cat.name));
-                                        break;
-                                    }
-                                    current_search_idx += 1;
-                                }
-                            }
-                            if selected_device.is_some() { break; }
-                        }
-
-                        if let Some((dev, cat_name)) = selected_device {
-                            let mut dy = detail_y + 10;
-                            pg.draw_text(detail_x + 10, dy, &alloc::format!("Name: {}", dev.name), 0xFFFFFF);
-                            dy += 20;
-                            pg.draw_text(detail_x + 10, dy, &alloc::format!("Category: {}", cat_name), 0xCCCCCC);
-                            dy += 20;
-                            pg.draw_text(detail_x + 10, dy, "UEFI Path:", 0xAAAAAA);
-                            dy += 15;
-
-                            // Shorten, wrap and indent path after the third '/'
-                            let path = &dev.path;
-                            let mut parts = alloc::vec::Vec::new();
-
-                            let mut slash_count = 0;
-                            let mut last_split = 0;
-                            for (i, c) in path.char_indices() {
-                                if c == '/' {
-                                    slash_count += 1;
-                                    if slash_count == 3 {
-                                        parts.push(&path[..i + 1]);
-                                        last_split = i + 1;
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if last_split > 0 {
-                                parts.push(&path[last_split..]);
-                            } else {
-                                parts.push(path);
-                            }
-
-                            let chunk_size = (detail_w - 30) / 8; // slightly smaller to account for indentation
-                            if chunk_size > 0 {
-                                for (i, part) in parts.iter().enumerate() {
-                                    let indent = if i > 0 { 20 } else { 0 };
-                                    let current_chunk_size = if i > 0 { chunk_size.saturating_sub(3) } else { chunk_size };
-
-                                    if part.len() <= current_chunk_size {
-                                        pg.draw_text(detail_x + 10 + indent, dy, part, 0x888888);
-                                        dy += 15;
-                                    } else {
-                                        for chunk in part.as_bytes().chunks(current_chunk_size) {
-                                            if let Ok(s) = core::str::from_utf8(chunk) {
-                                                pg.draw_text(detail_x + 10 + indent, dy, s, 0x888888);
-                                                dy += 15;
-                                            }
-                                            if dy > detail_y + detail_h - 20 { break; }
+                                    pg.draw_text(detail_x + 10, dy, "Description:", 0x00FF00);
+                                    dy += 20;
+                                    // Basic wrapping for description
+                                    let desc = &pkg.description;
+                                    let words: Vec<&str> = desc.split_whitespace().collect();
+                                    let mut line = String::new();
+                                    for word in words {
+                                        if line.len() + word.len() > 60 {
+                                            pg.draw_text(detail_x + 20, dy, &line, 0xAAAAAA);
+                                            dy += 16;
+                                            line.clear();
                                         }
+                                        if !line.is_empty() { line.push(' '); }
+                                        line.push_str(word);
                                     }
-                                    if dy > detail_y + detail_h - 20 { break; }
-                                }
-                            }
-
-                            dy += 20;
-                            if cat_name.contains("PCI") {
-                                pg.draw_text(detail_x + 10, dy, "PCI Information:", 0x00FFFF);
-                                dy += 20;
-                                // Search for more detailed info in self.pci_devices
-                                if let Some(pci) = self.pci_devices.iter().find(|p| {
-                                    format!("{:02X}:{:02X}.{}", p.bus, p.device, p.function) == dev.name
-                                }) {
-                                    pg.draw_text(detail_x + 10, dy, &format!("Vendor:   {}", pci.vendor_name()), 0xFFFFFF);
-                                    dy += 16;
-                                    pg.draw_text(detail_x + 10, dy, &format!("Device:   0x{:04X}", pci.device_id), 0xFFFFFF);
-                                    dy += 16;
-                                    pg.draw_text(detail_x + 10, dy, &format!("Class:    {}", pci.class_name()), 0xFFFFFF);
-                                    dy += 16;
-                                    pg.draw_text(detail_x + 10, dy, &format!("Revision: 0x{:02X}", pci.revision_id), 0xCCCCCC);
-                                    dy += 16;
-                                    pg.draw_text(detail_x + 10, dy, &format!("Interface: 0x{:02X}", pci.interface_id), 0xCCCCCC);
-                                    dy += 20;
-                                    pg.draw_text(detail_x + 10, dy, "Hardware Status: Online", 0x55FF55);
-                                } else {
-                                    pg.draw_text(detail_x + 10, dy, "Scanning for PCI Vendor/Device IDs...", 0x666666);
-                                }
-                            }
-                        } else {
-                            pg.draw_text(detail_x + 10, detail_y + 10, "Select a device to view properties", 0x888888);
-                        }
-
-                        // Device Actions
-                        let action_y = detail_y + detail_h + 20;
-                        let actions = ["Refresh List", "Scan PCI Bus", "Diagnostics", "Toggle Expanded"];
-                        let mut ax = 20;
-                        for (idx, action) in actions.iter().enumerate() {
-                            let is_focused = idx == self.device_action_idx && !self.term_selected;
-                            pg.fill_rect(ax, action_y, 140, 26, if is_focused { 0x00AA00 } else { 0x444444 });
-                            pg.draw_text(ax + 8, action_y + 5, action, 0xFFFFFF);
-                            ax += 150;
-                        }
-                        if self.device_action_idx == 1 {
-                            pg.draw_text(20, action_y + 35, "Scans the PCI bus using Port IO (0xCF8/0xCFC) to detect hardware", 0x00AAAA);
-                        }
-                    }
-                    DashboardTab::Storage => {
-                        // Title and path
-                        let base_y = content_top + margin;
-                        pg.draw_text(margin, base_y - 4, "File Explorer", 0x00FF00);
-                        pg.draw_text(margin, base_y + 8, &alloc::format!("Path: {}", self.current_path), 0xAAAAAA);
-
-                        // Table area
-                        let list_x = margin;
-                        let list_y = base_y + 28;
-                        let list_w = core::cmp::min(width - margin * 2, 720);
-                        let list_h = core::cmp::min(height - list_y - 90, 460);
-                        pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
-
-                        // Header row with better spacing and column guides
-                        pg.fill_rect(list_x + 1, list_y + 1, list_w - 2, line_h, 0x333333);
-                        pg.draw_text(list_x + 8, list_y + 4, "TYPE  NAME                                 SIZE (BYTES)  ATTR", 0xCCCCCC);
-                        // Optional column separators
-                        pg.draw_line(list_x + 48, list_y + 1, list_x + 48, list_y + list_h - 1, 0x444444);
-                        pg.draw_line(list_x + 340, list_y + 1, list_x + 340, list_y + list_h - 1, 0x444444);
-
-                        // Rows
-                        let mut y = list_y + line_h + gutter;
-                        for (i, entry) in self.files.iter().enumerate() {
-                            if y + line_h > list_y + list_h - 2 { break; }
-                            let color = if i == self.selected_file_idx { 0xFFFF00 } else { 0xFFFFFF };
-                            let icon = if entry.is_dir { pixel_graphics::icons::FOLDER_ICON_DATA } else {
-                                let dec_syn = ["json", "xml", "toml", "yaml", "yml"];
-                                let sys_syn = ["sys", "efi", "asm"];
-                                let prog_syn = ["micro", "ufe", "dmx", "bin", "rs"];
-
-
-                                let ext = entry.name.split(".").last().unwrap();
-                                if dec_syn.contains(&ext) {
-                                    pixel_graphics::icons::JSON_ICON_DATA
-                                } else if sys_syn.contains(&ext) {
-                                    pixel_graphics::icons::EXECUTABLE_ICON_DATA
-                                } else if prog_syn.contains(&ext) {
-                                    pixel_graphics::icons::CODE_ICON_DATA
-                                } else {
-                                    pixel_graphics::icons::FILE_ICON_DATA
-                                }
-                            };
-
-                            let size: String = if entry.size < 10000 {
-                                format!("{}", entry.size)
-                            } else if entry.size / 1024 < 10000 {
-                                format!("{}K", (entry.size / 1024))
-                            } else {
-                                format!("{}M", (entry.size / 1024) / 1024)
-                            };
-
-
-                            let background = if i == self.selected_file_idx { 0x333333 } else { 0x222222 };
-                            pg.draw_icon(list_x + 16, y, 16, 16, &icon);
-                            pg.draw_text_bg(list_x + 56, y, &alloc::format!("{:<32}", entry.name), color, background);
-                            pg.draw_text_bg(list_x + 348, y, &alloc::format!("{:>12}", size), 0xCCCCCC, background);
-                            pg.draw_text_bg(list_x + 470, y, if entry.is_dir { "DIR" } else { "FILE" }, 0x6666FF, background);
-                            y += line_h;
-                        }
-
-                        let props_x = list_x + list_w + gutter;
-                        let props_w = core::cmp::min(width.saturating_sub(props_x + margin), 360);
-                        if props_w > 120 {
-                            pg.draw_rect_outline(props_x, list_y, props_w, list_h, 0x777777);
-                            pg.draw_text(props_x + 10, list_y + 10, "Properties", 0x00FF00);
-                            if let Some(entry) = self.files.get(self.selected_file_idx) {
-                                let sep = if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" };
-                                let full_path = format!("{}{}{}", self.current_path, sep, entry.name);
-                                pg.draw_text(props_x + 10, list_y + 40, &format!("Name: {}", entry.name), 0xFFFFFF);
-                                pg.draw_text(props_x + 10, list_y + 60, &format!("Type: {}", if entry.is_dir { "Directory" } else { "File" }), 0xCCCCCC);
-                                pg.draw_text(props_x + 10, list_y + 80, &format!("Size: {} bytes", entry.size), 0xCCCCCC);
-                                pg.draw_text(props_x + 10, list_y + 100, &format!("Path: {}", full_path), 0x888888);
-                                pg.draw_text(props_x + 10, list_y + 130, &format!("Index: {} / {}", self.selected_file_idx + 1, self.files.len()), 0x888888);
-                            } else {
-                                pg.draw_text(props_x + 10, list_y + 40, "No item selected", 0x888888);
-                            }
-
-                            if let Some(action) = self.filesys_pending_action {
-                                let confirm_y = list_y + list_h - 90;
-                                pg.fill_rect(props_x + 8, confirm_y, props_w - 16, 72, 0x332222);
-                                pg.draw_rect_outline(props_x + 8, confirm_y, props_w - 16, 72, 0xFFAA00);
-                                pg.draw_text(props_x + 16, confirm_y + 10, "Confirm Operation", 0xFFAA00);
-                                pg.draw_text(props_x + 16, confirm_y + 30, &format!("{:?}", action), 0xFFFFFF);
-                                pg.draw_text(props_x + 16, confirm_y + 50, "END confirms, ESC cancels", 0xCCCCCC);
-                            }
-                        }
-
-                        let actions_y = list_h + margin * 8;
-                        pg.draw_text(margin, actions_y, "Actions for Selected Item", 0xCCCCCC);
-                        let actions = ["Open", "Props", "New File", "New Dir", "Rename", "Copy", "Move", "Delete"];
-                        let mut action_x = margin;
-                        let action_y = actions_y + 20;
-                        for (idx, action) in actions.iter().enumerate() {
-                            let is_focused = idx == self.filesys_action_idx;
-                            let color = if is_focused { 0x00AA00 } else { 0x444444 };
-                            pg.fill_rect(action_x, action_y, 92, 24, color);
-                            pg.draw_text(action_x + 6, action_y + 4, action, 0xFFFFFF);
-                            action_x += 100;
-                        }
-                        pg.draw_text(margin, action_y + 34, "LEFT/RIGHT chooses action, END runs it; rename/copy/move/delete ask for confirmation", 0x888888);
-                        pg.draw_text(margin, action_y + 52, &self.status_line, 0xFFFF00);
-                    }
-                    DashboardTab::Test => {
-                        pg.draw_text(20, 100, &alloc::format!("UI Components Test Bed (Qt6 Style)  res: {}x{}", width, height), 0x00FF00);
-
-                        // Column 1
-                        let mut y = 130;
-                        pg.draw_text(20, y, "Buttons & Inputs:", 0xAAAAAA);
-                        y += 25;
-                        pg.fill_rect(20, y, 100, 25, 0x444444);
-                        pg.draw_text(25, y + 5, "Push Button", 0xFFFFFF);
-                        pg.fill_rect(130, y, 30, 25, 0x444444);
-                        pg.draw_text(138, y + 5, "?", 0xFFFFFF); // ToolButton
-                        y += 35;
-
-                        pg.draw_checkbox(20, y, true, false, false, "CheckBox (Checked)");
-                        y += 25;
-                        pg.draw_checkbox(20, y, false, false, false, "CheckBox (Unchecked)");
-                        y += 25;
-                        pg.draw_checkbox(20, y, false, true, false, "CheckBox (Blocked/Denied)");
-                        y += 25;
-                        pg.draw_checkbox(20, y, true, false, true, "CheckBox (Disabled)");
-                        y += 25;
-
-                        pg.draw_radio_button(20, y, true);
-                        pg.draw_text(40, y, "RadioButton 1", 0xFFFFFF);
-                        y += 25;
-                        pg.draw_radio_button(20, y, false);
-                        pg.draw_text(40, y, "RadioButton 2", 0xFFFFFF);
-                        y += 35;
-
-                        pg.draw_text(20, y, "LineEdit:", 0xAAAAAA);
-                        y += 20;
-                        pg.draw_rect_outline(20, y, 150, 20, 0x888888);
-                        pg.fill_rect(21, y + 1, 148, 18, 0xFFFFFF);
-                        pg.draw_text(25, y + 2, "Editable text..ſ", 0x000000);
-                        y += 30;
-
-                        pg.draw_text(20, y, "SpinBox / DoubleSpinBox:", 0xAAAAAA);
-                        y += 15;
-                        pg.draw_spinbox(20, y, 60, 42, "int");
-                        pg.draw_double_spinbox(120, y, 60, 3.14, 2);
-
-                        y += 30;
-
-                        // Column 2
-                        let mut y = 130;
-                        let x2 = 250;
-                        pg.draw_text(x2, y, "Sliders & Progress:", 0xAAAAAA);
-                        y += 25;
-                        pg.draw_slider(x2, y, 150, 40, 100, false);
-                        y += 25; // Horizontal Slider
-                        pg.draw_slider(x2 + 160, 130, 100, 30, 100, true); // Vertical Slider
-
-                        pg.draw_text(x2, y, "Progress Bar:", 0xAAAAAA);
-                        y += 20;
-                        pg.draw_progress_bar(x2, y, 150, 20, 65, 100, 0x00FF00);
-                        y += 35;
-
-                        pg.draw_text(x2, y, "LCD Number:", 0xAAAAAA);
-                        y += 20;
-                        pg.draw_lcd_number(x2, y, "123.45");
-                        y += 40;
-
-                        pg.draw_text(x2, y, "ScrollBars:", 0xAAAAAA);
-                        y += 20;
-                        pg.draw_rect_outline(x2, y, 150, 15, 0x444444);
-                        pg.fill_rect(x2 + 40, y + 1, 30, 13, 0x888888); // H Scroll
-                        y += 25;
-
-                        pg.draw_text(x2, y, "Date/Time Edits:", 0xAAAAAA);
-                        y += 20;
-                        pg.draw_text(x2, y, "2026-02-23 10:25", 0x00FFFF); //y += 30;
-
-                        // Column 3
-                        let mut y = 130;
-                        let x3 = 500;
-                        pg.draw_text(x3, y, "Complex Views (Mock):", 0xAAAAAA);
-                        y += 25;
-                        pg.draw_rect_outline(x3, y, 200, 60, 0x888888); // ListView
-                        pg.draw_text(x3 + 5, y + 5, "ListView Item A", 0xFFFFFF);
-                        pg.draw_text(x3 + 5, y + 25, "ListView Item B", 0xFFFF00);
-                        pg.draw_text(x3 + 5, y + 45, "ListView Item C", 0xFFFFFF);
-                        y += 70;
-
-                        pg.draw_rect_outline(x3, y, 200, 60, 0x888888); // TreeView
-                        pg.draw_text(x3 + 5, y + 5, "[-] Root", 0xFFFFFF);
-                        pg.draw_text(x3 + 20, y + 25, " └─ Child 1", 0xAAAAAA);
-                        pg.draw_text(x3 + 20, y + 45, " └─ Child 2", 0xAAAAAA);
-                        y += 70;
-
-                        pg.draw_rect_outline(x3, y, 200, 60, 0x888888); // TableView
-                        pg.draw_line(x3, y + 20, x3 + 200, y + 20, 0x888888);
-                        pg.draw_line(x3 + 60, y, x3 + 60, y + 60, 0x888888);
-                        pg.draw_text(x3 + 5, y + 2, "H1", 0xAAAAAA);
-                        pg.draw_text(x3 + 65, y + 2, "Header 2", 0xAAAAAA);
-                        pg.draw_text(x3 + 5, y + 25, "Val 1", 0xFFFFFF);
-                        pg.draw_text(x3 + 65, y + 25, "Data 2", 0xFFFFFF);
-                        //y += 70;
-
-
-                        // Group Box & ToolBox
-                        let y = 450;
-                        pg.draw_rect_outline(20, y, 200, 100, 0x888888);
-                        pg.fill_rect(30, y - 8, 80, 16, 0x222222);
-                        pg.draw_text(35, y - 8, "GroupBox", 0xAAAAAA);
-                        pg.draw_text(40, y + 20, "Internal content", 0x888888);
-
-                        pg.draw_rect_outline(240, y, 200, 100, 0x888888);
-                        pg.fill_rect(240, y, 200, 20, 0x444444);
-                        pg.draw_text(245, y + 2, "ToolBox Tab 1 [v]", 0xFFFFFF);
-                        pg.fill_rect(240, y + 80, 200, 20, 0x444444);
-                        pg.draw_text(245, y + 82, "ToolBox Tab 2 [>]", 0xFFFFFF);
-
-                        pg.draw_rect_outline(460, y, 200, 100, 0x888888); // ScrollArea
-                        pg.draw_rect_outline(645, y, 15, 100, 0x444444);
-                        pg.fill_rect(646, y + 10, 13, 30, 0x888888); // V Scroll
-                        pg.draw_text(470, y + 10, "Scroll Area Content...", 0xFFFFFF);
-                        pg.draw_text(470, y + 30, "That is clipped", 0xFFFFFF);
-
-                        // Lines
-
-                        let y = 600;
-                        pg.draw_line(20, y, 780, y, 0x555555); // Horizontal Line
-                        pg.draw_line(400, y + 5, 400, y + 50, 0x555555); // Vertical Line
-
-                        pg.draw_text(20, y + 10, "Labels & Browser:", 0xAAAAAA);
-                        pg.draw_text(20, y + 30, "Standard Label", 0xFFFFFF);
-                        pg.draw_rect_outline(150, y + 10, 230, 40, 0x444444);
-                        pg.draw_text(155, y + 15, "Text Browser with <b>rich</b> content", 0xAAAAAA);
-
-                        pg.draw_text(420, y + 10, "Dial & Key Sequence:", 0xAAAAAA);
-                        // Mock Dial
-                        pg.draw_dial(420, y + 30, 12, 25, 100);
-                        pg.draw_rect_outline(550, y + 30, 100, 20, 0x888888);
-                        pg.draw_text(555, y + 32, "Ctrl+Alt+Del", 0xFFFF00);
-
-
-                        let y = 130;
-                        let x = 750;
-
-                        // Table Data (3D setup)
-                        let headers = ["ID", "Name", "Status"];
-                        let mut rows: Vec<&[&str]> = vec![];
-                        rows.push(&["01", "Kernel", "Running"]);
-                        rows.push(&["02", "GOP", "Active"]);
-                        pg.draw_table_view(x, y, 250, 100, &headers, rows);
-
-                        // Tree Data (Nested JSON-style)
-                        let children = [
-                            TreeViewNode { label: "bin", children: &[], expanded: false },
-                            TreeViewNode { label: "boot", children: &[], expanded: false },
-                        ];
-                        let root = TreeViewNode {
-                            label: "Root (/) ",
-                            children: &children,
-                            expanded: true,
-                        };
-                        pg.draw_tree_view(x, y + 200, 200, 150, &root);
-
-                        pg.draw_icon(x, y + 400, 16, 16, &pixel_graphics::icons::RAM_ICON_DATA);
-                        pg.draw_icon(x + 24, y + 400, 16, 16, &pixel_graphics::icons::PCI_GREEN_ICON_DATA);
-                        pg.draw_icon(x + 48, y + 400, 16, 16, &pixel_graphics::icons::PCI_BLUE_ICON_DATA);
-                        pg.draw_icon(x + 72, y + 400, 16, 16, &pixel_graphics::icons::CPU_ICON_DATA);
-                        pg.draw_icon(x + 96, y + 400, 16, 16, &pixel_graphics::icons::HOURGLASS_ICON_DATA);
-                        pg.draw_icon(x + 120, y + 400, 16, 16, &pixel_graphics::icons::ETHERNET_ICON_DATA);
-                        pg.draw_icon(x + 144, y + 400, 16, 16, &pixel_graphics::icons::HDD_INTERNAL_ICON_DATA);
-                        pg.draw_icon(x + 168, y + 400, 16, 16, &pixel_graphics::icons::SETTINGS_ICON_DATA);
-                        pg.draw_icon(x + 200, y + 400, 32, 32, &pixel_graphics::icons::GTK_CUBE_32_ICON_DATA);
-                        pg.draw_icon(x, y + 450, 32, 32, &pixel_graphics::icons::CD_DISK_32_ICON_DATA);
-                        pg.draw_icon(x + 50, y + 450, 32, 32, &pixel_graphics::icons::SCRIPT_YELLOW_32_ICON_DATA);
-                        pg.draw_icon(x + 100, y + 450, 32, 32, &pixel_graphics::icons::TAPE_WRITE_32_ICON_DATA);
-                        pg.draw_icon(x + 150, y + 450, 32, 32, &pixel_graphics::icons::CUBE_TREE_32_ICON_DATA);
-                        pg.draw_icon(x + 200, y + 450, 32, 32, &pixel_graphics::icons::GEAR_WINDOW_SETTINGS_32_ICON_DATA);
-                        pg.draw_icon(x + 250, y + 450, 32, 32, &pixel_graphics::icons::GRAPHICS_2D_32_ICON_DATA);
-                        pg.draw_icon(x, y + 500, 32, 32, &pixel_graphics::icons::BLADE_NETWORK_32_ICON_DATA);
-                        pg.draw_icon(x + 50, y + 500, 32, 32, &pixel_graphics::icons::INTEGRATED_CIRCUIT_32_ICON_DATA);
-                        pg.draw_icon(x + 100, y + 500, 32, 32, &pixel_graphics::icons::WINOBJ_SEMAPHORE_32_ICON_DATA);
-                        pg.draw_icon(x + 150, y + 500, 32, 32, &pixel_graphics::icons::REGEDIT_CUBES_32_ICON_DATA);
-                        pg.draw_icon(x + 200, y + 500, 32, 32, &pixel_graphics::icons::REGISTRY_HIVE_32_ICON_DATA);
-                        pg.draw_icon(x + 250, y + 500, 32, 32, &pixel_graphics::icons::DATABASE_CLUSTER_32_ICON_DATA);
-                    }
-                    DashboardTab::Editor => {
-                        if let Some(ref ed) = self.editor {
-                            // Draw Header with Mode
-                            let mode_text = if ed.mode == EditorMode::Insert { "-- INSERT --" } else if ed.mode == EditorMode::Command { "-- COMMAND --" } else { "-- NORMAL --" };
-                            let view_type = if ed.is_hex { "[HEX VIEW]" } else { "[TEXT VIEW]" };
-                            pg.draw_text(margin, content_top + 5, &format!("Editing: {} {}", ed.file_path, view_type), 0x00FF00);
-                            pg.draw_text(width - 150, content_top + 5, mode_text, 0xFFFF00);
-
-                            let edit_y_start = content_top + 30;
-                            let visible_lines = (height - edit_y_start - 60) / 20;
-
-                            if ed.is_hex {
-                                let mut y = content_top + 40;
-                                let line_height = 20;
-                                let hex_start_x = margin + 110;
-                                let ascii_start_x = margin + 600;
-
-                                for (i, chunk) in ed.buffer.chunks(16).enumerate().skip(ed.scroll_offset) {
-                                    if y > height - 80 { break; }
-
-                                    let offset = i * 16;
-                                    // Draw Offset in Gray
-                                    pg.draw_text(margin + 10, y, &format!("{:08X}", offset), 0x888888);
-
-                                    for (j, &byte) in chunk.iter().enumerate() {
-                                        let color = match byte {
-                                            0..=31 | 127 => 0x5555FF,   // Blue: Control
-                                            32..=126 => 0xFFFFFF,      // White: ASCII
-                                            _ => 0xFF00FF,             // Purple: Other/Extended
-                                        };
-
-                                        // Draw Hex Byte
-                                        pg.draw_text(hex_start_x + (j * 30), y, &format!("{:02X}", byte), color);
-
-                                        // Draw ASCII Char on the side
-                                        let ascii_char = if byte >= 32 && byte <= 126 { byte as char } else { '.' };
-                                        pg.draw_text(ascii_start_x + (j * 12), y, &ascii_char.to_string(), color);
-                                    }
-                                    y += line_height;
-                                }
-                            } else {
-                                // Text Editor Rendering
-                                let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
-                                for (i, line) in content.lines().skip(ed.scroll_offset).enumerate() {
-                                    if i >= visible_lines { break; }
-                                    pg.draw_text(margin + 40, edit_y_start + (i * 20), line, 0xFFFFFF);
-                                    // Line numbers
-                                    pg.draw_text(margin, edit_y_start + (i * 20), &format!("{:3}", ed.scroll_offset + i + 1), 0x666666);
-                                }
-                            }
-
-                            pg.draw_text(margin, height - 70, ":w - Save | :q - Quit | i - Insert | Esc - Normal", 0x888888);
-                            pg.draw_text(margin + 600, height - 70, &*format!(":{}", ed.command_buffer), 0xFFFFFF);
-                        }
-                    }
-                    DashboardTab::Settings => {
-                        pg.draw_text(10, page_y - 15, "SYSTEM SETTINGS", 0x00FF00);
-
-
-                        let left_x = 10;
-                        let left_y = page_y + 2;
-                        let left_w = (width / 3) - 20;
-                        let left_h = height - left_y - 20;
-                        pg.draw_rect_outline(left_x, left_y, left_w, left_h, 0x444444);
-                        pg.fill_rect(left_x + 1, left_y + 1, left_w - 2, 28, 0x222222);
-                        pg.draw_text(left_x + 10, left_y + 8, "Categories", 0xAAAAAA);
-
-                        let categories = [
-                            ("General", "Runtime defaults and global behavior"),
-                            ("Boot", "Startup, watchdog, and state restore"),
-                            ("Interface", "Dashboard display and visual features"),
-                            ("Virtual Machines", "VM lifecycle and safety defaults"),
-                            ("Network", "NIC, ping, LAN scan, and HTTP controls"),
-                            ("Storage", "File explorer and filesystem behavior"),
-                            ("Packages", "Package index and verification policy"),
-                            ("Developer", "Language, debug, and toolchain flags"),
-                            ("Security", "Protected and experimental ring0 options"),
-                            ("About", "Build and environment information"),
-                        ];
-
-                        let mut left_row_y = left_y + 38;
-                        for (idx, (name, summary)) in categories.iter().enumerate() {
-                            if left_row_y + 35 > left_y + left_h - 8 { break; }
-                            let selected = idx == self.selected_settings_category_idx;
-                            if selected {
-                                pg.fill_rect(left_x + 4, left_row_y - 4, left_w - 8, 32, 0x334433);
-                                pg.draw_rect_outline(left_x + 4, left_row_y - 4, left_w - 8, 32, 0x00AA00);
-                            }
-                            pg.draw_text(left_x + 12, left_row_y, name, if selected { 0xFFFF00 } else { 0xFFFFFF });
-                            pg.draw_text(left_x + 12, left_row_y + 14, summary, 0x666666);
-                            left_row_y += 38;
-                        }
-
-                        let right_x = (width / 3) + 5;
-                        let right_y = page_y + 2;
-                        let right_w = (width * 2 / 3) - 15;
-                        let right_h = height - right_y - 20;
-
-                        pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x444444);
-                        pg.fill_rect(right_x + 1, right_y + 1, right_w - 2, 28, 0x222222);
-
-                        let selected_category = categories
-                            .get(self.selected_settings_category_idx)
-                            .map(|(name, _)| *name)
-                            .unwrap_or("General");
-                        pg.draw_text(right_x + 15, right_y + 8, selected_category, 0xFFFFFF);
-
-                        let mut x = right_x + 20;
-                        let mut y = right_y + 45;
-
-                        let settings = self.settings_rows();
-                        for (idx, (label, value, blocked, disabled)) in settings.iter().enumerate() {
-                            if idx == self.selected_settings_idx {
-                                pg.fill_rect(right_x + 5, y - 4, right_w - 10, 24, 0x333333);
-                            }
-
-                            let label_color = if *disabled { 0x555555 } else if idx == self.selected_settings_idx { 0xFFFF00 } else { 0xDDDDDD };
-
-                            if value.as_str() == "on" || value.as_str() == "off" {
-                                pg.draw_checkbox(x, y, value.as_str() == "on", *blocked, *disabled, label);
-                            } else {
-                                pg.draw_text(x, y, label, label_color);
-                                let val_color = if *blocked { 0xAA5555 } else { 0x00DCDC };
-                                pg.draw_text(right_x + (right_w / 2), y, value, val_color);
-                            }
-                            y += 28;
-                        }
-
-                        // Bottom info bar
-                        let info_y = right_y + right_h - 140;
-                        pg.draw_rect_outline(right_x + 10, info_y, right_w - 20, 100, 0x333333);
-
-                        pg.draw_text(right_x + 20, info_y + 10, "NAVIGATION", 0x888888);
-                        pg.draw_text(right_x + 20, info_y + 30, "UP/DOWN: Select setting   LEFT/RIGHT: Change category", 0x666666);
-                        pg.draw_text(right_x + 20, info_y + 50, "ENTER:   Toggle or cycle through options", 0x666666);
-
-                        if !self.status_line.is_empty() {
-                            pg.draw_text(right_x + 20, info_y + 75, &format!("STATUS: {}", self.status_line), 0x00AAAA);
-                        }
-
-                        if selected_category == "About" {
-                            let env_y = right_y + 180;
-                            pg.draw_text(right_x + 20, env_y, "ENVIRONMENT SNAPSHOT", 0xAAAAAA);
-                            let mut ey = env_y + 25;
-                            for (key, value) in crate::env::global_vars_snapshot().iter().rev().take(8) {
-                                pg.draw_text(right_x + 30, ey, &format!("{:<20} = {}", key, value), 0x777777);
-                                ey += 18;
-                            }
-                        }
-                    }
-                    DashboardTab::Packages => {
-                        pg.draw_text(20, 100, "Packages", 0x00FF00);
-
-                        let package_names = self.package_names();
-                        let list_x = 40;
-                        let list_y = 140;
-                        let list_w = 360;
-                        let list_h = 420;
-                        pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
-                        pg.fill_rect(list_x + 1, list_y + 1, list_w - 2, 18, 0x333333);
-                        pg.draw_text(list_x + 8, list_y + 4, "NAME                         TYPE", 0xCCCCCC);
-
-                        let mut y = list_y + 28;
-                        for (idx, name) in package_names.iter().enumerate() {
-                            if y > list_y + list_h - 20 { break; }
-                            let Some(pkg) = self.package_manager.registry.get(name) else { continue; };
-                            if idx == self.selected_package_idx {
-                                pg.fill_rect(list_x + 2, y - 2, list_w - 4, 16, 0x444400);
-                            }
-                            pg.draw_text(list_x + 8, y, &format!("{:<28} {:?}", pkg.name, pkg.package_type), if idx == self.selected_package_idx { 0xFFFF00 } else { 0xFFFFFF });
-                            pg.draw_package_icon(list_x + list_w - 24, y - 1, true);
-                            y += 18;
-                        }
-
-                        let detail_x = list_x + list_w + 30;
-                        let detail_w = 520;
-                        pg.draw_rect_outline(detail_x, list_y, detail_w, 420, 0x888888);
-                        pg.fill_rect(detail_x + 1, list_y + 1, detail_w - 2, 18, 0x333333);
-                        pg.draw_text(detail_x + 8, list_y + 4, "PACKAGE DETAILS", 0x00FF00);
-
-                        if let Some(name) = self.selected_package_name() {
-                            if let Some(pkg) = self.package_manager.registry.get(&name) {
-                                let mut dy = list_y + 30;
-                                pg.draw_text(detail_x + 10, dy, &format!("Name:      {}", pkg.name), 0xFFFFFF);
-                                dy += 20;
-                                pg.draw_text(detail_x + 10, dy, &format!("Version:   {}", pkg.version), 0x00FFFF);
-                                dy += 20;
-                                pg.draw_text(detail_x + 10, dy, &format!("Type:      {:?}", pkg.package_type), 0xAAAAAA);
-                                dy += 20;
-                                pg.draw_text(detail_x + 10, dy, &format!("Author:    {}", pkg.author), 0xFFFFFF);
-                                dy += 20;
-
-                                if let Some(ref url) = pkg.repo_url {
-                                    pg.draw_text(detail_x + 10, dy, &format!("Repo:      {}", url), 0x5555FF);
-                                    dy += 20;
-                                }
-
-                                let status_color = if pkg.has_compilation_issues { 0xFF5555 } else { 0x55FF55 };
-                                let status_text = if pkg.has_compilation_issues { "FAILED / ISSUES" } else { "READY / OK" };
-                                pg.draw_text(detail_x + 10, dy, &format!("Status:    {}", status_text), status_color);
-                                dy += 30;
-
-                                pg.draw_text(detail_x + 10, dy, "Dependencies:", 0x00FF00);
-                                dy += 20;
-                                if pkg.deps.is_empty() {
-                                    pg.draw_text(detail_x + 20, dy, "none", 0x888888);
-                                    dy += 20;
-                                } else {
-                                    for dep in &pkg.deps {
-                                        pg.draw_text(detail_x + 20, dy, &format!("- {}", dep), 0xCCCCCC);
-                                        dy += 16;
-                                    }
-                                }
-                                dy += 10;
-
-                                pg.draw_text(detail_x + 10, dy, "Description:", 0x00FF00);
-                                dy += 20;
-                                // Basic wrapping for description
-                                let desc = &pkg.description;
-                                let words: Vec<&str> = desc.split_whitespace().collect();
-                                let mut line = String::new();
-                                for word in words {
-                                    if line.len() + word.len() > 60 {
+                                    if !line.is_empty() {
                                         pg.draw_text(detail_x + 20, dy, &line, 0xAAAAAA);
-                                        dy += 16;
-                                        line.clear();
                                     }
-                                    if !line.is_empty() { line.push(' '); }
-                                    line.push_str(word);
                                 }
-                                if !line.is_empty() {
-                                    pg.draw_text(detail_x + 20, dy, &line, 0xAAAAAA);
-                                }
+                            } else {
+                                pg.draw_text(detail_x + 10, list_y + 40, "No packages loaded", 0xAAAAAA);
                             }
-                        } else {
-                            pg.draw_text(detail_x + 10, list_y + 40, "No packages loaded", 0xAAAAAA);
-                        }
 
-                        let actions = ["Refresh", "Verify", "Uninstall", "Update", "Download", "Autocompile"];
-                        let mut action_x = 40;
-                        let action_y = list_y + list_h + 24;
-                        for (idx, action) in actions.iter().enumerate() {
-                            let is_focused = idx == self.package_action_idx;
-                            pg.fill_rect(action_x, action_y, 110, 26, if is_focused { 0x00AA00 } else { 0x444444 });
-                            pg.draw_text(action_x + 8, action_y + 5, action, 0xFFFFFF);
-                            action_x += 120;
+                            let actions = ["Refresh", "Verify", "Uninstall", "Update", "Download", "Autocompile"];
+                            let mut action_x = 40;
+                            let action_y = list_y + list_h + 24;
+                            for (idx, action) in actions.iter().enumerate() {
+                                let is_focused = idx == self.package_action_idx;
+                                pg.fill_rect(action_x, action_y, 110, 26, if is_focused { 0x00AA00 } else { 0x444444 });
+                                pg.draw_text(action_x + 8, action_y + 5, action, 0xFFFFFF);
+                                action_x += 120;
+                            }
+                            if self.package_action_idx == 1 {
+                                pg.draw_text(40, action_y + 30, "Verifies package dependencies and integrity", 0x00AAAA);
+                            }
+                            pg.draw_text(40, action_y + 40, "UP/DOWN selects package, LEFT/RIGHT chooses action, ENTER runs it", 0x888888);
+                            pg.draw_text(40, action_y + 60, &self.status_line, 0xFFFF00);
                         }
-                        if self.package_action_idx == 1 {
-                            pg.draw_text(40, action_y + 30, "Verifies package dependencies and integrity", 0x00AAAA);
+                        _ => {
+                            pg.draw_text(5, page_y - 15, "this page is unavailable", 0xFFFFFF)
                         }
-                        pg.draw_text(40, action_y + 40, "UP/DOWN selects package, LEFT/RIGHT chooses action, ENTER runs it", 0x888888);
-                        pg.draw_text(40, action_y + 60, &self.status_line, 0xFFFF00);
-                    }
-                    _ => {
-                        pg.draw_text(5, page_y - 15, "this page is unavailable", 0xFFFFFF)
                     }
                 }
 
@@ -2035,7 +2044,6 @@ impl DashboardUI {
                     pg.draw_text(win_x + 5, win_y + 2, &app_ctx.application.name, 0xFFFFFF);
 
 
-
                     let step_tsc_begin = unsafe { core::arch::x86_64::_rdtsc() };
                     if !app_ctx.step(None) {
                         apps_to_remove.push(idx);
@@ -2048,8 +2056,6 @@ impl DashboardUI {
 
                     app_ctx.ui_time = draw_tsc_end.saturating_sub(draw_tsc_begin) as usize;
                     app_ctx.cpu_time = step_tsc_end.saturating_sub(step_tsc_begin) as usize;
-
-
                 }
 
                 for idx in apps_to_remove.into_iter().rev() {
@@ -2062,7 +2068,6 @@ impl DashboardUI {
                         }
                     }
                 }
-
 
 
                 // Draw functional UI layers
@@ -2080,12 +2085,12 @@ impl DashboardUI {
 
                 self.draw_startup_menu(&mut pg, width, height);
 
-            // pg.draw_header(0, 0, width, 32, TSC_PER_US as usize,
-            //                [self.ctrl_mode, self.alt_mode, self.fn_mode],
-            //                [self.resources.fps, self.resources.frame_ms, self.resources.cpu_usage as usize, self.resources.used_memory_mb as usize]
-            // );
-            // cursor always drawn last (always on top)
-            pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
+                // pg.draw_header(0, 0, width, 32, TSC_PER_US as usize,
+                //                [self.ctrl_mode, self.alt_mode, self.fn_mode],
+                //                [self.resources.fps, self.resources.frame_ms, self.resources.cpu_usage as usize, self.resources.used_memory_mb as usize]
+                // );
+                // cursor always drawn last (always on top)
+                pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
 
 
                 if self.settings.pg_scanlines { pg.apply_scanlines(); }
@@ -2102,9 +2107,10 @@ impl DashboardUI {
                 }
 
 
-            // Presentation belongs to the dashboard, not to a particular
-            // app or tab renderer.
-            pg.flip();
+                // Presentation belongs to the dashboard, not to a particular
+                // app or tab renderer.
+                pg.flip();
+            // }
         }
     }
 
@@ -2985,7 +2991,24 @@ impl DashboardUI {
                 self.startup_menu_active = !self.startup_menu_active;
                 return;
             }
+            // These are window-manager mode toggles.  They must remain
+            // available while an X app has focus instead of being swallowed
+            // by that app's input handler.
+            if matches!(key,
+                Key::Special(ScanCode::FUNCTION_2)
+                | Key::Special(ScanCode::FUNCTION_3)
+                | Key::Special(ScanCode::FUNCTION_4)
+            ) {
+                self.handle_dashboard_chrome_input(key);
+                return;
+            }
             if self.handle_startup_menu_input(key) {
+                return;
+            }
+            // Window-manager shortcuts must be handled before a focused app
+            // consumes the key.  Previously focused X windows returned here,
+            // making Ctrl+arrow move/resize bindings unreachable.
+            if self.handle_window_keybind(key) {
                 return;
             }
             if let Some(focused_idx) = self.focused_process_idx {
@@ -2993,6 +3016,10 @@ impl DashboardUI {
                     app_ctx.handle_input(key);
                     return;
                 }
+            }
+            if let Some(app_ctx) = self.tab_apps.get_mut(&self.selected_tab) {
+                app_ctx.handle_input(key);
+                // sync happens in draw/step
             }
             use uefi::proto::console::text::ScanCode;
 

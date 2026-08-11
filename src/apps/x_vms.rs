@@ -29,7 +29,7 @@ impl Runnable for X_VMs {
         let gutter = 12usize;
         let line_h = 15usize;
         let width = 800;
-        let height = 600;
+        let height = 600usize;
 
         pg.draw_text(x + margin, y + margin, "Virtual Machines", 0x00FF00);
         
@@ -37,7 +37,10 @@ impl Runnable for X_VMs {
         let table_x = x + margin;
         let table_y = y + margin + 30;
         let table_w = core::cmp::min(width - margin * 2, 600);
-        let table_h = height - table_y - 120;
+        // `table_y` includes the window's screen-space origin.  Calculate
+        // the available height in local layout coordinates so moving a window
+        // cannot underflow this value and trigger a massive render loop.
+        let table_h = height.saturating_sub(margin + 30 + 120);
         pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0xCCCCCC);
         
         // Header
@@ -114,7 +117,10 @@ impl Runnable for X_VMs {
     }
 
     fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
-        // Sync vms from environment or global state
+        if let Some(data) = env.global_data.as_ref() {
+            self.vms = data.vms.clone();
+            self.selected_vm_idx = self.selected_vm_idx.min(self.vms.len().saturating_sub(1));
+        }
     }
 
     fn input(&mut self, key: Key) {
@@ -132,7 +138,6 @@ impl Runnable for X_VMs {
                 if self.vm_action_idx < 7 { self.vm_action_idx += 1; }
             }
             Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
-                // Enter: Execute action
                 if let Some(vm) = self.vms.get(self.selected_vm_idx) {
                     let vm_id = vm.id;
                     unsafe {
@@ -145,11 +150,6 @@ impl Runnable for X_VMs {
                                 4 => { let _ = hv.delete_vm(vm_id); }
                                 5 => { let _ = hv.save_vm_metadata("/VMSTATE"); }
                                 6 => { let _ = hv.restore_vm_metadata("/VMSTATE"); }
-                                7 => {
-                                    // Console - this needs to be handled by the UI/Shell
-                                    // For now we might need a way to signal this.
-                                    // We'll use a hack: set a special var.
-                                }
                                 _ => {}
                             }
                         }

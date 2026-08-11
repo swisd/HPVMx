@@ -6,11 +6,15 @@ use crate::env::{AppInfo, Environment, Runnable};
 use crate::ui::pixel_graphics::PixelGraphics;
 
 #[derive(Clone)]
-pub struct X_Test {}
+pub struct X_Test {
+    iter: usize,
+}
 
 impl X_Test {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            iter: 0,
+        }
     }
 }
 
@@ -19,7 +23,11 @@ impl Runnable for X_Test {
         pg.draw_text(x + 20, y + 20, "System Diagnostics", 0x00FF00);
     }
 
-    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {}
+    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
+        if let Some(data) = env.global_data.as_ref() {
+            self.iter = data.iter as usize;
+        }
+    }
     fn input(&mut self, key: Key) {}
     fn as_any(&self) -> &dyn core::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }

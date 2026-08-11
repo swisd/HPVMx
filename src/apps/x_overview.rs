@@ -43,41 +43,54 @@ impl X_Overview {
 
 impl Runnable for X_Overview {
     fn draw(&self, pg: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) {
-        pg.draw_text(x + 20, y + 20, "System Overview", 0x00FF00);
+        // Draw side menu background
+        let menu_w = 200;
+        let content_x = x + menu_w;
+        pg.fill_rect(x, y, menu_w, 600, 0x333333);
+        
+        let categories = ["Overview", "Hardware", "Virtualization", "Storage", "Network", "Security", "Logs", "Tools", "Help"];
+        let mut menu_y = y + 20;
+        for (idx, cat) in categories.iter().enumerate() {
+            let color = if idx == 0 { 0x00FF00 } else { 0xCCCCCC };
+            pg.draw_text(x + 20, menu_y, cat, color);
+            menu_y += 30;
+        }
+
+        pg.draw_text(content_x + 20, y + 20, "System Overview", 0x00FF00);
         
         let mut curr_y = y + 50;
-        pg.draw_text(x + 20, curr_y, "System Health: OK", 0x00FF00);
+        pg.draw_text(content_x + 20, curr_y, "System Health: OK", 0x00FF00);
         curr_y += 30;
-        pg.draw_text(x + 20, curr_y, &format!("CPU:   {} Cores, {}% Usage", self.cpu_count, self.cpu_usage), 0xFFFFFF);
+        pg.draw_text(content_x + 20, curr_y, &format!("CPU:   {} Cores, {}% Usage", self.cpu_count, self.cpu_usage), 0xFFFFFF);
         curr_y += 20;
-        pg.draw_text(x + 20, curr_y, &format!("Memory: {} / {} MB", self.used_memory_mb, self.total_memory_mb), 0xFFFFFF);
-        curr_y += 30;
-        
-        pg.draw_text(x + 20, curr_y, "I/O Performance:", 0xAAAAAA);
-        curr_y += 20;
-        pg.draw_text(x + 40, curr_y, &format!("Disk:   Read {} KB/s, Write {} KB/s", self.disk_read_kbps, self.disk_write_kbps), 0xCCCCCC);
-        curr_y += 20;
-        pg.draw_text(x + 40, curr_y, &format!("Network: RX {} KB/s, TX {} KB/s", self.net_rx_kbps, self.net_tx_kbps), 0xCCCCCC);
+        pg.draw_text(content_x + 20, curr_y, &format!("Memory: {} / {} MB", self.used_memory_mb, self.total_memory_mb), 0xFFFFFF);
         curr_y += 30;
         
-        pg.draw_text(x + 20, curr_y, &format!("Virtualization: {} VMs Running", self.running_vms), 0xFFFFFF);
+        pg.draw_text(content_x + 20, curr_y, "I/O Performance:", 0xAAAAAA);
         curr_y += 20;
-        pg.draw_text(x + 20, curr_y, &format!("Total VMs: {}", self.total_vms), 0xCCCCCC);
+        pg.draw_text(content_x + 40, curr_y, &format!("Disk:   Read {} KB/s, Write {} KB/s", self.disk_read_kbps, self.disk_write_kbps), 0xCCCCCC);
+        curr_y += 20;
+        pg.draw_text(content_x + 40, curr_y, &format!("Network: RX {} KB/s, TX {} KB/s", self.net_rx_kbps, self.net_tx_kbps), 0xCCCCCC);
+        curr_y += 30;
+        
+        pg.draw_text(content_x + 20, curr_y, &format!("Virtualization: {} VMs Running", self.running_vms), 0xFFFFFF);
+        curr_y += 20;
+        pg.draw_text(content_x + 20, curr_y, &format!("Total VMs: {}", self.total_vms), 0xCCCCCC);
         curr_y += 30;
 
-        pg.draw_text(x + 20, curr_y, "Hardware Categories:", 0xAAAAAA);
+        pg.draw_text(content_x + 20, curr_y, "Hardware Categories:", 0xAAAAAA);
         curr_y += 20;
-        pg.draw_text(x + 40, curr_y, &format!("Storage: {} Files in current path", self.files_count), 0xCCCCCC);
+        pg.draw_text(content_x + 40, curr_y, &format!("Storage: {} Files in current path", self.files_count), 0xCCCCCC);
         curr_y += 20;
-        pg.draw_text(x + 40, curr_y, &format!("Devices: {} Categories detected", self.categories_count), 0xCCCCCC);
+        pg.draw_text(content_x + 40, curr_y, &format!("Devices: {} Categories detected", self.categories_count), 0xCCCCCC);
         curr_y += 60;
-        pg.draw_text_bg(x + 40, curr_y, "STATE BACKUP", 0xFF7700, 0x444444);
+        pg.draw_text_bg(content_x + 40, curr_y, "STATE BACKUP", 0xFF7700, 0x444444);
         curr_y += 20;
-        pg.fill_rect(x + 40, curr_y, 70, 30, 0x553333);
-        pg.draw_text(x + 42, curr_y + 2, "SAVE [/]", 0xBBBBAA);
+        pg.fill_rect(content_x + 40, curr_y, 70, 30, 0x553333);
+        pg.draw_text(content_x + 42, curr_y + 2, "SAVE [/]", 0xBBBBAA);
 
         let time_y = y + 20;
-        let time_x = x + 420;
+        let time_x = content_x + 320;
         if let Ok((time, caps)) = runtime::get_time_and_caps() {
             pg.draw_text(time_x, time_y, &format!("{:?}", time), 0xFFFFFF);
             pg.draw_text(time_x, time_y + 10, &format!("{:?}", caps), 0xFFFFFF);
@@ -85,7 +98,20 @@ impl Runnable for X_Overview {
     }
 
     fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
-        // Here we would ideally sync from the global environment if needed
+        if let Some(data) = env.global_data.as_ref() {
+            self.cpu_count = data.resources.cpu_count;
+            self.cpu_usage = data.resources.cpu_usage;
+            self.used_memory_mb = data.resources.used_memory_mb;
+            self.total_memory_mb = data.resources.total_memory_mb;
+            self.disk_read_kbps = data.resources.disk_read_kbps as u32;
+            self.disk_write_kbps = data.resources.disk_write_kbps as u32;
+            self.net_rx_kbps = data.resources.net_rx_kbps as u32;
+            self.net_tx_kbps = data.resources.net_tx_kbps as u32;
+            self.running_vms = data.vms.iter().filter(|v| v.state.contains("Running")).count();
+            self.total_vms = data.vms.len();
+            self.files_count = data.files.len();
+            self.categories_count = data.categories.len();
+        }
     }
 
     fn input(&mut self, key: Key) {

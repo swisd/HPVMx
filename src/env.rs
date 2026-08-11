@@ -13,7 +13,7 @@ use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
 use uefi::proto::console::text::Key;
 use uefi_raw::protocol::hii::config::HiiTime;
-use crate::apps;
+use crate::{apps, GLOBALENV};
 use crate::apps::AppConstructor;
 use crate::hpvmlog::LOGGING_SILENCED;
 use crate::ui::pixel_graphics::icons::ICON32;
@@ -31,14 +31,22 @@ use crate::apps::x_packages::X_Packages;
 use crate::apps::x_test::X_Test;
 use crate::apps::x_createvm::X_CreateVM;
 use crate::apps::x_editor::X_Editor;
+use crate::pm::PackageManager;
 use crate::rng::XorShiftRng;
+use crate::ui::{DashboardTab, DashboardUI, DeviceCategory, FileEntry, FilePendingAction, ResourceMonitorTab, SystemResources, TextEditor, UiSettings, VmDisplayInfo};
 
 pub type EnvironmentVariable = (String, String);
 
 static GLOBAL_ENV_READY: AtomicBool = AtomicBool::new(false);
 static mut GLOBAL_ENV_VARS: MaybeUninit<BTreeMap<String, String>> = MaybeUninit::uninit();
 
-fn global_env_vars_mut() -> &'static mut BTreeMap<String, String> {
+pub fn global_data_ref() -> Option<&'static GlobalEnvironmentData> {
+    unsafe {
+        GLOBALENV.as_ref().map(|env| &env.data)
+    }
+}
+
+pub(crate) fn global_env_vars_mut() -> &'static mut BTreeMap<String, String> {
     unsafe {
         if !GLOBAL_ENV_READY.load(Ordering::SeqCst) {
             GLOBAL_ENV_VARS.write(BTreeMap::new());
@@ -82,9 +90,8 @@ pub struct Environment {
     pub tmp: EnvironmentVariable,
     pub user: EnvironmentVariable,
     pub devname: EnvironmentVariable,
-
+    pub global_data: Option<&'static GlobalEnvironmentData>,
 }
-
 
 impl Environment {
     pub fn new() -> Environment {
@@ -94,6 +101,7 @@ impl Environment {
             tmp: ("".to_string(), "".to_string()),
             user: ("".to_string(), "".to_string()),
             devname: ("".to_string(), "".to_string()),
+            global_data: None,
         }
     }
 }
@@ -103,13 +111,22 @@ impl Environment {
 ///
 /// Contains system-wide variables like the number of processors and OS version.
 pub struct GlobalEnvironment {
-    pub cd: EnvironmentVariable,
-    pub xd: EnvironmentVariable,
-    pub tmp: EnvironmentVariable,
-    pub user: EnvironmentVariable,
-    pub devname: EnvironmentVariable,
-    pub processor_count: EnvironmentVariable,
-    pub os_version: EnvironmentVariable,
+    // pub cd: EnvironmentVariable,
+    // pub xd: EnvironmentVariable,
+    // pub tmp: EnvironmentVariable,
+    // pub user: EnvironmentVariable,
+    // pub devname: EnvironmentVariable,
+    // pub processor_count: EnvironmentVariable,
+    // pub os_version: EnvironmentVariable,
+    pub data: GlobalEnvironmentData,
+}
+
+impl GlobalEnvironment {
+    pub fn new() -> GlobalEnvironment {
+        GlobalEnvironment {
+            data: GlobalEnvironmentData::new()
+        }
+    }
 }
 
 
@@ -275,7 +292,8 @@ pub struct ApplicationContext {
 /// Execution context for an application that can be stepped manually.
 ///
 /// This is used by the windowing system to update multiple applications
-/// concurrently in the same main loop.
+///
+#[derive(Clone)]
 pub struct SteppedApplicationContext {
     pub parent: Unknown<Application>,
     pub application: Application,
@@ -355,6 +373,303 @@ fn offset_clamped(value: usize, delta: isize, max: usize) -> usize {
         value.saturating_add(delta as usize).min(max)
     }
 }
+
+
+
+#[derive(Clone)]
+pub struct GlobalEnvironmentData {
+    pub vms: Vec<VmDisplayInfo>,
+    pub resources: SystemResources,
+    pub scroll_offset: usize,
+    pub console_scroll_offset: usize,
+    pub console_h_scroll_offset: usize,
+    pub current_path: String,
+    pub files: Vec<FileEntry>,
+    pub selected_file_idx: usize,
+    pub categories: Vec<DeviceCategory>,
+    pub selected_device_idx: usize,
+    pub device_action_idx: usize,
+
+    // Fields for Create VM UI
+    pub new_vm_name: String,
+    pub new_vm_memory_mb: u32,
+    pub new_vm_vcpus: u32,
+    pub create_vm_focus_idx: usize,
+    pub vm_action_idx: usize, // For VM actions (0: Start, 1: Stop, 2: Reset, 3: Zero, 4: Delete)
+    pub selected_vm_idx: usize,
+    pub filesys_action_idx: usize,
+    pub filesys_pending_action: Option<FilePendingAction>,
+    pub filesys_new_counter: usize,
+    pub term_selected: bool,
+    pub term_buf: String,
+    pub editor: Option<TextEditor>,
+    pub package_manager: PackageManager,
+    pub iter: u64,
+    pub active_apps: Vec<SteppedApplicationContext>,
+    pub focused_process_idx: Option<usize>, // Which app gets the keyboard?
+    pub selected_app_idx: usize,
+    pub app_window_position: (usize, usize),
+    pub ctrl_mode: bool,
+    pub alt_mode: bool,
+    pub fn_mode: bool,
+    pub selected_package_idx: usize,
+    pub package_action_idx: usize,
+    pub selected_network_action_idx: usize,
+    pub network_target: String,
+    pub selected_settings_category_idx: usize,
+    pub selected_settings_idx: usize,
+    pub settings: UiSettings,
+    pub status_line: String,
+    pub command_history: Vec<String>,
+    pub history_idx: Option<usize>,
+
+    // New functional UI features
+    pub notifications: Vec<(String, usize)>, // (message, duration_frames)
+    pub command_palette_active: bool,
+    pub command_palette_query: String,
+    pub command_palette_selected: usize,
+    pub command_palette_scroll_offset: usize,
+    pub startup_menu_active: bool,
+    pub selected_startup_app: usize,
+
+    pub glitch_y: usize,
+    pub pci_devices: Vec<crate::hardware::pci::PciDeviceInfo>,
+    pub tab_apps: BTreeMap<DashboardTab, XSteppedApplicationContext>,
+    pub resmon_tab: ResourceMonitorTab,
+    pub cycles: usize,
+}
+
+impl GlobalEnvironmentData {
+    pub fn new() -> Self {
+        GlobalEnvironmentData {
+        vms: Vec::new(),
+        resources: SystemResources {
+            total_memory_mb: 0,
+            used_memory_mb: 0,
+            cpu_count: 0,
+            cpu_usage: 0,
+            cpu_core_usage: Vec::new(),
+            disk_read_kbps: 0,
+            disk_write_kbps: 0,
+            net_rx_kbps: 0,
+            net_tx_kbps: 0,
+            gpu_usage: 0,
+            cpu_history: Vec::with_capacity(100),
+            mem_history: Vec::with_capacity(100),
+            disk_read_history: Vec::with_capacity(100),
+            disk_write_history: Vec::with_capacity(100),
+            net_rx_history: Vec::with_capacity(100),
+            net_tx_history: Vec::with_capacity(100),
+            gpu_history: Vec::with_capacity(100),
+            fps_history: Vec::with_capacity(100),
+            ft_ms_history: Vec::with_capacity(100),
+            fps: 0,
+            frame_ms: 0,
+        },
+        scroll_offset: 0,
+        console_scroll_offset: 0,
+        console_h_scroll_offset: 0,
+        current_path: String::from("\\"),
+        files: Vec::new(),
+        selected_file_idx: 0,
+        categories: Vec::new(),
+        selected_device_idx: 0,
+        device_action_idx: 0,
+        new_vm_name: String::from("NewVM"),
+        new_vm_memory_mb: 256,
+        new_vm_vcpus: 1,
+        create_vm_focus_idx: 0,
+        vm_action_idx: 0,
+        selected_vm_idx: 0,
+        filesys_action_idx: 0,
+        filesys_pending_action: None,
+        filesys_new_counter: 1,
+        term_selected: false,
+        term_buf: "".to_string(),
+        editor: None,
+        package_manager: PackageManager::new(),
+        iter: 0,
+        active_apps: Vec::new(),
+        focused_process_idx: None,
+        selected_app_idx: 0,
+
+        app_window_position: (100, 100),
+        ctrl_mode: false,
+        alt_mode: false,
+        fn_mode: false,
+        selected_package_idx: 0,
+        package_action_idx: 0,
+        selected_network_action_idx: 0,
+        network_target: String::from("127.0.0.1"),
+        selected_settings_category_idx: 0,
+        selected_settings_idx: 0,
+        settings: UiSettings {
+            extra_debug_info: false,
+            folder_absolute_sizes: false,
+            state_save_restore: true,
+            extended_symbol_library: true,
+            ring0_udmi_udxi: false,
+            controllang_support: false,
+            pg_vshaders: true,
+            experimental_mem_comp: false,
+            auto_refresh_storage: true,
+            show_hidden_files: false,
+            general_profile: 0,
+            boot_target: 0,
+            interface_density: 0,
+            vm_safety_policy: 0,
+            network_profile: 0,
+            storage_policy: 0,
+            package_policy: 0,
+            developer_level: 0,
+            security_policy: 0,
+            ui_scaling: 1, // 100%
+            terminal_font: 0,
+            pg_scanlines: false,
+            pg_dither: false,
+            pg_glitch: false,
+            pg_aberration: 0,
+        },
+        status_line: String::from("Ready"),
+        command_history: Vec::new(),
+        history_idx: None,
+        notifications: Vec::new(),
+        command_palette_active: false,
+        command_palette_query: String::new(),
+        command_palette_selected: 0,
+        command_palette_scroll_offset: 0,
+        startup_menu_active: false,
+        selected_startup_app: 0,
+        glitch_y: 0,
+        pci_devices: Vec::new(),
+        tab_apps: BTreeMap::new(),
+        resmon_tab: ResourceMonitorTab::Resources,
+        cycles: 0,
+    }
+    }
+
+    pub fn pull_from_ui(&mut self, ui: DashboardUI) {
+        self.vms = ui.vms;
+        self.resources = ui.resources;
+        self.scroll_offset = ui.scroll_offset;
+        self.console_scroll_offset = ui.scroll_offset;
+        self.console_h_scroll_offset = ui.scroll_offset;
+        self.current_path = ui.current_path;
+        self.files = ui.files;
+        self.selected_file_idx = ui.selected_file_idx;
+        self.categories = ui.categories;
+        self.selected_device_idx = ui.selected_device_idx;
+        self.device_action_idx = ui.device_action_idx;
+        self.new_vm_name = ui.new_vm_name;
+        self.new_vm_memory_mb = ui.new_vm_memory_mb;
+        self.new_vm_vcpus = ui.new_vm_vcpus;
+        self.create_vm_focus_idx = ui.create_vm_focus_idx;
+        self.vm_action_idx = ui.vm_action_idx;
+        self.selected_vm_idx = ui.selected_vm_idx;
+        self.filesys_action_idx = ui.filesys_action_idx;
+        self.filesys_pending_action = ui.filesys_pending_action;
+        self.filesys_new_counter = ui.filesys_new_counter;
+        self.term_selected = ui.term_selected;
+        self.term_buf = ui.term_buf;
+        self.editor = ui.editor;
+        self.package_manager = ui.package_manager;
+        self.iter = ui.iter;
+        self.active_apps = ui.active_apps;
+        self.focused_process_idx = ui.focused_process_idx;
+        self.app_window_position = ui.app_window_position;
+        self.ctrl_mode = ui.ctrl_mode;
+        self.alt_mode = ui.alt_mode;
+        self.fn_mode = ui.fn_mode;
+        self.selected_package_idx = ui.selected_package_idx;
+        self.package_action_idx = ui.package_action_idx;
+        self.selected_network_action_idx = ui.selected_network_action_idx;
+        self.network_target = ui.network_target;
+        self.selected_settings_idx = ui.selected_settings_idx;
+        self.settings = ui.settings;
+        self.status_line = ui.status_line;
+        self.command_history = ui.command_history;
+        self.history_idx = ui.history_idx;
+        self.notifications = ui.notifications;
+        self.command_palette_active = ui.command_palette_active;
+        self.command_palette_selected = ui.command_palette_selected;
+        self.command_palette_scroll_offset = ui.command_palette_scroll_offset;
+        self.startup_menu_active = ui.startup_menu_active;
+        self.selected_startup_app = ui.selected_startup_app;
+        self.glitch_y = ui.glitch_y;
+        self.pci_devices = ui.pci_devices;
+        self.tab_apps = ui.tab_apps;
+        self.resmon_tab = ui.resmon_tab;
+        self.cycles = ui.cycles;
+
+    }
+
+    pub fn pull_from_ui_thru(&mut self, ui: DashboardUI) -> DashboardUI {
+        self.vms = ui.vms.clone();
+        self.resources = ui.resources.clone();
+        self.scroll_offset = ui.scroll_offset.clone();
+        self.console_scroll_offset = ui.scroll_offset.clone();
+        self.console_h_scroll_offset = ui.scroll_offset.clone();
+        self.current_path = ui.current_path.clone();
+        self.files = ui.files.clone();
+        self.selected_file_idx = ui.selected_file_idx.clone();
+        self.categories = ui.categories.clone();
+        self.selected_device_idx = ui.selected_device_idx.clone();
+        self.device_action_idx = ui.device_action_idx.clone();
+        self.new_vm_name = ui.new_vm_name.clone();
+        self.new_vm_memory_mb = ui.new_vm_memory_mb.clone();
+        self.new_vm_vcpus = ui.new_vm_vcpus.clone();
+        self.create_vm_focus_idx = ui.create_vm_focus_idx.clone();
+        self.vm_action_idx = ui.vm_action_idx.clone();
+        self.selected_vm_idx = ui.selected_vm_idx.clone();
+        self.filesys_action_idx = ui.filesys_action_idx.clone();
+        self.filesys_pending_action = ui.filesys_pending_action.clone();
+        self.filesys_new_counter = ui.filesys_new_counter.clone();
+        self.term_selected = ui.term_selected.clone();
+        self.term_buf = ui.term_buf.clone();
+        self.editor = ui.editor.clone();
+        self.package_manager = ui.package_manager.clone();
+        self.iter = ui.iter.clone();
+        self.active_apps = ui.active_apps.clone();
+        self.focused_process_idx = ui.focused_process_idx.clone();
+        self.app_window_position = ui.app_window_position.clone();
+        self.ctrl_mode = ui.ctrl_mode.clone();
+        self.alt_mode = ui.alt_mode.clone();
+        self.fn_mode = ui.fn_mode.clone();
+        self.selected_package_idx = ui.selected_package_idx.clone();
+        self.package_action_idx = ui.package_action_idx.clone();
+        self.selected_network_action_idx = ui.selected_network_action_idx.clone();
+        self.network_target = ui.network_target.clone();
+        self.selected_settings_idx = ui.selected_settings_idx.clone();
+        self.settings = ui.settings.clone();
+        self.status_line = ui.status_line.clone();
+        self.command_history = ui.command_history.clone();
+        self.history_idx = ui.history_idx.clone();
+        self.notifications = ui.notifications.clone();
+        self.command_palette_active = ui.command_palette_active.clone();
+        self.command_palette_selected = ui.command_palette_selected.clone();
+        self.command_palette_scroll_offset = ui.command_palette_scroll_offset.clone();
+        self.startup_menu_active = ui.startup_menu_active.clone();
+        self.selected_startup_app = ui.selected_startup_app.clone();
+        self.glitch_y = ui.glitch_y.clone();
+        self.pci_devices = ui.pci_devices.clone();
+        self.tab_apps = ui.tab_apps.clone();
+        self.resmon_tab = ui.resmon_tab.clone();
+        self.cycles = ui.cycles.clone();
+        ui
+
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
 
 #[allow(deprecated)]
 impl ApplicationContext {
@@ -485,6 +800,9 @@ impl SteppedApplicationContext {
             return false;
         }
 
+        // Pull data from GLOBALENV if available
+        self.environment.global_data = global_data_ref();
+
         // 1. Update Environment
         self.application.local_env = self.environment.clone();
 
@@ -522,16 +840,10 @@ impl SteppedApplicationContext {
     }
     pub fn handle_input(&mut self, key: Key) {
         use uefi::proto::console::text::ScanCode;
-        match key {
-            Key::Special(ScanCode::ESCAPE) => {
-                self.exit_requested = true;
-            }
-            Key::Special(ScanCode::FUNCTION_2) => {
-                //
-            }
-            _ => {
-                self.application.input(key);
-            }
+        if matches!(key, Key::Special(ScanCode::ESCAPE)) {
+            self.exit_requested = true;
+        } else {
+            self.application.input(key);
         }
     }
     pub fn from_name(name: &str) -> Option<SteppedApplicationContext> {
@@ -682,17 +994,21 @@ impl XSteppedApplicationContext {
             return false;
         }
 
+        // Pull data from GLOBALENV if available
+        self.environment.global_data = global_data_ref();
+
+        // 0. Handle forwarded input BEFORE logic so logic can see updated state from input if needed
+        // (though logic usually pulls from global_data which is updated above)
+        if let Some(k) = key {
+            self.handle_input(k);
+        }
+
         // 1. Run application logic
         self.application.logic(&mut self.local_vars, &mut self.environment);
 
         // 2. Run background tasks
         if let Some(tasks) = self.background_tasks.as_mut() {
             tasks.retain_mut(|task| !task.tick(&mut self.local_vars, &mut self.environment));
-        }
-
-        // 3. Handle forwarded input
-        if let Some(k) = key {
-            self.handle_input(k);
         }
 
         let end_busy = unsafe { core::arch::x86_64::_rdtsc() };
@@ -762,6 +1078,7 @@ impl XSteppedApplicationContext {
         Some(ctx)
     }
 
+    /// Avoid using this function as it may cause issues (dashboard should pull from GLOBALENV)
     pub fn sync_back_to_dashboard(&self, ui: &mut crate::ui::DashboardUI) {
         if !self.from_ui { return; }
         
@@ -825,6 +1142,7 @@ impl XSteppedApplicationContext {
                 if let Some(settings) = self.application.inner.as_any().downcast_ref::<X_Settings>() {
                     ui.settings = settings.settings.clone();
                     ui.selected_settings_idx = settings.selected_settings_idx;
+                    ui.selected_settings_category_idx = settings.selected_settings_category_idx;
                 }
             }
             crate::ui::DashboardTab::CreateVM => {
@@ -835,11 +1153,16 @@ impl XSteppedApplicationContext {
                     ui.create_vm_focus_idx = cvm.create_vm_focus_idx;
                 }
             }
+            DashboardTab::Editor => {
+                if let Some(editor) = self.application.inner.as_any().downcast_ref::<X_Editor>() {
+                     // ui.editor = editor.editor.clone(); // Not implemented in ui yet?
+                }
+            }
             _ => {}
         }
     }
 
-    pub fn from_dashboard(ui: &crate::ui::DashboardUI, tab: crate::ui::DashboardTab) -> Self {
+    pub fn from_dashboard(ui: &DashboardUI, tab: DashboardTab) -> Self {
         let name = match tab {
             crate::ui::DashboardTab::Overview => "X_Overview",
             crate::ui::DashboardTab::VirtualMachines => "X_VMs",
@@ -939,6 +1262,7 @@ impl XSteppedApplicationContext {
                 if let Some(settings) = ctx.application.inner.as_any_mut().downcast_mut::<X_Settings>() {
                     settings.settings = ui.settings.clone();
                     settings.selected_settings_idx = ui.selected_settings_idx;
+                    settings.selected_settings_category_idx = ui.selected_settings_category_idx;
                 }
             }
             crate::ui::DashboardTab::Packages => {
@@ -955,6 +1279,16 @@ impl XSteppedApplicationContext {
                     cvm.new_vm_memory_mb = ui.new_vm_memory_mb;
                     cvm.new_vm_vcpus = ui.new_vm_vcpus;
                     cvm.create_vm_focus_idx = ui.create_vm_focus_idx;
+                }
+            }
+            crate::ui::DashboardTab::Editor => {
+                if let Some(editor_app) = ctx.application.inner.as_any_mut().downcast_mut::<X_Editor>() {
+                    // Sync editor state if needed
+                }
+            }
+            crate::ui::DashboardTab::Test => {
+                if let Some(test) = ctx.application.inner.as_any_mut().downcast_mut::<X_Test>() {
+                    // X_Test doesn't have an iter field in its struct definition
                 }
             }
             _ => {}

@@ -70,7 +70,13 @@ impl Runnable for X_Network {
         pg.draw_text(sub_x, sub_y, "LEFT/RIGHT chooses action, ENTER runs it, +/- cycles ping target", 0x888888);
     }
 
-    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {}
+    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
+        if let Some(data) = env.global_data.as_ref() {
+            if self.network_target.is_empty() {
+                self.network_target = data.network_target.clone();
+            }
+        }
+    }
     fn input(&mut self, key: Key) {
         match key {
             Key::Special(ScanCode::LEFT) => {
@@ -80,14 +86,22 @@ impl Runnable for X_Network {
                 if self.selected_network_action_idx < 5 { self.selected_network_action_idx += 1; }
             }
             Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
-                // Execute action
+                match self.selected_network_action_idx {
+                    0 => { let _ = crate::devices::net_hw::init(); }
+                    1 => crate::devices::net::status(),
+                    2 => { let _ = crate::devices::net::ping(&self.network_target, 4, 250); }
+                    3 => crate::devices::net::lanscan("192.168.1."),
+                    4 => crate::devices::net::httpd_start(8080),
+                    5 => crate::devices::net::httpd_stop(),
+                    _ => {}
+                }
             }
             Key::Printable(c) => {
                 let ch = char::from(c);
                 if ch == '+' || ch == '=' {
-                    // cycle target
+                    self.network_target = String::from("192.168.1.1");
                 } else if ch == '-' || ch == '_' {
-                    // cycle target
+                    self.network_target = String::from("127.0.0.1");
                 }
             }
             _ => {}

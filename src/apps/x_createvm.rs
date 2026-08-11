@@ -47,7 +47,9 @@ impl Runnable for X_CreateVM {
         pg.draw_text(x + 20, curr_y + 50, "TAB to switch fields, ENTER to create, ESC to cancel", 0x888888);
     }
 
-    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {}
+    fn logic(&mut self, _vars: &mut Vec<String>, _env: &mut Environment) {
+        // Form values and focus belong to this instance until submission.
+    }
     fn input(&mut self, key: Key) {
         match key {
             Key::Printable(c) => {
@@ -82,15 +84,13 @@ impl Runnable for X_CreateVM {
                     }
                     '\r' | '\n' => {
                         if self.create_vm_focus_idx == 3 {
-                            // Trigger Create VM
                             unsafe {
                                 if let Some(hv) = crate::HYPERVISOR.as_mut() {
                                     let _ = hv.create_vm(&self.new_vm_name, self.new_vm_memory_mb, self.new_vm_vcpus);
                                 }
                             }
-                            // Should probably return to VM list
                         } else if self.create_vm_focus_idx == 4 {
-                            // Cancel
+                            self.create_vm_focus_idx = 0;
                         } else {
                             self.create_vm_focus_idx = (self.create_vm_focus_idx + 1) % 5;
                         }

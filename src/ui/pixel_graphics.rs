@@ -46,7 +46,7 @@ impl PixelGraphics {
         len: usize // This is our visible "window" size
 
     ) {
-        if data.len() < 2 { return; }
+        if data.len() < 2 || len < 2 || width == 0 || height == 0 { return; }
 
         self.draw_rect_outline(x, y, width, height, 0x444444);
 
@@ -63,10 +63,14 @@ impl PixelGraphics {
             let x_offset_1 = ((i - start_idx) as f64 * dx) as usize;
             let x_offset_2 = ((i + 1 - start_idx) as f64 * dx) as usize;
 
-            let val1: u64 = data[i].into();
+            // Metrics can legitimately exceed the graph's display scale.  Do
+            // not allow that to underflow the unsigned screen coordinate: an
+            // underflowed endpoint makes Bresenham walk an effectively
+            // unbounded line and stalls the whole UI.
+            let val1: u64 = data[i].into().min(max_val);
             let y1 = y + height - (val1 as f64 * scale) as usize;
 
-            let val2: u64 = data[i+1].into();
+            let val2: u64 = data[i+1].into().min(max_val);
             let y2 = y + height - (val2 as f64 * scale) as usize;
 
             // Ensure we stay within the horizontal bounds of the graph
@@ -1128,9 +1132,9 @@ impl PixelGraphics {
         self.draw_icon(5, 5, 128, 128, &icons::HPVMX_128_CLR_ICON_DATA);
 
         // Draw navigation
-        self.fill_rect(0, 32, width, 16, 0x444444); // Dark Gray
-        let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
-        self.draw_text(10, 36, nav_text, 0xFFFFFF);
+        // self.fill_rect(0, 32, width, 16, 0x444444); // Dark Gray
+        // let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
+        // self.draw_text(10, 36, nav_text, 0xFFFFFF);
     }
 
 

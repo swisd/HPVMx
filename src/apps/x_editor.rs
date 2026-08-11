@@ -19,7 +19,15 @@ impl Runnable for X_Editor {
         pg.draw_text(x + 20, y + 20, "Text Editor", 0x00FF00);
     }
 
-    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {}
+    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
+        if let Some(data) = env.global_data.as_ref() {
+            if let Some(editor) = data.editor.as_ref() {
+                // If we don't have an editor or it's different, we might want to sync.
+                // However, X_Editor is usually its own state.
+                // For "copy logic" we might just want to be aware of the global editor.
+            }
+        }
+    }
     fn input(&mut self, key: Key) {}
     fn as_any(&self) -> &dyn core::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }

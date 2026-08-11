@@ -42,6 +42,7 @@ mod modules;
 mod c_stems;
 mod registry;
 mod dls;
+mod backgrounds;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -93,6 +94,7 @@ use crate::paging::PagingManager;
 use crate::rng::XorShiftRng;
 use crate::ui::DashboardTab;
 use pm::PackageManager;
+use crate::env::{GlobalEnvironment, GlobalEnvironmentData};
 use crate::page::{Pagefile, PagefileHeader};
 
 //#[global_allocator]
@@ -109,7 +111,7 @@ static mut PAGEFILE: Pagefile = Pagefile { header: PagefileHeader::DefaultHeader
 
 //use crate::graphics::Cursor;
 
-
+pub static mut GLOBALENV: Option<GlobalEnvironment> = None;
 
 pub static mut HYPERVISOR: Option<HypervisorManager> = None;
 static mut TOTAL_PHYSICAL_MEMORY_MB: u32 = 0;
@@ -192,7 +194,7 @@ fn main() -> Status {
         }
     };
 
-    crate::vdebug!("GDT", "initializing gdt");
+    vdebug!("GDT", "initializing gdt");
     gdt::init();
     crate::vdebug!("IDT", "initializing idt");
     interrupts::init_idt();
@@ -201,7 +203,7 @@ fn main() -> Status {
     let mut mapper = unsafe { PagingManager::get_active_mapper(x86_64::VirtAddr::new(16384)) };
 
 
-    crate::vdebug!("fs", "building devicelist");
+    vdebug!("fs", "building devicelist");
 
     // Identify boot disk
     let loaded_image = boot::open_protocol_exclusive::<uefi::proto::loaded_image::LoadedImage>(boot::image_handle()).unwrap();
@@ -226,7 +228,7 @@ fn main() -> Status {
         HYPERVISOR = Some(HypervisorManager::new());
         if let Some(ref mut hv) = HYPERVISOR {
             match hv.initialize() {
-                Ok(_) => crate::vdebug!("VMM", "hypervisor initialized"),
+                Ok(_) => vdebug!("VMM", "hypervisor initialized"),
                 Err(e) => hpvm_warn!("VMM", "hypervisor init failed: {}", e),
             }
         }
@@ -243,7 +245,7 @@ fn main() -> Status {
 
     // 3. Now check for SimplePointer again
     let mouse_handles = boot::find_handles::<SimplePointer>().unwrap_or_default();
-    crate::vdebug!("mouse", "Now found {} pointer handles", mouse_handles.len());
+    vdebug!("mouse", "Now found {} pointer handles", mouse_handles.len());
 
     unsafe {
         init_mouse_deep_scan();
@@ -253,18 +255,23 @@ fn main() -> Status {
         devices::net::status();
     }
 
-    crate::vdebug!("HPVMx", "init sequence complete.");
+    vdebug!("HPVMx", "init sequence complete.");
     let mut PACKAGE_MANAGER: PackageManager = PackageManager::new();
     PACKAGE_MANAGER.load_registry();
 
-    crate::vdebug!("CPU", "calibrating tsc");
+    vdebug!("CPU", "calibrating tsc");
     calibrate_tsc();
-    crate::vdebug!("CPU", "tsc cyc/us {}", TSC_PER_US);
+    vdebug!("CPU", "tsc cyc/us {}", TSC_PER_US);
     let _ = boot::set_watchdog_timer(0, 0, None);
 
+    vdebug!("env", "creating globalenv");
+    unsafe {
+        GLOBALENV = Some(GlobalEnvironment::new());
+    }
 
 
-    crate::vdebug!("HPVMx", "ready");
+
+    vdebug!("HPVMx", "ready");
     hpvm_warn!("HPVMx", "within spinloop");
     //Graphics::get_graphics_info();
 

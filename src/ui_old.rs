@@ -4,10 +4,10 @@
 //!
 //! This module contains the core UI logic, including the `DashboardUI`
 //! which manages the main display, active applications, and system status.
-
+pub static DASH_BACK_ENABLED: bool = true;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use crate::{hpvm_error, hpvm_info, hpvm_log, TSC_PER_US};
+use crate::{hpvm_error, hpvm_info, hpvm_log, vdebug, TSC_PER_US};
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -28,9 +28,9 @@ pub mod graphics3d;
 
 use crate::{handle_vm_command, hpvm_warn, message, terminal};
 use crate::pm::{Package, PackageManager, PackageType};
-use pixel_graphics::{PixelGraphics, TreeViewNode};
+use pixel_graphics::{PixelGraphics, TreeViewNode, icons};
 use crate::apps::error::ErrorApp;
-use crate::env::{Application, SteppedApplicationContext, WindowState};
+use crate::env::{Application, SteppedApplicationContext, WindowState, XSteppedApplicationContext};
 use crate::input::ScanCodeV2;
 
 #[derive(Clone, Debug)]
@@ -67,18 +67,20 @@ pub enum FilePendingAction {
 /// Handles the dashboard, windowing system for applications,
 /// and user input routing.
 pub struct DashboardUI {
-    selected_tab: DashboardTab,
+    pub selected_tab: DashboardTab,
     pub vms: Vec<VmDisplayInfo>,
     pub resources: SystemResources,
-    scroll_offset: usize,
-    cursor: crate::graphics::Cursor,
+    pub scroll_offset: usize,
+    pub console_scroll_offset: usize,
+    pub console_h_scroll_offset: usize,
+    pub cursor: crate::graphics::Cursor,
     pub current_path: String,
     pub files: Vec<FileEntry>,
     pub selected_file_idx: usize,
     pub categories: Vec<DeviceCategory>,
     pub selected_device_idx: usize,
     pub device_action_idx: usize,
-    exit_requested: bool,
+    pub exit_requested: bool,
 
     // Fields for Create VM UI
     pub new_vm_name: String,
@@ -95,7 +97,7 @@ pub struct DashboardUI {
     pub editor: Option<TextEditor>,
     pub package_manager: PackageManager,
     pub iter: u64,
-    pub active_apps: Vec<SteppedApplicationContext>,
+    pub active_apps: Vec<crate::env::SteppedApplicationContext>,
     pub focused_process_idx: Option<usize>, // Which app gets the keyboard?
     pub selected_app_idx: usize,
     pub app_window_position: (usize, usize),
@@ -119,11 +121,14 @@ pub struct DashboardUI {
     pub command_palette_query: String,
     pub command_palette_selected: usize,
     pub command_palette_scroll_offset: usize,
-
-
+    pub startup_menu_active: bool,
+    pub selected_startup_app: usize,
 
     pub glitch_y: usize,
     pub pci_devices: Vec<crate::hardware::pci::PciDeviceInfo>,
+    pub tab_apps: BTreeMap<DashboardTab, XSteppedApplicationContext>,
+    pub resmon_tab: ResourceMonitorTab,
+    pub cycles: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -155,7 +160,7 @@ pub struct UiSettings {
     pub pg_aberration: usize, // 0: off, 1: low, 2: mid, 3: high
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Ord, PartialEq, Eq, PartialOrd)]
 /// Available tabs in the dashboard.
 pub enum DashboardTab {
     Overview,
@@ -171,6 +176,27 @@ pub enum DashboardTab {
     Settings,
     Packages,
     Apps,
+}
+
+impl DashboardTab {
+    pub fn from_u8(val: u8) -> Self {
+        match val {
+            0 => DashboardTab::Overview,
+            1 => DashboardTab::VirtualMachines,
+            2 => DashboardTab::Resources,
+            3 => DashboardTab::Storage,
+            4 => DashboardTab::Network,
+            5 => DashboardTab::Console,
+            6 => DashboardTab::Devices,
+            7 => DashboardTab::Test,
+            8 => DashboardTab::CreateVM,
+            9 => DashboardTab::Editor,
+            10 => DashboardTab::Settings,
+            11 => DashboardTab::Packages,
+            12 => DashboardTab::Apps,
+            _ => DashboardTab::Overview,
+        }
+    }
 }
 
 const COMMAND_PALETTE_VISIBLE_COUNT: usize = 10;
@@ -318,13 +344,20 @@ const UI_PALETTE_COMMANDS: &[&str] = &[
     "Help: Misc Help",
 ];
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum EditorMode {
     Normal,
     Insert,
     Command,
 }
 
+#[derive(Clone)]
+pub enum ResourceMonitorTab {
+    Resources,
+    Processes,
+}
+
+#[derive(Clone)]
 pub struct TextEditor {
     pub file_path: String,
     pub buffer: Vec<u8>,
@@ -351,6 +384,7 @@ impl TextEditor {
     }
 }
 
+#[derive(Clone)]
 pub struct VmDisplayInfo {
     pub id: u32,
     pub name: String,
@@ -361,6 +395,7 @@ pub struct VmDisplayInfo {
     pub uptime_seconds: u64,
 }
 
+#[derive(Clone)]
 pub struct SystemResources {
     pub total_memory_mb: u32,
     pub used_memory_mb: u32,
@@ -391,7 +426,7 @@ pub struct SystemResources {
 
 impl DashboardUI {
     pub fn new(package_manager: PackageManager) -> Self {
-        Self {
+        let mut ui = Self {
             selected_tab: DashboardTab::Overview,
             vms: Vec::new(),
             resources: SystemResources {
@@ -418,6 +453,8 @@ impl DashboardUI {
                 frame_ms: 0,
             },
             scroll_offset: 0,
+            console_scroll_offset: 0,
+            console_h_scroll_offset: 0,
             cursor: crate::graphics::Cursor::new(),
             current_path: String::from("\\"),
             files: Vec::new(),
@@ -489,13 +526,51 @@ impl DashboardUI {
             command_palette_query: String::new(),
             command_palette_selected: 0,
             command_palette_scroll_offset: 0,
+            startup_menu_active: false,
+            selected_startup_app: 0,
             glitch_y: 0,
             pci_devices: Vec::new(),
+            tab_apps: BTreeMap::new(),
+            resmon_tab: ResourceMonitorTab::Resources,
+            cycles: 0,
+        };
+        ui.ensure_tab_app(DashboardTab::Overview);
+        ui
+    }
+
+    /// Lazily creates the application that owns a dashboard tab.  Dashboard
+    /// chrome is deliberately kept here; tab content belongs to `x_*` apps.
+    fn ensure_tab_app(&mut self, tab: DashboardTab) {
+        if !self.tab_apps.contains_key(&tab) {
+            let app_ctx = XSteppedApplicationContext::from_dashboard(self, tab);
+            self.tab_apps.insert(tab, app_ctx);
         }
     }
 
     pub fn add_vm(&mut self, vm: VmDisplayInfo) {
         self.vms.push(vm);
+    }
+
+    pub fn refresh_vms(&mut self) {
+        unsafe {
+            if let Some(hv) = crate::HYPERVISOR.as_ref() {
+                self.vms.clear();
+                let vms = hv.list_vms();
+                let hv_vms = &hv.vms;
+                for (id, name, state) in vms {
+                    let memory_usage_mb = hv_vms.get(&id).map(|v| v.memory_mb).unwrap_or(0);
+                    self.add_vm(VmDisplayInfo {
+                        id,
+                        name: name.to_string(),
+                        state: state.to_string(),
+                        cpu_usage: 0,
+                        memory_usage_mb,
+                        disk_usage_mb: 1024,
+                        uptime_seconds: 0,
+                    });
+                }
+            }
+        }
     }
 
     fn command_palette_items(&self) -> &'static [&'static str] {
@@ -625,28 +700,62 @@ impl DashboardUI {
             pg.clear(0x222222);
 
             // Draw header
-            pg.fill_rect(0, 0, width, 48, 0x008080); // Cyan-ish
-            pg.draw_text(width / 2 - 160, 16, "HPVMx - Hypervisor Management Console", 0xFFFFFF);
+            // pg.fill_rect(0, 0, width, 32, 0x608080); // Cyan-ish
+            // // pg.draw_text(width / 2 - 160, 16, "HPVMx - Hypervisor Management Console", 0xFFFFFF);
+            //
+            // // Draw clock in top right
+            // if let Ok(time) = runtime::get_time() {
+            //     let time_str = alloc::format!("{:02}:{:02}", time.hour(), time.minute());
+            //     pg.draw_text(width - 50, 12, &time_str, 0xFFFF00); // Yellow clock
+            // }
+            //
+            // pg.draw_text(width - 150, 8, &format!("{} fps", self.resources.fps), 0xFFFFFF);
+            // pg.draw_text(width - 212, 8, &format!("{} ms", self.resources.frame_ms), 0xFFFFFF);
+            // pg.draw_text(width - 250, 8, &format!("{}%", self.resources.cpu_usage), 0xFFFFFF);
+            // pg.draw_text(width - 165, 19, &format!("{} MHz", TSC_PER_US), 0xFFFFFF);
+            // pg.draw_text(width - 250, 19, &format!("{} MB", self.resources.used_memory_mb), 0xFFFFFF);
+            //
+            // pg.draw_text(width - 100, 2, if self.ctrl_mode { "ctrl" } else { "" }, 0xFFFFFF);
+            // pg.draw_text((width - 100) + 33, 2, if self.alt_mode { "alt" } else { "" }, 0xFFFFFF);
+            // pg.draw_text((width - 100) + 60, 2, if self.fn_mode { "fn" } else { "" }, 0xFFFFFF);
+            //
+            // // pg.draw_text(40, 1, "   __ _____ _   ____  ___", 0xFFFFFF);
+            // // pg.draw_text(40, 11, "  / // / _ \\ | / /  |/  /_ __", 0xFFFFFF);
+            // // pg.draw_text(40, 21, " / _  / ___/ |/ / /|_/ /\\ \\ /", 0xFFFFFF);
+            // // pg.draw_text(40, 31, "/_//_/_/   |___/_/  /_//_\\_\\", 0xFFFFFF);
+            //
+            // pg.draw_icon(5, 5, 128, 128, &icons::HPVMX_128_CLR_ICON_DATA);
+            //
+            // // Draw navigation
+            // pg.fill_rect(0, 32, width, 16, 0x444444); // Dark Gray
+            // let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
+            // pg.draw_text(10, 36, nav_text, 0xFFFFFF);
 
-            // Draw clock in top right
-            if let Ok(time) = runtime::get_time() {
-                let time_str = alloc::format!("{:02}:{:02}:{:02}", time.hour(), time.minute(), time.second());
-                pg.draw_text(width - 100, 16, &time_str, 0xFFFF00); // Yellow clock
-            }
+            // Draw all active background windows/apps first
+            // for (idx, app_ctx) in self.active_apps.iter_mut().enumerate() {
+            //     if Some(idx) != self.focused_process_idx {
+            //         Self::draw_windowed_app(&mut pg, app_ctx, false);
+            //     }
+            // }
+            //
+            // // Draw focused app on top
+            // if let Some(idx) = self.focused_process_idx {
+            //     if let Some(app_ctx) = self.active_apps.get_mut(idx) {
+            //         Self::draw_windowed_app(&mut pg, app_ctx, true);
+            //     }
+            // }
+            //
+            // // Background step all apps
+            // for app_ctx in self.active_apps.iter_mut() {
+            //     app_ctx.step(None);
+            // }
 
-            pg.draw_text(width - 100, 2, if self.ctrl_mode {"ctrl"} else {""}, 0xFFFFFF);
-            pg.draw_text((width - 100) + 33, 2, if self.alt_mode {"alt"} else {""}, 0xFFFFFF);
-            pg.draw_text((width - 100) + 60, 2, if self.fn_mode {"fn"} else {""}, 0xFFFFFF);
+            pg.draw_header(0, 0, width, 32, TSC_PER_US as usize,
+                           [self.ctrl_mode, self.alt_mode, self.fn_mode],
+                           [self.resources.fps, self.resources.frame_ms, self.resources.cpu_usage as usize, self.resources.used_memory_mb as usize]
+            );
 
-            pg.draw_text(40, 1, "   __ _____ _   ____  ___", 0xFFFFFF);
-            pg.draw_text(40, 11, "  / // / _ \\ | / /  |/  /_ __", 0xFFFFFF);
-            pg.draw_text(40, 21, " / _  / ___/ |/ / /|_/ /\\ \\ /", 0xFFFFFF);
-            pg.draw_text(40, 31, "/_//_/_/   |___/_/  /_//_\\_\\", 0xFFFFFF);
 
-            // Draw navigation
-            pg.fill_rect(0, 48, width, 32, 0x444444); // Dark Gray
-            let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
-            pg.draw_text(10, 56, nav_text, 0xFFFFFF);
             let page_y = 100;
 
             // Layout constants for consistent spacing across tabs
@@ -657,7 +766,15 @@ impl DashboardUI {
             let gutter = 12usize; // space between widgets/rows
             let line_h = 15usize; // standard text line height
 
-            // Content area based on selected tab
+            // The dashboard surface remains the authoritative tab renderer.
+            // X contexts are launched as independent windows; they must not
+            // suppress the proven dashboard layout below.
+            // self.ensure_tab_app(self.selected_tab);
+            // if let Some(app_ctx) = self.tab_apps.get_mut(&self.selected_tab) {
+            //     app_ctx.step(None);
+            //     app_ctx.sync_back_to_dashboard(self);
+            //     app_ctx.application.draw(&mut pg, &app_ctx.local_vars, 0, content_top);
+            // } else {
             match self.selected_tab {
                 DashboardTab::Overview => {
                     pg.draw_text(20, 100, "System Overview", 0x00FF00);
@@ -691,7 +808,7 @@ impl DashboardUI {
                     pg.draw_text_bg(40, y, "STATE BACKUP", 0xFF7700, 0x444444);
                     y += 20;
                     pg.fill_rect(40, y, 70, 30, 0x553333);
-                    pg.draw_text(42, y+2, "SAVE [/]", 0xBBBBAA);
+                    pg.draw_text(42, y + 2, "SAVE [/]", 0xBBBBAA);
 
 
                     y = 100;
@@ -701,7 +818,6 @@ impl DashboardUI {
                     pg.draw_text(420, y, &*time_data_0, 0xFFFFFF);
                     y += 10;
                     pg.draw_text(420, y, &*time_data_1, 0xFFFFFF);
-
 
 
                     // let text_new_0 = format!("{:?}", uefi::runtime::get_variable(VariableKey::));
@@ -730,7 +846,7 @@ impl DashboardUI {
                         pg.draw_rect_outline(x, y, card_w, card_h, border_color);
 
                         // Icon placeholder
-                        pg.draw_icon(x + card_w/2 - 20, y + 20, 32, 32, icon);
+                        pg.draw_icon(x + card_w / 2 - 20, y + 20, 32, 32, icon);
                         pg.draw_text(x + 10, y + card_h - 20, name, 0xFFFFFF);
 
                         // Grid position info
@@ -819,7 +935,7 @@ impl DashboardUI {
                     if !self.vms.is_empty() {
                         let actions_y = table_y + table_h + gutter;
                         pg.draw_text(margin, actions_y, "Actions for Selected VM:", 0xCCCCCC);
-                        let actions = ["Start", "Stop", "Reset", "Zero", "Delete", "Save", "Restore"];
+                        let actions = ["Start", "Stop", "Reset", "Zero", "Delete", "Save", "Restore", "Console"];
                         let mut action_x = margin;
                         let action_y = actions_y + 20;
                         for (idx, action) in actions.iter().enumerate() {
@@ -875,78 +991,227 @@ impl DashboardUI {
                     pg.draw_text(margin, form_y + 50, "TAB to switch fields | ENTER to confirm | ESC to cancel", 0x888888);
                 }
                 DashboardTab::Resources => {
-                    // Left info panel
-                    let panel_x = margin;
-                    let panel_y = content_top + margin;
-                    let panel_w = 360usize;
-                    let panel_h = 480usize;
-                    pg.draw_rect_outline(panel_x, panel_y, panel_w, panel_h, 0x888888);
-                    pg.draw_text_bg(panel_x, panel_y - 4, "Resource Monitor", 0x20FF20, 0x222222);
+                    match self.resmon_tab {
+                        ResourceMonitorTab::Resources => {
+                            pg.draw_text(margin, content_top - 6, "[ Resources ]  | Processes |", 0xFFFFFF);
 
-                    pg.draw_text(panel_x + 10, panel_y + 16, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
-                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
-                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h * 2, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
+                            // Left info panel
+                            let panel_x = margin;
+                            let panel_y = content_top + margin;
+                            let panel_w = 360usize;
+                            let panel_h = 480usize;
+                            pg.draw_rect_outline(panel_x, panel_y, panel_w, panel_h, 0x888888);
+                            pg.draw_text_bg(panel_x, panel_y - 4, "Resource Monitor", 0x20FF20, 0x222222);
 
-                    // Memory usage bar and graph
-                    let bar_y = panel_y + 16 + line_h * 3 + gutter;
-                    pg.draw_text(panel_x + 10, bar_y, "Memory History (10s):", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00, 60);
+                            pg.draw_text(panel_x + 10, panel_y + 16, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
+                            pg.draw_text(panel_x + 10, panel_y + 16 + line_h, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
+                            pg.draw_text(panel_x + 10, panel_y + 16 + line_h * 2, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
 
-                    // I/O Stats and Graphs
-                    let io_y = bar_y + 80 + gutter * 2;
-                    pg.draw_text(panel_x + 10, io_y, "Net Traffic (RX:Cyan TX:Yellow)", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF, 60);
-                    pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00, 60);
+                            // Memory usage bar and graph
+                            let bar_y = panel_y + 16 + line_h * 3 + gutter;
+                            pg.draw_text(panel_x + 10, bar_y, "Memory History (10s):", 0xCCCCCC);
+                            pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00, 60);
 
-                    let disk_y = io_y + 80;
-                    pg.draw_text(panel_x + 10, disk_y, "Disk I/O (Read:White Write:Red)", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF, 60);
-                    pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000, 60);
+                            // I/O Stats and Graphs
+                            let io_y = bar_y + 80 + gutter * 2;
+                            pg.draw_text(panel_x + 10, io_y, "Net Traffic (RX:Cyan TX:Yellow)", 0xCCCCCC);
+                            pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF, 60);
+                            pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00, 60);
 
-                    let gpu_y = disk_y + 80;
-                    pg.draw_text(panel_x+ 10, gpu_y, "GPU Usage:", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, gpu_y+20, 165, 50, &self.resources.gpu_history, 100, 0xFF7700, 60);
+                            let disk_y = io_y + 80;
+                            pg.draw_text(panel_x + 10, disk_y, "Disk I/O (Read:White Write:Red)", 0xCCCCCC);
+                            pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF, 60);
+                            pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000, 60);
+
+                            let gpu_y = disk_y + 80;
+                            pg.draw_text(panel_x + 10, gpu_y, "GPU Usage:", 0xCCCCCC);
+                            pg.draw_line_graph(panel_x + 10, gpu_y + 20, 165, 50, &self.resources.gpu_history, 100, 0xFF7700, 60);
 
 
+                            // Right CPU core list panel or Total CPU Graph
+                            let right_x = panel_x + panel_w + gutter * 2;
+                            let right_y = panel_y;
+                            let right_w = core::cmp::min(width - right_x - margin, 360);
+                            let right_h = core::cmp::min(height - right_y - 100, 260);
+                            pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
+                            pg.draw_text_bg(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF, 0x222222);
+                            pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00, 60);
+
+                            pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
+                            for i in 0..self.resources.cpu_count {
+                                let row_y = right_y + 120 + (i as usize * (line_h + 4));
+                                if row_y + line_h > right_y + right_h - 8 { break; }
+                                let usage = if i < self.resources.cpu_core_usage.len() as u32 { self.resources.cpu_core_usage[i as usize] } else { 0 };
+                                pg.draw_text(right_x + 10, row_y, &alloc::format!("C{}:{:>2}%", i, usage), 0xCCCCCC);
+                                pg.draw_progress_bar(right_x + 70, row_y, right_w - 80, 12, usage as usize, 100, 0x00FF00);
+                            }
+
+                            pg.draw_text_bg(right_x + 10, right_y + 300, "FPS History:", 0xFFFFFF, 0x222222);
+                            pg.draw_line_graph(right_x + 10, right_y + 300, right_w - 20, 80, &self.resources.fps_history, 75, 0xFF44FF, 60);
+                            pg.draw_text_bg(right_x + 10, right_y + 400, "Frame MS History:", 0xFFFFFF, 0x222222);
+                            pg.draw_line_graph(right_x + 10, right_y + 400, right_w - 20, 80, &self.resources.ft_ms_history, 750, 0xFFAAFF, 60);
+
+                            // Heatmap for CPU Core usage
+                            let hm_y = right_y + 500;
+                            pg.draw_text(right_x + 10, hm_y, "CPU Heatmap (Real-time Core Stress):", 0xFFFFFF);
+                            let mut hm_data = [0.0f32; 16];
+                            for i in 0..core::cmp::min(self.resources.cpu_core_usage.len(), 1) {
+                                hm_data[i] = self.resources.cpu_core_usage[i] as f32 / 100.0;
+                            }
+                            pg.draw_heatmap(right_x + 10, hm_y + 20, right_w - 20, 80, 4, 4, &hm_data);
+
+                            // draw u64 le text for all stats
+
+                            pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.cpu_usage as u64, 0xFFFFFF);
+                            pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.used_memory_mb as u64, 0xFFFFFF);
+                            pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.frame_ms as u64, 0xFFFFFF);
+                            pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.gpu_usage as u64, 0xFFFFFF);
+                        }
+                        ResourceMonitorTab::Processes => {
+                            pg.draw_text(margin, content_top - 6, "| Resources |  [ Processes ]", 0xFFFFFF);
+
+                            let panel_x = margin;
+                            let panel_y = content_top + margin;
+                            let panel_w = 600usize;
+                            let panel_h = 480usize;
+
+                            pg.draw_text_bg(panel_x, panel_y - 4, "Process Monitor", 0x20FF20, 0x222222);
+                            let headers: &[&str] = &["name", "pid", "cycles", "cpu time"];
+                            let cycles_string = format!("{:#?}", self.cycles);
+                            let cycles_str = cycles_string.as_str();
+                            let mut rows: Vec<&[&str]> = vec![
+                                &["system", "0", "x", "x"],
+                                &["hardware", "9", "x", "x"],
+                            ];
+
+                            // // 1. Store actual fixed-size String arrays in memory
+                            // let mut row_storage: Vec<[String; 3]> = Vec::with_capacity(self.active_apps.len());
+                            //
+                            // for app in &self.active_apps {
+                            //     let name = app.application.name.to_string();
+                            //     let pid = format!("{:#?}", app.pid);
+                            //     let cycles = "x".to_string();
+                            //
+                            //     row_storage.push([name, pid, cycles]);
+                            // }
+                            //
+                            // // 2. Build slice references into the stored arrays
+                            // // Constructing &[&str] views referencing the backing String data
+                            // let row_refs: Vec<[&str; 3]> = row_storage
+                            //     .iter()
+                            //     .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str()])
+                            //     .collect();
+                            //
+                            // // 3. Push slice views into rows
+                            // for row in &row_refs {
+                            //     rows.push(row);
+                            // }
+
+                            // 2. Hoist the backing storage variables OUTSIDE the fallback scope
+                            // These must stay alive as long as `rows` is being used
+                            let mut row_storage: Vec<[String; 4]> = Vec::new();
+                            let mut row_refs: Vec<[&str; 4]> = Vec::new();
+
+                            // Wrap the logic in a closure or function that returns an Option/Result
+                            // 3. Fallible logic scope (your "try" block)
+                            // let mut allocate_rows = || -> Option<()> {
+                            //     // Safely allocate room for the strings
+                            //     row_storage.try_reserve(self.active_apps.len()).ok()?;
+                            //
+                            //     for app in &self.active_apps {
+                            //         let name = app.application.name.to_string();
+                            //         let pid = format!("{:#?}", app.pid);
+                            //         let cycles = "x".to_string();
+                            //
+                            //         row_storage.push([name, pid, cycles]);
+                            //     }
+                            //
+                            //     // Safely reserve room for the slice references
+                            //     row_refs.try_reserve(self.active_apps.len()).ok()?;
+                            //
+                            //     // Build the string views into the outer row_refs
+                            //     row_refs.extend(
+                            //         row_storage
+                            //             .iter()
+                            //             .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str()])
+                            //     );
+                            //
+                            //     // Push slice views into rows
+                            //     for row in &row_refs {
+                            //         rows.push(row);
+                            //     }
+                            //
+                            //     Some(())
+                            // };
+                            //
+                            // // "Try/Except" wrapper: If it returns None, execution safely skips the rest
+                            // if allocate_rows().is_none() {
+                            //     vdebug!("ui", "OOM alloc error DashboardTab::Resources.ResourceMonitorTab::Processes.var:rows")
+                            // }
+
+                            // 2. Use a labeled loop as a "try" block that we can break out of early
+                            vdebug!("ui", "[TRY] Entering 'try_block loop...");
+
+                            'try_block: loop {
+                                vdebug!("ui", "[TRY] Checking capacity for row_storage...");
+                                // Fallibly allocate capacity for strings
+                                if row_storage.try_reserve(self.active_apps.len()).is_err() {
+                                    vdebug!("ui", "[FAIL] Allocation failed inside row_storage.try_reserve!");
+                                    break 'try_block;
+                                }
+                                vdebug!("ui", "[SUCCESS] row_storage memory reserved.");
+
+                                vdebug!("ui", "[TRY] Beginning active_apps iteration loop...");
+
+                                row_storage.push([String::from("dashboard"), String::from("14"), format!("{:#?}", self.cycles), format!("{:#?}", ((self.resources.fps as u64 * self.cycles as u64) / (TSC_PER_US * 1000000)) * 100)]);
+
+                                for (index, app) in self.active_apps.iter().enumerate() {
+                                    // NOTE: If your UEFI app freezes right here, one of these three allocations is failing.
+                                    // Rust's default allocator will panic on OOM here unless custom catch mechanics are present.
+                                    let name = app.application.name.to_string();
+                                    let pid = format!("{:#?}", app.pid);
+                                    let total_cyc = app.ui_time + app.cpu_time;
+                                    let cycles = format!("{:#?}", total_cyc);
+
+                                    row_storage.push([name, pid, cycles, format!("{:#?}", ((self.resources.fps as u64 * app.cpu_time as u64) / TSC_PER_US * 1000000) * 100)]);
+                                }
+                                vdebug!("ui", "[SUCCESS] Finished active_apps loop. row_storage populated.");
+
+                                vdebug!("ui", "[TRY] Checking capacity for row_refs...");
+                                // Fallibly allocate capacity for the slice references
+                                if row_refs.try_reserve(self.active_apps.len()).is_err() {
+                                    vdebug!("ui", "[FAIL] Allocation failed inside row_refs.try_reserve!");
+                                    break 'try_block;
+                                }
+                                vdebug!("ui", "[SUCCESS] row_refs memory reserved.");
+
+                                vdebug!("ui", "[TRY] Extending row_refs mapping...");
+                                // Build views using references pointing directly to row_storage strings
+                                row_refs.extend(
+                                    row_storage
+                                        .iter()
+                                        .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str(), row[3].as_str()])
+                                );
+                                vdebug!("ui", "[SUCCESS] row_refs extended successfully.");
+
+                                vdebug!("ui", "[TRY] Pushing slice views into rows vector...");
+                                // Safely push slice views into rows
+                                for row in &row_refs {
+                                    rows.push(&row[..]);
+                                }
+                                vdebug!("ui", "[SUCCESS] All elements safely integrated into rows.");
+
+                                break 'try_block;
+                            }
+
+                            vdebug!("ui", "[EXIT] Left the 'try_block loop.");
 
 
-                    // Right CPU core list panel or Total CPU Graph
-                    let right_x = panel_x + panel_w + gutter * 2;
-                    let right_y = panel_y;
-                    let right_w = core::cmp::min(width - right_x - margin, 360);
-                    let right_h = core::cmp::min(height - right_y - 100, 260);
-                    pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
-                    pg.draw_text_bg(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF, 0x222222);
-                    pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00, 60);
-
-                    pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
-                    for i in 0..self.resources.cpu_count {
-                        let row_y = right_y + 120 + (i as usize * (line_h + 4));
-                        if row_y + line_h > right_y + right_h - 8 { break; }
-                        let usage = if i < self.resources.cpu_core_usage.len() as u32 { self.resources.cpu_core_usage[i as usize] } else { 0 };
-                        pg.draw_text(right_x + 10, row_y, &alloc::format!("C{}:{:>2}%", i, usage), 0xCCCCCC);
-                        pg.draw_progress_bar(right_x + 70, row_y, right_w - 80, 12, usage as usize, 100, 0x00FF00);
+                            pg.draw_table_view(panel_x, panel_y + 4, panel_w, panel_h, headers, rows);
+                        }
                     }
-
-                    pg.draw_text_bg(right_x + 10, right_y + 300, "FPS History:", 0xFFFFFF, 0x222222);
-                    pg.draw_line_graph(right_x + 10, right_y + 300, right_w - 20, 80, &self.resources.fps_history, 75, 0xFF44FF, 60);
-                    pg.draw_text_bg(right_x + 10, right_y + 400, "Frame MS History:", 0xFFFFFF, 0x222222);
-                    pg.draw_line_graph(right_x + 10, right_y + 400, right_w - 20, 80, &self.resources.ft_ms_history, 750, 0xFFAAFF, 60);
-
-                    // Heatmap for CPU Core usage
-                    let hm_y = right_y + 500;
-                    pg.draw_text(right_x + 10, hm_y, "CPU Heatmap (Real-time Core Stress):", 0xFFFFFF);
-                    let mut hm_data = [0.0f32; 16];
-                    for i in 0..core::cmp::min(self.resources.cpu_core_usage.len(), 16) {
-                        hm_data[i] = self.resources.cpu_core_usage[i] as f32 / 100.0;
-                    }
-                    pg.draw_heatmap(right_x + 10, hm_y + 20, right_w - 20, 80, 4, 4, &hm_data);
-
-                    // draw u64 le text for all stats
-
                 }
                 DashboardTab::Network => {
-
                     let x = 20;
                     let mut y = 100;
                     pg.draw_text(x, y, "Network Status", 0x00FF00);
@@ -1004,22 +1269,26 @@ impl DashboardUI {
                     pg.draw_text(x, y, "LEFT/RIGHT chooses action, ENTER runs it, +/- cycles ping target", 0x888888);
                     y += 20;
                     pg.draw_text(x, y, &self.status_line, 0xFFFF00);
-
-
-
-
                 }
                 DashboardTab::Console => {
                     pg.draw_text(20, 100, "Hypervisor Real-time Log", 0x00FF00);
                     let logs = crate::hpvmlog::get_logs();
-                    pg.draw_log_viewer(margin, 130, width - margin * 2, height - 135 - margin * 8, &logs);
+                    pg.draw_log_viewer(
+                        margin,
+                        130,
+                        width - margin * 2,
+                        height - 135 - margin * 8,
+                        &logs,
+                        self.console_scroll_offset,
+                        self.console_h_scroll_offset,
+                    );
 
                     let y_msg = height - margin * 6;
-                    pg.draw_text(margin, y_msg, "Use PgUp/PgDn to scroll, C to clear", 0x888888);
+                    pg.draw_text(margin, y_msg, "Use PgUp/PgDn to scroll logs, LEFT/RIGHT to scroll text, C to clear", 0x888888);
 
-                    pg.draw_rect_outline(margin, height-95, width - margin * 8, 35, 0x999999);
+                    pg.draw_rect_outline(margin, height - 95, width - margin * 8, 35, 0x999999);
                     if self.term_selected {
-                        pg.draw_rect_outline_adv(margin - 1, height-96, (width - margin * 8)+2, 37, 0x888844, 3, 0x0F0F0F0F);
+                        pg.draw_rect_outline_adv(margin - 1, height - 96, (width - margin * 8) + 2, 37, 0x888844, 3, 0x0F0F0F0F);
                     }
                     pg.draw_text(margin + 5, height - 60, "press enter to send, end to enter type mode, and esc to exit", 0x888888);
                     pg.draw_text(margin + 5, height - 85, alloc::format!("HPVMx> {}", self.term_buf).as_str(), 0xDDDDDD);
@@ -1040,7 +1309,7 @@ impl DashboardUI {
                         if cat.expanded {
                             for dev in &cat.devices {
                                 let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xFFFFFF };
-                                pg.draw_icon(35, y - 2, 16, 16, if cat.name == "Network Adapters" {&pixel_graphics::icons::PCI_GREEN_ICON_DATA} else { &pixel_graphics::icons::PCI_BLUE_ICON_DATA });
+                                pg.draw_icon(35, y - 2, 16, 16, if cat.name == "Network Adapters" { &pixel_graphics::icons::PCI_GREEN_ICON_DATA } else { &pixel_graphics::icons::PCI_BLUE_ICON_DATA });
 
                                 // Split path after third '/' for the list view as well
                                 let path = &dev.path;
@@ -1120,7 +1389,7 @@ impl DashboardUI {
                             if c == '/' {
                                 slash_count += 1;
                                 if slash_count == 3 {
-                                    parts.push(&path[..i+1]);
+                                    parts.push(&path[..i + 1]);
                                     last_split = i + 1;
                                     break;
                                 }
@@ -1241,10 +1510,10 @@ impl DashboardUI {
 
                         let size: String = if entry.size < 10000 {
                             format!("{}", entry.size)
-                        } else if entry.size/1024 < 10000 {
-                            format!("{}K", (entry.size/1024))
+                        } else if entry.size / 1024 < 10000 {
+                            format!("{}K", (entry.size / 1024))
                         } else {
-                            format!("{}M", (entry.size/1024)/1024)
+                            format!("{}M", (entry.size / 1024) / 1024)
                         };
 
 
@@ -1283,7 +1552,7 @@ impl DashboardUI {
                         }
                     }
 
-                    let actions_y = list_h + margin*8;
+                    let actions_y = list_h + margin * 8;
                     pg.draw_text(margin, actions_y, "Actions for Selected Item", 0xCCCCCC);
                     let actions = ["Open", "Props", "New File", "New Dir", "Rename", "Copy", "Move", "Delete"];
                     let mut action_x = margin;
@@ -1303,53 +1572,78 @@ impl DashboardUI {
 
                     // Column 1
                     let mut y = 130;
-                    pg.draw_text(20, y, "Buttons & Inputs:", 0xAAAAAA); y += 25;
-                    pg.fill_rect(20, y, 100, 25, 0x444444); pg.draw_text(25, y+5, "Push Button", 0xFFFFFF);
-                    pg.fill_rect(130, y, 30, 25, 0x444444); pg.draw_text(138, y+5, "?", 0xFFFFFF); // ToolButton
+                    pg.draw_text(20, y, "Buttons & Inputs:", 0xAAAAAA);
+                    y += 25;
+                    pg.fill_rect(20, y, 100, 25, 0x444444);
+                    pg.draw_text(25, y + 5, "Push Button", 0xFFFFFF);
+                    pg.fill_rect(130, y, 30, 25, 0x444444);
+                    pg.draw_text(138, y + 5, "?", 0xFFFFFF); // ToolButton
                     y += 35;
 
-                    pg.draw_checkbox(20, y, true, false, false, "CheckBox (Checked)"); y += 25;
-                    pg.draw_checkbox(20, y, false, false, false, "CheckBox (Unchecked)");  y += 25;
-                    pg.draw_checkbox(20, y, false, true, false,"CheckBox (Blocked/Denied)");  y += 25;
-                    pg.draw_checkbox(20, y, true, false, true, "CheckBox (Disabled)"); y += 25;
+                    pg.draw_checkbox(20, y, true, false, false, "CheckBox (Checked)");
+                    y += 25;
+                    pg.draw_checkbox(20, y, false, false, false, "CheckBox (Unchecked)");
+                    y += 25;
+                    pg.draw_checkbox(20, y, false, true, false, "CheckBox (Blocked/Denied)");
+                    y += 25;
+                    pg.draw_checkbox(20, y, true, false, true, "CheckBox (Disabled)");
+                    y += 25;
 
-                    pg.draw_radio_button(20, y, true); pg.draw_text(40, y, "RadioButton 1", 0xFFFFFF); y += 25;
-                    pg.draw_radio_button(20, y, false); pg.draw_text(40, y, "RadioButton 2", 0xFFFFFF); y += 35;
+                    pg.draw_radio_button(20, y, true);
+                    pg.draw_text(40, y, "RadioButton 1", 0xFFFFFF);
+                    y += 25;
+                    pg.draw_radio_button(20, y, false);
+                    pg.draw_text(40, y, "RadioButton 2", 0xFFFFFF);
+                    y += 35;
 
-                    pg.draw_text(20, y, "LineEdit:", 0xAAAAAA); y += 20;
-                    pg.draw_rect_outline(20, y, 150, 20, 0x888888); pg.fill_rect(21, y+1, 148, 18, 0xFFFFFF);
-                    pg.draw_text(25, y+2, "Editable text..ſ", 0x000000); y += 30;
+                    pg.draw_text(20, y, "LineEdit:", 0xAAAAAA);
+                    y += 20;
+                    pg.draw_rect_outline(20, y, 150, 20, 0x888888);
+                    pg.fill_rect(21, y + 1, 148, 18, 0xFFFFFF);
+                    pg.draw_text(25, y + 2, "Editable text..ſ", 0x000000);
+                    y += 30;
 
-                    pg.draw_text(20, y, "SpinBox / DoubleSpinBox:", 0xAAAAAA); y += 15;
+                    pg.draw_text(20, y, "SpinBox / DoubleSpinBox:", 0xAAAAAA);
+                    y += 15;
                     pg.draw_spinbox(20, y, 60, 42, "int");
                     pg.draw_double_spinbox(120, y, 60, 3.14, 2);
 
-                    y+= 30;
+                    y += 30;
 
                     // Column 2
                     let mut y = 130;
                     let x2 = 250;
-                    pg.draw_text(x2, y, "Sliders & Progress:", 0xAAAAAA); y += 25;
-                    pg.draw_slider(x2, y, 150, 40, 100, false); y += 25; // Horizontal Slider
+                    pg.draw_text(x2, y, "Sliders & Progress:", 0xAAAAAA);
+                    y += 25;
+                    pg.draw_slider(x2, y, 150, 40, 100, false);
+                    y += 25; // Horizontal Slider
                     pg.draw_slider(x2 + 160, 130, 100, 30, 100, true); // Vertical Slider
 
-                    pg.draw_text(x2, y, "Progress Bar:", 0xAAAAAA); y += 20;
-                    pg.draw_progress_bar(x2, y, 150, 20, 65, 100, 0x00FF00); y += 35;
+                    pg.draw_text(x2, y, "Progress Bar:", 0xAAAAAA);
+                    y += 20;
+                    pg.draw_progress_bar(x2, y, 150, 20, 65, 100, 0x00FF00);
+                    y += 35;
 
-                    pg.draw_text(x2, y, "LCD Number:", 0xAAAAAA); y += 20;
-                    pg.draw_lcd_number(x2, y, "123.45"); y += 40;
+                    pg.draw_text(x2, y, "LCD Number:", 0xAAAAAA);
+                    y += 20;
+                    pg.draw_lcd_number(x2, y, "123.45");
+                    y += 40;
 
-                    pg.draw_text(x2, y, "ScrollBars:", 0xAAAAAA); y += 20;
-                    pg.draw_rect_outline(x2, y, 150, 15, 0x444444); pg.fill_rect(x2 + 40, y + 1, 30, 13, 0x888888); // H Scroll
+                    pg.draw_text(x2, y, "ScrollBars:", 0xAAAAAA);
+                    y += 20;
+                    pg.draw_rect_outline(x2, y, 150, 15, 0x444444);
+                    pg.fill_rect(x2 + 40, y + 1, 30, 13, 0x888888); // H Scroll
                     y += 25;
 
-                    pg.draw_text(x2, y, "Date/Time Edits:", 0xAAAAAA); y += 20;
+                    pg.draw_text(x2, y, "Date/Time Edits:", 0xAAAAAA);
+                    y += 20;
                     pg.draw_text(x2, y, "2026-02-23 10:25", 0x00FFFF); //y += 30;
 
                     // Column 3
                     let mut y = 130;
                     let x3 = 500;
-                    pg.draw_text(x3, y, "Complex Views (Mock):", 0xAAAAAA); y += 25;
+                    pg.draw_text(x3, y, "Complex Views (Mock):", 0xAAAAAA);
+                    y += 25;
                     pg.draw_rect_outline(x3, y, 200, 60, 0x888888); // ListView
                     pg.draw_text(x3 + 5, y + 5, "ListView Item A", 0xFFFFFF);
                     pg.draw_text(x3 + 5, y + 25, "ListView Item B", 0xFFFF00);
@@ -1365,8 +1659,10 @@ impl DashboardUI {
                     pg.draw_rect_outline(x3, y, 200, 60, 0x888888); // TableView
                     pg.draw_line(x3, y + 20, x3 + 200, y + 20, 0x888888);
                     pg.draw_line(x3 + 60, y, x3 + 60, y + 60, 0x888888);
-                    pg.draw_text(x3 + 5, y + 2, "H1", 0xAAAAAA); pg.draw_text(x3 + 65, y + 2, "Header 2", 0xAAAAAA);
-                    pg.draw_text(x3 + 5, y + 25, "Val 1", 0xFFFFFF); pg.draw_text(x3 + 65, y + 25, "Data 2", 0xFFFFFF);
+                    pg.draw_text(x3 + 5, y + 2, "H1", 0xAAAAAA);
+                    pg.draw_text(x3 + 65, y + 2, "Header 2", 0xAAAAAA);
+                    pg.draw_text(x3 + 5, y + 25, "Val 1", 0xFFFFFF);
+                    pg.draw_text(x3 + 65, y + 25, "Data 2", 0xFFFFFF);
                     //y += 70;
 
 
@@ -1378,11 +1674,14 @@ impl DashboardUI {
                     pg.draw_text(40, y + 20, "Internal content", 0x888888);
 
                     pg.draw_rect_outline(240, y, 200, 100, 0x888888);
-                    pg.fill_rect(240, y, 200, 20, 0x444444); pg.draw_text(245, y + 2, "ToolBox Tab 1 [v]", 0xFFFFFF);
-                    pg.fill_rect(240, y + 80, 200, 20, 0x444444); pg.draw_text(245, y + 82, "ToolBox Tab 2 [>]", 0xFFFFFF);
+                    pg.fill_rect(240, y, 200, 20, 0x444444);
+                    pg.draw_text(245, y + 2, "ToolBox Tab 1 [v]", 0xFFFFFF);
+                    pg.fill_rect(240, y + 80, 200, 20, 0x444444);
+                    pg.draw_text(245, y + 82, "ToolBox Tab 2 [>]", 0xFFFFFF);
 
                     pg.draw_rect_outline(460, y, 200, 100, 0x888888); // ScrollArea
-                    pg.draw_rect_outline(645, y, 15, 100, 0x444444); pg.fill_rect(646, y + 10, 13, 30, 0x888888); // V Scroll
+                    pg.draw_rect_outline(645, y, 15, 100, 0x444444);
+                    pg.fill_rect(646, y + 10, 13, 30, 0x888888); // V Scroll
                     pg.draw_text(470, y + 10, "Scroll Area Content...", 0xFFFFFF);
                     pg.draw_text(470, y + 30, "That is clipped", 0xFFFFFF);
 
@@ -1400,7 +1699,8 @@ impl DashboardUI {
                     pg.draw_text(420, y + 10, "Dial & Key Sequence:", 0xAAAAAA);
                     // Mock Dial
                     pg.draw_dial(420, y + 30, 12, 25, 100);
-                    pg.draw_rect_outline(550, y + 30, 100, 20, 0x888888); pg.draw_text(555, y + 32, "Ctrl+Alt+Del", 0xFFFF00);
+                    pg.draw_rect_outline(550, y + 30, 100, 20, 0x888888);
+                    pg.draw_text(555, y + 32, "Ctrl+Alt+Del", 0xFFFF00);
 
 
                     let y = 130;
@@ -1408,10 +1708,10 @@ impl DashboardUI {
 
                     // Table Data (3D setup)
                     let headers = ["ID", "Name", "Status"];
-                    let row1 = ["01", "Kernel", "Running"];
-                    let row2 = ["02", "GOP", "Active"];
-                    let rows = [&row1[..], &row2[..]];
-                    pg.draw_table_view(x, y, 250, 100, &headers, &rows);
+                    let mut rows: Vec<&[&str]> = vec![];
+                    rows.push(&["01", "Kernel", "Running"]);
+                    rows.push(&["02", "GOP", "Active"]);
+                    pg.draw_table_view(x, y, 250, 100, &headers, rows);
 
                     // Tree Data (Nested JSON-style)
                     let children = [
@@ -1450,7 +1750,7 @@ impl DashboardUI {
                 DashboardTab::Editor => {
                     if let Some(ref ed) = self.editor {
                         // Draw Header with Mode
-                        let mode_text = if ed.mode == EditorMode::Insert { "-- INSERT --" } else if ed.mode == EditorMode::Command {"-- COMMAND --"} else { "-- NORMAL --" };
+                        let mode_text = if ed.mode == EditorMode::Insert { "-- INSERT --" } else if ed.mode == EditorMode::Command { "-- COMMAND --" } else { "-- NORMAL --" };
                         let view_type = if ed.is_hex { "[HEX VIEW]" } else { "[TEXT VIEW]" };
                         pg.draw_text(margin, content_top + 5, &format!("Editing: {} {}", ed.file_path, view_type), 0x00FF00);
                         pg.draw_text(width - 150, content_top + 5, mode_text, 0xFFFF00);
@@ -1503,13 +1803,12 @@ impl DashboardUI {
                     }
                 }
                 DashboardTab::Settings => {
-
                     pg.draw_text(10, page_y - 15, "SYSTEM SETTINGS", 0x00FF00);
 
 
                     let left_x = 10;
                     let left_y = page_y + 2;
-                    let left_w = (width/3)-20;
+                    let left_w = (width / 3) - 20;
                     let left_h = height - left_y - 20;
                     pg.draw_rect_outline(left_x, left_y, left_w, left_h, 0x444444);
                     pg.fill_rect(left_x + 1, left_y + 1, left_w - 2, 28, 0x222222);
@@ -1541,9 +1840,9 @@ impl DashboardUI {
                         left_row_y += 38;
                     }
 
-                    let right_x = (width/3) + 5;
+                    let right_x = (width / 3) + 5;
                     let right_y = page_y + 2;
-                    let right_w = (width*2/3) - 15;
+                    let right_w = (width * 2 / 3) - 15;
                     let right_h = height - right_y - 20;
 
                     pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x444444);
@@ -1571,7 +1870,7 @@ impl DashboardUI {
                         } else {
                             pg.draw_text(x, y, label, label_color);
                             let val_color = if *blocked { 0xAA5555 } else { 0x00DCDC };
-                            pg.draw_text(right_x + (right_w/2), y, value, val_color);
+                            pg.draw_text(right_x + (right_w / 2), y, value, val_color);
                         }
                         y += 28;
                     }
@@ -1707,14 +2006,8 @@ impl DashboardUI {
             }
 
             // Draw footer
-            pg.fill_rect(0, height - 48, width, 48, 0x000080); // Blue
-            pg.draw_text(10, height - 32, " Use keys O, V, R, S, N, D, C, T, Z to switch tabs | X to shutdown", 0xFFFFFF);
-            pg.draw_text(width - 60, height - 13, &format!("{} fps", self.resources.fps), 0xFFFFFF);
-            pg.draw_text(width - 120, height - 13, &format!("{} ms", self.resources.frame_ms), 0xFFFFFF);
-            pg.draw_text(width - 200, height - 13, &format!("{} MHz", TSC_PER_US), 0xFFFFFF);
-            pg.draw_text(width - 250, height - 13, &format!("{}%", self.resources.cpu_usage), 0xFFFFFF);
-            pg.draw_text(width - 330, height - 13, &format!("{} MB", self.resources.used_memory_mb), 0xFFFFFF);
-            pg.draw_rect_outline(width - 340, height - 15, 338, 14, 0xCCCCCC);
+            pg.fill_rect(0, height - 18, width, 18, 0x000080); // Blue
+            // pg.draw_text(10, height - 32, " Use keys O, V, R, S, N, D, C, T, Z to switch tabs | X to shutdown", 0xFFFFFF);
 
             // Update and draw cursor
             if self.iter % 20 == 0 {
@@ -1724,12 +2017,8 @@ impl DashboardUI {
             }
 
 
-
             // apply settings to these items
             //pg.app_context_border("");
-
-
-
 
 
             //pg.flip();
@@ -1747,15 +2036,23 @@ impl DashboardUI {
                 pg.fill_rect(win_x, win_y, win_w, win_h, 0x111111);
                 pg.draw_rect_outline(win_x, win_y, win_w, win_h, if is_focused { 0x00FFFF } else { 0x888888 });
                 pg.fill_rect(win_x, win_y, win_w, WindowState::TITLE_BAR_HEIGHT, if is_focused { 0x008080 } else { 0x444444 });
-                pg.fill_rect(win_x+win_w-20, win_y, 20, WindowState::TITLE_BAR_HEIGHT, if is_focused { 0xAA0000 } else { 0x440000 });
-                pg.draw_text(win_x+win_w-15, win_y+2, "X", 0xFFFFFF);
+                pg.fill_rect(win_x + win_w - 20, win_y, 20, WindowState::TITLE_BAR_HEIGHT, if is_focused { 0xAA0000 } else { 0x440000 });
+                pg.draw_text(win_x + win_w - 15, win_y + 2, "X", 0xFFFFFF);
                 pg.draw_text(win_x + 5, win_y + 2, &app_ctx.application.name, 0xFFFFFF);
 
+
+                let step_tsc_begin = unsafe { core::arch::x86_64::_rdtsc() };
                 if !app_ctx.step(None) {
                     apps_to_remove.push(idx);
                 }
+                let step_tsc_end = unsafe { core::arch::x86_64::_rdtsc() };
 
+                let draw_tsc_begin = unsafe { core::arch::x86_64::_rdtsc() };
                 app_ctx.draw(&mut pg);
+                let draw_tsc_end = unsafe { core::arch::x86_64::_rdtsc() };
+
+                app_ctx.ui_time = draw_tsc_end.saturating_sub(draw_tsc_begin) as usize;
+                app_ctx.cpu_time = step_tsc_end.saturating_sub(step_tsc_begin) as usize;
             }
 
             for idx in apps_to_remove.into_iter().rev() {
@@ -1769,7 +2066,6 @@ impl DashboardUI {
                 }
             }
 
-            pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
 
             // Draw functional UI layers
             let mut ypos = 0;
@@ -1784,6 +2080,16 @@ impl DashboardUI {
                 pg.draw_command_palette(&self.command_palette_query, &filtered, self.command_palette_selected, self.command_palette_scroll_offset);
             }
 
+            self.draw_startup_menu(&mut pg, width, height);
+
+            // pg.draw_header(0, 0, width, 32, TSC_PER_US as usize,
+            //                [self.ctrl_mode, self.alt_mode, self.fn_mode],
+            //                [self.resources.fps, self.resources.frame_ms, self.resources.cpu_usage as usize, self.resources.used_memory_mb as usize]
+            // );
+            // cursor always drawn last (always on top)
+            pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
+
+
             if self.settings.pg_scanlines { pg.apply_scanlines(); }
             if self.settings.pg_dither { pg.apply_dither(); }
             if self.settings.pg_glitch { self.glitch_y = pg.apply_glitch(self.glitch_y); }
@@ -1797,27 +2103,15 @@ impl DashboardUI {
                 _ => {}
             }
 
-            pg.flip();
 
-        } else {
-            // self.draw_header();
-            // self.draw_navigation_bar();
-            //
-            // match self.selected_tab {
-            //     DashboardTab::Overview => self.draw_overview(),
-            //     DashboardTab::VirtualMachines => self.draw_vms_list(),
-            //     DashboardTab::Resources => self.draw_resources(),
-            //     DashboardTab::Storage => self.draw_storage(),
-            //     DashboardTab::Network => self.draw_network(),
-            //     DashboardTab::Console => self.draw_console(),
-            //     DashboardTab::Devices => {},
-            //     DashboardTab::Test => {},
+            // Presentation belongs to the dashboard, not to a particular
+            // app or tab renderer.
+            pg.flip();
             // }
-            //
-            // self.draw_footer();
-            message!("", "dashboard unavailable")
         }
     }
+
+
 
     fn count_running_vms(&self) -> usize {
         self.vms.iter()
@@ -1839,12 +2133,7 @@ impl DashboardUI {
 
         for (alias, path) in device_map {
             let entry = DeviceEntry { name: alias.clone(), path: path.clone() };
-            if alias.starts_with("dsk") { disks.push(entry); }
-            else if alias.starts_with("net") { nets.push(entry); }
-            else if alias.starts_with("usb") { usbs.push(entry); }
-            else if alias.starts_with("com") { coms.push(entry); }
-            else if alias.starts_with("pci") { pcis.push(entry); }
-            else { others.push(entry); }
+            if alias.starts_with("dsk") { disks.push(entry); } else if alias.starts_with("net") { nets.push(entry); } else if alias.starts_with("usb") { usbs.push(entry); } else if alias.starts_with("com") { coms.push(entry); } else if alias.starts_with("pci") { pcis.push(entry); } else { others.push(entry); }
         }
 
         // Preserve expansion state if categories already exist
@@ -2008,62 +2297,62 @@ impl DashboardUI {
         self.create_vm_focus_idx = 0;
     }
 
-    fn option_value(options: &[&'static str], idx: usize) -> String {
+    fn option_value(&self, options: &[&'static str], idx: usize) -> String {
         options.get(idx).copied().unwrap_or(options[0]).to_string()
     }
 
-    pub fn settings_rows(&self) -> Vec<(String, String, bool, bool)> {
+    pub fn settings_rows(&mut self) -> Vec<(String, String, bool, bool)> {
         match self.selected_settings_category_idx {
             0 => alloc::vec![
-                (String::from("HPVMX_PROFILE"), Self::option_value(&["balanced", "diagnostic", "performance"], self.settings.general_profile), false, false),
+                (String::from("HPVMX_PROFILE"), self.option_value(&["balanced", "diagnostic", "performance"], self.settings.general_profile), false, false),
                 (String::from("Extra Debug Info"), if self.settings.extra_debug_info { "on" } else { "off" }.to_string(), false, false),
                 (String::from("HPVMX_USER"), String::from("operator"), false, false),
                 (String::from("Experimental Mem Comp"), if self.settings.experimental_mem_comp { "on" } else { "off" }.to_string(), false, false),
             ],
             1 => alloc::vec![
-                (String::from("HPVMX_BOOT_TARGET"), Self::option_value(&["dashboard", "shell", "last-vm"], self.settings.boot_target), false, false),
+                (String::from("HPVMX_BOOT_TARGET"), self.option_value(&["dashboard", "shell", "last-vm"], self.settings.boot_target), false, false),
                 (String::from("State Save/Restore"), if self.settings.state_save_restore { "on" } else { "off" }.to_string(), false, false),
                 (String::from("HPVMX_WATCHDOG"), String::from("disabled"), false, false),
             ],
             2 => alloc::vec![
-                (String::from("HPVMX_UI_DENSITY"), Self::option_value(&["normal", "compact", "wide"], self.settings.interface_density), false, false),
-                (String::from("HPVMX_UI_SCALING"), Self::option_value(&["50%", "100%", "150%", "200%"], self.settings.ui_scaling), false, false),
+                (String::from("HPVMX_UI_DENSITY"), self.option_value(&["normal", "compact", "wide"], self.settings.interface_density), false, false),
+                (String::from("HPVMX_UI_SCALING"), self.option_value(&["50%", "100%", "150%", "200%"], self.settings.ui_scaling), false, false),
                 (String::from("Extended Symbol Library"), if self.settings.extended_symbol_library { "on" } else { "off" }.to_string(), false, false),
                 (String::from("PG VShaders"), if self.settings.pg_vshaders { "on" } else { "off" }.to_string(), false, false),
                 (String::from("PG Scanlines"), if self.settings.pg_scanlines { "on" } else { "off" }.to_string(), false, false),
                 (String::from("PG Dither"), if self.settings.pg_dither { "on" } else { "off" }.to_string(), false, false),
                 (String::from("PG Glitch"), if self.settings.pg_glitch { "on" } else { "off" }.to_string(), false, false),
-                (String::from("PG Aberration"), Self::option_value(&["off", "low", "mid", "high", "super", "extreme"], self.settings.pg_aberration), false, false),
+                (String::from("PG Aberration"), self.option_value(&["off", "low", "mid", "high", "super", "extreme"], self.settings.pg_aberration), false, false),
             ],
             3 => alloc::vec![
-                (String::from("HPVMX_VM_SAFETY"), Self::option_value(&["prompt", "auto-save", "strict"], self.settings.vm_safety_policy), false, false),
+                (String::from("HPVMX_VM_SAFETY"), self.option_value(&["prompt", "auto-save", "strict"], self.settings.vm_safety_policy), false, false),
                 (String::from("HPVMX_VM_DEFAULT_MEM"), format!("{}MB", self.new_vm_memory_mb), false, false),
                 (String::from("HPVMX_VM_DEFAULT_CPUS"), format!("{}", self.new_vm_vcpus), false, false),
             ],
             4 => alloc::vec![
-                (String::from("HPVMX_NET_PROFILE"), Self::option_value(&["dhcp", "static", "loopback"], self.settings.network_profile), false, false),
+                (String::from("HPVMX_NET_PROFILE"), self.option_value(&["dhcp", "static", "loopback"], self.settings.network_profile), false, false),
                 (String::from("HPVMX_NET_TARGET"), self.network_target.clone(), false, false),
                 (String::from("HPVMX_HTTPD_PORT"), String::from("8080"), false, false),
             ],
             5 => alloc::vec![
-                (String::from("HPVMX_STORAGE_POLICY"), Self::option_value(&["preserve", "confirm-delete", "developer"], self.settings.storage_policy), false, false),
+                (String::from("HPVMX_STORAGE_POLICY"), self.option_value(&["preserve", "confirm-delete", "developer"], self.settings.storage_policy), false, false),
                 (String::from("Folder Absolute Sizes"), if self.settings.folder_absolute_sizes { "on" } else { "off" }.to_string(), false, false),
                 (String::from("Auto-refresh Storage"), if self.settings.auto_refresh_storage { "on" } else { "off" }.to_string(), false, false),
                 (String::from("Show Hidden Files"), if self.settings.show_hidden_files { "on" } else { "off" }.to_string(), false, false),
             ],
             6 => alloc::vec![
-                (String::from("HPVMX_PM_VERIFY"), Self::option_value(&["standard", "quick", "full"], self.settings.package_policy), false, false),
+                (String::from("HPVMX_PM_VERIFY"), self.option_value(&["standard", "quick", "full"], self.settings.package_policy), false, false),
                 (String::from("HPVMX_PM_AUTOHEAL"), String::from("off"), false, false),
                 (String::from("HPVMX_PM_INDEX"), self.package_manager.package_path.clone(), false, false),
             ],
             7 => alloc::vec![
-                (String::from("HPVMX_DEV_LEVEL"), Self::option_value(&["normal", "verbose", "toolchain"], self.settings.developer_level), false, false),
-                (String::from("Terminal Font"), Self::option_value(&["8x16", "dualscale (experimental)"], self.settings.terminal_font), false, false),
+                (String::from("HPVMX_DEV_LEVEL"), self.option_value(&["normal", "verbose", "toolchain"], self.settings.developer_level), false, false),
+                (String::from("Terminal Font"), self.option_value(&["8x16", "dualscale (experimental)"], self.settings.terminal_font), false, false),
                 (String::from("ControlLang Support"), if self.settings.controllang_support { "on" } else { "off" }.to_string(), false, true),
                 (String::from("HPVMX_MICRO_C_TARGET"), String::from("x86_64"), false, false),
             ],
             8 => alloc::vec![
-                (String::from("HPVMX_SECURITY_POLICY"), Self::option_value(&["standard", "paranoid", "lab"], self.settings.security_policy), false, false),
+                (String::from("HPVMX_SECURITY_POLICY"), self.option_value(&["standard", "paranoid", "lab"], self.settings.security_policy), false, false),
                 (String::from("Ring0 UDMI/UDXI"), if self.settings.ring0_udmi_udxi { "on" } else { "off" }.to_string(), true, false),
                 (String::from("HPVMX_AUTOLYTIC"), String::from("enabled"), false, false),
             ],
@@ -2247,6 +2536,7 @@ impl DashboardUI {
 
     pub fn set_tab(&mut self, tab: DashboardTab) {
         self.selected_tab = tab;
+        self.ensure_tab_app(tab);
     }
 
     pub fn get_tab(&self) -> DashboardTab {
@@ -2276,16 +2566,16 @@ impl DashboardUI {
         };
 
         match cmd {
-            "Overview: Show System Summary" => self.selected_tab = DashboardTab::Overview,
+            "Overview: Show System Summary" => self.set_tab(DashboardTab::Overview),
             "Overview: Refresh Resources" => {
-                self.selected_tab = DashboardTab::Overview;
+                self.set_tab(DashboardTab::Overview);
                 self.status_line = String::from("Resource snapshot is live");
             }
             "VM: List Virtual Machines" | "VM: Refresh List" => {
-                self.selected_tab = DashboardTab::VirtualMachines;
+                self.set_tab(DashboardTab::VirtualMachines);
                 run_simple(vec!["vm", "list"], &mut self.package_manager);
             }
-            "VM: Create New VM" => self.selected_tab = DashboardTab::CreateVM,
+            "VM: Create New VM" => self.set_tab(DashboardTab::CreateVM),
             "VM: Start Selected VM" => {
                 if let Some(id) = selected_vm_id.as_deref() {
                     crate::handle_vm_command(&["vm", "start", id]);
@@ -2315,8 +2605,8 @@ impl DashboardUI {
                 }
             }
             "VM: Simulate Violation" => crate::handle_vm_command(&["vm", "simulate-violation"]),
-            "Resources: View CPU/Memory" => self.selected_tab = DashboardTab::Resources,
-            "Storage: Browse Files" => self.selected_tab = DashboardTab::Storage,
+            "Resources: View CPU/Memory" => self.set_tab(DashboardTab::Resources),
+            "Storage: Browse Files" => self.set_tab(DashboardTab::Storage),
             "Storage: Refresh Drives" | "System: Refresh Storage" => {
                 self.refresh_storage();
                 self.notifications.push(("Storage refreshed".to_string(), 60));
@@ -2507,10 +2797,97 @@ impl DashboardUI {
         )
     }
 
-    fn add_app_window(&mut self, app_ctx: SteppedApplicationContext) {
+    fn add_app_window(&mut self, app_ctx: crate::env::SteppedApplicationContext) {
         let (x, y) = self.next_window_position();
         self.active_apps.push(app_ctx.with_window_position(x, y));
         self.focused_process_idx = Some(self.active_apps.len() - 1);
+    }
+
+    fn draw_windowed_app(pg: &mut PixelGraphics, app_ctx: &mut SteppedApplicationContext, focused: bool) {
+        let window = app_ctx.window;
+        let border = if focused { 0x00FFFF } else { 0x888888 };
+        let title = if focused { 0x008080 } else { 0x444444 };
+
+        pg.fill_rect(window.x, window.y, window.width, window.height, 0x111111);
+        pg.draw_rect_outline(window.x, window.y, window.width, window.height, border);
+        pg.fill_rect(window.x, window.y, window.width, WindowState::TITLE_BAR_HEIGHT, title);
+        pg.fill_rect(window.x + window.width.saturating_sub(20), window.y, 20, WindowState::TITLE_BAR_HEIGHT, if focused { 0xAA0000 } else { 0x440000 });
+        pg.draw_text(window.x + 5, window.y + 2, &app_ctx.application.name, 0xFFFFFF);
+        pg.draw_text(window.x + window.width.saturating_sub(15), window.y + 2, "X", 0xFFFFFF);
+        app_ctx.draw(pg);
+    }
+
+    fn startup_app_indices() -> Vec<usize> {
+        crate::apps::APP_REGISTRY.iter()
+            .enumerate()
+            .filter_map(|(idx, (name, _, _, _))| name.starts_with("X_").then_some(idx))
+            .collect()
+    }
+
+    fn draw_startup_menu(&self, pg: &mut PixelGraphics, width: usize, height: usize) {
+        let taskbar_y = height.saturating_sub(28);
+        pg.fill_rect(0, taskbar_y, width, 28, 0x000080);
+        pg.fill_rect(6, taskbar_y + 4, 102, 20, if self.startup_menu_active { 0x008080 } else { 0x444444 });
+        pg.draw_text(14, taskbar_y + 8, "[F1] Start     [X] Shutdown", 0xFFFFFF);
+
+        if !self.startup_menu_active { return; }
+
+        let app_indices = Self::startup_app_indices();
+        let visible = app_indices.len();
+        let menu_h = visible * 24 + 36;
+        let menu_y = taskbar_y.saturating_sub(menu_h);
+        pg.fill_rect(6, menu_y, 290, menu_h, 0x202020);
+        pg.draw_rect_outline(6, menu_y, 290, menu_h, 0x00AAAA);
+        pg.draw_text(16, menu_y + 10, "Applications", 0x00FFFF);
+        for (row, registry_idx) in app_indices.iter().take(visible).enumerate() {
+            let (name, _, icon, version) = crate::apps::APP_REGISTRY[*registry_idx];
+            let display_name = name.strip_prefix("X_").unwrap_or(name);
+            let y = menu_y + 30 + row * 24;
+            let selected = row == self.selected_startup_app;
+            if selected { pg.fill_rect(10, y - 2, 282, 22, 0x005050); }
+            pg.draw_icon(16, y, 16, 16, &icon);
+            pg.draw_text(40, y + 2, display_name, if selected { 0xFFFF00 } else { 0xFFFFFF });
+            pg.draw_text(190, y + 2, version, 0xAAAAAA);
+        }
+    }
+
+    fn handle_startup_menu_input(&mut self, key: Key) -> bool {
+        if !self.startup_menu_active { return false; }
+        let app_indices = Self::startup_app_indices();
+        match key {
+            Key::Special(ScanCode::ESCAPE) => {
+                self.startup_menu_active = false;
+            }
+            Key::Special(ScanCode::FUNCTION_1) => {
+                self.startup_menu_active = false;
+            }
+            Key::Special(ScanCode::UP) => {
+                self.selected_startup_app = self.selected_startup_app.saturating_sub(1);
+            }
+            Key::Special(ScanCode::DOWN) => {
+                self.selected_startup_app = (self.selected_startup_app + 1).min(app_indices.len().saturating_sub(1));
+            }
+            Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
+                if let Some(registry_idx) = app_indices.get(self.selected_startup_app) {
+                    let (name, _, _, _) = crate::apps::APP_REGISTRY[*registry_idx];
+                    if let Some(app_ctx) = SteppedApplicationContext::from_name(name) {
+                        self.add_app_window(app_ctx);
+                    }
+                }
+                self.startup_menu_active = false;
+            }
+            _ => {}
+        }
+        true
+    }
+
+    pub fn add_vm_console_window(&mut self, vm_id: u32, media_path: &str, media_kind: &str) {
+        let vm_app = crate::apps::vm_console::VmConsoleApp::new(vm_id, media_path, media_kind);
+        let dims = crate::env::AppInfo::dimensions(&vm_app);
+        let mut app = crate::env::Application::new(Box::new(vm_app));
+        app.name = format!("VM {} Console", vm_id);
+        app.dimensions = dims;
+        self.add_app_window(crate::env::SteppedApplicationContext::new(app, None));
     }
 
     fn handle_window_keybind(&mut self, key: Key) -> bool {
@@ -2577,7 +2954,70 @@ impl DashboardUI {
         true
     }
 
+    /// Handles dashboard chrome after the selected `x_*` application has
+    /// received input.  Tab-specific input must never live here.
+    fn handle_dashboard_chrome_input(&mut self, key: Key) {
+        match key {
+            Key::Printable(c) if !self.term_selected && self.selected_tab != DashboardTab::Editor => {
+                match char::from(c).to_ascii_lowercase() {
+                    'o' => self.set_tab(DashboardTab::Overview),
+                    'v' => self.set_tab(DashboardTab::VirtualMachines),
+                    'r' => self.set_tab(DashboardTab::Resources),
+                    's' => self.set_tab(DashboardTab::Storage),
+                    'n' => self.set_tab(DashboardTab::Network),
+                    'd' => self.set_tab(DashboardTab::Devices),
+                    'c' => self.set_tab(DashboardTab::Console),
+                    't' => self.set_tab(DashboardTab::Test),
+                    'z' => self.set_tab(DashboardTab::Settings),
+                    'p' => self.set_tab(DashboardTab::Packages),
+                    'a' => self.set_tab(DashboardTab::Apps),
+                    'k' => self.command_palette_active = true,
+                    'x' => runtime::reset(ResetType::SHUTDOWN, Status::SUCCESS, Some(&[0])),
+                    _ => {}
+                }
+            }
+            Key::Special(ScanCode::FUNCTION_2) => self.ctrl_mode = !self.ctrl_mode,
+            Key::Special(ScanCode::FUNCTION_3) => self.alt_mode = !self.alt_mode,
+            Key::Special(ScanCode::FUNCTION_4) => self.fn_mode = !self.fn_mode,
+            _ => {}
+        }
+    }
+
     pub fn handle_input(&mut self, key: Key) {
+        if matches!(key, Key::Special(ScanCode::FUNCTION_1)) {
+            self.startup_menu_active = !self.startup_menu_active;
+            return;
+        }
+        // These are window-manager mode toggles.  They must remain
+        // available while an X app has focus instead of being swallowed
+        // by that app's input handler.
+        if matches!(key,
+                Key::Special(ScanCode::FUNCTION_2)
+                | Key::Special(ScanCode::FUNCTION_3)
+                | Key::Special(ScanCode::FUNCTION_4)
+            ) {
+            self.handle_dashboard_chrome_input(key);
+            return;
+        }
+        if self.handle_startup_menu_input(key) {
+            return;
+        }
+        // Window-manager shortcuts must be handled before a focused app
+        // consumes the key.  Previously focused X windows returned here,
+        // making Ctrl+arrow move/resize bindings unreachable.
+        if self.handle_window_keybind(key) {
+            return;
+        }
+        if let Some(focused_idx) = self.focused_process_idx {
+            if let Some(app_ctx) = self.active_apps.get_mut(focused_idx) {
+                app_ctx.handle_input(key);
+                return;
+            }
+        }
+        if let Some(app_ctx) = self.tab_apps.get_mut(&self.selected_tab) {
+            app_ctx.handle_input(key);
+            // sync happens in draw/step
+        }
         use uefi::proto::console::text::ScanCode;
 
         // Command Palette handling
@@ -2658,7 +3098,6 @@ impl DashboardUI {
             return;
         }
 
-
         match self.selected_tab {
             DashboardTab::CreateVM => {
                 match key {
@@ -2722,10 +3161,10 @@ impl DashboardUI {
             DashboardTab::Storage => {
                 match key {
                     Key::Special(ScanCode::LEFT) => {
-                        if self.filesys_action_idx >= 1 {self.filesys_action_idx -= 1 } else { self.filesys_action_idx = 0 }
+                        if self.filesys_action_idx >= 1 { self.filesys_action_idx -= 1 } else { self.filesys_action_idx = 0 }
                     }
                     Key::Special(ScanCode::RIGHT) => {
-                        if self.filesys_action_idx < 7 {self.filesys_action_idx += 1 } else { self.filesys_action_idx = 7 }
+                        if self.filesys_action_idx < 7 { self.filesys_action_idx += 1 } else { self.filesys_action_idx = 7 }
                     }
                     Key::Special(ScanCode::ESCAPE) => {
                         self.filesys_pending_action = None;
@@ -2945,7 +3384,7 @@ impl DashboardUI {
                         self.selected_settings_idx = 0;
                     }
                     Key::Special(ScanCode::RIGHT) => {
-                        self.selected_settings_category_idx = (self.selected_settings_category_idx + 1).min(8);
+                        self.selected_settings_category_idx = (self.selected_settings_category_idx + 1).min(9);
                         self.selected_settings_idx = 0;
                     }
                     Key::Special(ScanCode::UP) => {
@@ -2986,7 +3425,7 @@ impl DashboardUI {
                         Key::Special(ScanCode::ESCAPE) => ed.mode = EditorMode::Normal,
                         Key::Printable(char16) => {
                             match char::from(char16) {
-                                '\u{8}'=> {
+                                '\u{8}' => {
                                     ed.buffer.pop(); // Simple end-of-file backspace for now
                                 }
                                 _ => {
@@ -3002,7 +3441,6 @@ impl DashboardUI {
                                     }
                                 }
                             }
-
                         }
                         _ => {}
                     },
@@ -3032,7 +3470,6 @@ impl DashboardUI {
                                     _ => {
                                         ed.mode = EditorMode::Normal;
                                         self.ui_error(1);
-
                                     },
                                 }
                             } else {
@@ -3122,6 +3559,24 @@ impl DashboardUI {
                     Key::Special(ScanCode::END) => {
                         self.term_selected = true;
                     }
+                    Key::Special(ScanCode::PAGE_UP) => {
+                        self.console_scroll_offset = self.console_scroll_offset.saturating_add(5);
+                    }
+                    Key::Special(ScanCode::PAGE_DOWN) => {
+                        self.console_scroll_offset = self.console_scroll_offset.saturating_sub(5);
+                    }
+                    _ => {}
+                }
+            }
+            DashboardTab::Resources => {
+                match key {
+                    Key::Printable(c) => {}
+                    Key::Special(ScanCode::RIGHT) => {
+                        self.resmon_tab = ResourceMonitorTab::Processes
+                    }
+                    Key::Special(ScanCode::LEFT) => {
+                        self.resmon_tab = ResourceMonitorTab::Resources
+                    }
                     _ => {}
                 }
             }
@@ -3136,20 +3591,20 @@ impl DashboardUI {
                         'q' => {
                             self.ui_error(22);
                         }
-                        'o' => self.selected_tab = DashboardTab::Overview,
-                        'v' => self.selected_tab = DashboardTab::VirtualMachines,
-                        'r' => self.selected_tab = DashboardTab::Resources,
-                        's' => self.selected_tab = DashboardTab::Storage,
-                        'n' => self.selected_tab = DashboardTab::Network,
-                        'd' => self.selected_tab = DashboardTab::Devices,
-                        'c' => self.selected_tab = DashboardTab::Console,
-                        't' => self.selected_tab = DashboardTab::Test,
-                        'z' => self.selected_tab = DashboardTab::Settings,
-                        'p' => self.selected_tab = DashboardTab::Packages,
-                        'a' => self.selected_tab = DashboardTab::Apps,
+                        'o' => self.set_tab(DashboardTab::Overview),
+                        'v' => self.set_tab(DashboardTab::VirtualMachines),
+                        'r' => self.set_tab(DashboardTab::Resources),
+                        's' => self.set_tab(DashboardTab::Storage),
+                        'n' => self.set_tab(DashboardTab::Network),
+                        'd' => self.set_tab(DashboardTab::Devices),
+                        'c' => self.set_tab(DashboardTab::Console),
+                        't' => self.set_tab(DashboardTab::Test),
+                        'z' => self.set_tab(DashboardTab::Settings),
+                        'p' => self.set_tab(DashboardTab::Packages),
+                        'a' => self.set_tab(DashboardTab::Apps),
                         ' ' => {
                             if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
-                                self.selected_tab = DashboardTab::CreateVM;
+                                self.set_tab(DashboardTab::CreateVM);
                             }
                         }
                         '\r' | '\n' => {
@@ -3183,7 +3638,7 @@ impl DashboardUI {
                                 }
                             } else if matches!(self.selected_tab, DashboardTab::Apps) {
                                 let (name, _, _, _) = crate::apps::APP_REGISTRY[self.selected_app_idx];
-                                if let Some(app_ctx) = SteppedApplicationContext::from_name(name) {
+                                if let Some(app_ctx) = crate::env::SteppedApplicationContext::from_name(name) {
                                     self.add_app_window(app_ctx);
                                 }
                             } else if matches!(self.selected_tab, DashboardTab::Devices) {
@@ -3254,10 +3709,8 @@ impl DashboardUI {
                             self.command_palette_active = true
                         }
 
-
                         _ => {}
                     }
-
                 }
                 // if (self.cursor.left_button) {
                 //     self.cursor.left_button = false;
@@ -3286,6 +3739,8 @@ impl DashboardUI {
                     if self.selected_vm_idx > 0 {
                         self.selected_vm_idx -= 1;
                     }
+                } else if matches!(self.selected_tab, DashboardTab::Console) {
+                    self.console_scroll_offset = self.console_scroll_offset.saturating_add(1);
                 } else {
                     if self.scroll_offset > 0 {
                         self.scroll_offset -= 1;
@@ -3322,6 +3777,8 @@ impl DashboardUI {
                     if self.selected_vm_idx < self.vms.len().saturating_sub(1) {
                         self.selected_vm_idx += 1;
                     }
+                } else if matches!(self.selected_tab, DashboardTab::Console) {
+                    self.console_scroll_offset = self.console_scroll_offset.saturating_sub(1);
                 } else {
                     if self.scroll_offset < self.vms.len().saturating_sub(1) {
                         self.scroll_offset += 1;
@@ -3331,6 +3788,8 @@ impl DashboardUI {
             Key::Special(ScanCode::LEFT) => {
                 if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
                     self.vm_action_idx = self.vm_action_idx.saturating_sub(1);
+                } else if matches!(self.selected_tab, DashboardTab::Console) {
+                    self.console_h_scroll_offset = self.console_h_scroll_offset.saturating_add(1);
                 } else if matches!(self.selected_tab, DashboardTab::Apps) {
                     if self.selected_app_idx > 0 {
                         self.selected_app_idx -= 1;
@@ -3340,6 +3799,8 @@ impl DashboardUI {
             Key::Special(ScanCode::RIGHT) => {
                 if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
                     self.vm_action_idx = (self.vm_action_idx + 1).min(6);
+                } else if matches!(self.selected_tab, DashboardTab::Console) {
+                    self.console_h_scroll_offset = self.console_h_scroll_offset.saturating_sub(1);
                 } else if matches!(self.selected_tab, DashboardTab::Apps) {
                     if self.selected_app_idx + 1 < crate::apps::APP_REGISTRY.len() {
                         self.selected_app_idx += 1;
