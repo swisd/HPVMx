@@ -47,7 +47,12 @@ impl AppInfo for VmConsoleApp {
 
 impl RunnableClone for VmConsoleApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        Box::new(VmConsoleApp {
+            vm_id: self.vm_id,
+            media_path: self.media_path.clone(),
+            media_kind: self.media_kind.clone(),
+            frame: self.frame,
+        })
     }
 }
 

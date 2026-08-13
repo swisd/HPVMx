@@ -62,7 +62,7 @@ impl AppInfo for SysTestApp {
 
 impl RunnableClone for SysTestApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        Box::new(SysTestApp::new())
     }
 }
 

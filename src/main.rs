@@ -311,6 +311,14 @@ fn main() -> Status {
         // drive network timers (loopback stack)
         devices::net_stack::poll_tick();
 
+        // update non-blocking audio
+        devices::audio::update();
+
+        // init HDA if not initialized
+        if !devices::hda::is_available() {
+            let _ = devices::hda::init();
+        }
+
         // Print Prompt
         system::with_stdout(|s| Write::write_str(s, "\nHPVMx> ").unwrap());
 

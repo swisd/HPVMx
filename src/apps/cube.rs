@@ -27,7 +27,12 @@ impl CubeApp {
 
 impl RunnableClone for CubeApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        Box::new(CubeApp {
+            angle_x: self.angle_x,
+            angle_y: self.angle_y,
+            speed_x: self.speed_x,
+            speed_y: self.speed_y,
+        })
     }
 }
 

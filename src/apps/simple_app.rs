@@ -8,9 +8,11 @@ use crate::ui::pixel_graphics::{icons, PixelGraphics};
 pub struct SimpleApp {
     pub color: [u32;3]
 }
+
+
 impl AppInfo for SimpleApp {
     fn name(&self) -> &str {
-        "SimpleAPp"
+        "SimpleApp"
     }
 
     fn version(&self) -> &str {
@@ -26,11 +28,7 @@ impl AppInfo for SimpleApp {
     }
 }
 
-impl RunnableClone for SimpleApp {
-    fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
-    }
-}
+
 
 impl Runnable for SimpleApp {
     fn draw(&self, graphics_entity: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
@@ -58,4 +56,10 @@ impl Runnable for SimpleApp {
 
     fn as_any(&self) -> &dyn core::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+}
+
+impl RunnableClone for SimpleApp {
+    fn clone_box(&self) -> Box<dyn Runnable> {
+        Box::new(SimpleApp { color: self.color })
+    }
 }

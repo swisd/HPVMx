@@ -360,6 +360,59 @@ impl FileSystem {
         Ok(())
     }
 
+    pub fn rename(src: &str, dst: &str) -> Result<(), &'static str> {
+        let mut root = Self::get_root(None)?;
+        let src_cstr = Self::path_to_cstr16(src)?;
+        
+        // Open the source file or directory
+        let mut handle = root.open(src_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
+            .map_err(|_| "Failed to open source for rename")?;
+        
+        // Get current info
+        let mut info_buffer = [0u8; 1024];
+        let info = handle.get_info::<FileInfo>(&mut info_buffer)
+            .map_err(|_| "Failed to get file info for rename")?;
+        
+        // Create new info with the new name
+        // UEFI rename is done by calling set_info with a new FileInfo containing the new name
+        let dst_path = Self::resolve_path(dst);
+        let dst_cstr = Self::path_to_cstr16(&dst_path)?;
+        
+        // We need to construct a new FileInfo or modify the existing one in the buffer
+        // The uefi-rs FileInfo is a variable-sized struct.
+        // For simplicity and safety in this environment, we'll use copy + remove if set_info is tricky,
+        // but let's try to do it properly if possible.
+        // Actually, many UEFI implementations have issues with set_info(FileInfo).
+        // A safer "rename" that works across all environments is just copy + remove for files
+        // and clone_dir + remove for directories.
+        
+        let is_dir = info.attribute().contains(FileAttribute::DIRECTORY);
+        
+        if is_dir {
+            Self::move_directory(src, dst)
+        } else {
+            Self::move_file(src, dst)
+        }
+    }
+
+    pub fn move_directory(src: &str, dst: &str) -> Result<(), &'static str> {
+        Self::clone_dir(src, dst)?;
+        Self::remove_dir(src)?;
+        Ok(())
+    }
+
+    pub fn remove_dir(path: &str) -> Result<(), &'static str> {
+        let mut root = Self::get_root(None)?;
+        let path_cstr = Self::path_to_cstr16(path)?;
+
+        let handle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
+            .map_err(|_| "Open dir for delete failed")?;
+        let dir = handle.into_directory().ok_or("Not a directory")?;
+
+        dir.delete().map_err(|_| "Delete dir failed")?;
+        Ok(())
+    }
+
     pub fn remove(path: &str) -> Result<(), &'static str> {
         let mut root = Self::get_root(None)?;
         let path_cstr = Self::path_to_cstr16(path)?;
@@ -525,80 +578,64 @@ impl FileSystem {
         let state = Self::get_state();
         let current_path = &state.cwd;
 
-        let drive_name = if let Some(colon_idx) = current_path.find(':') {
-            Some(&current_path[..colon_idx])
+        message!("\n", "CONTENTS OF: {}\n", current_path);
+
+        match Self::read_dir(current_path) {
+            Ok(entries) => {
+                for (name, is_dir) in entries {
+                    let suffix = if is_dir { "/" } else { "" };
+                    message!("\t", "  {}{}", name, suffix);
+                }
+            }
+            Err(e) => {
+                message!("", "  Error: {}", e);
+            }
+        }
+    }
+
+    /// Read a directory and return a list of file/folder names with a directory flag
+    pub fn read_dir(path: &str) -> Result<Vec<(String, bool)>, &'static str> {
+        let drive_name = if let Some(colon_idx) = path.find(':' ) {
+            Some(&path[..colon_idx])
         } else {
             None
         };
 
-        let mut root_dir = match Self::get_root(drive_name) {
-            Ok(root) => root,
-            Err(_) => {
-                message!("\n", "Failed to open drive: {:?}", drive_name);
-                return;
-            }
-        };
+        let mut root_dir = Self::get_root(drive_name)?;
 
-        message!("\n", "ROOT {:?}", root_dir);
-        message!("", "CONTENTS OF: {}\n", current_path);
-
-        let sub_path = if let Some(colon_idx) = current_path.find(':') {
-            &current_path[colon_idx + 1..]
+        let sub_path = if let Some(colon_idx) = path.find(':') {
+            &path[colon_idx + 1..]
         } else {
-            current_path
+            path
         };
 
         let mut target_dir = if sub_path == "\\" || sub_path == "/" || sub_path.is_empty() {
             root_dir
         } else {
-            let path_u16 = Self::path_to_cstr16(current_path);
-            let path_cstr = match path_u16 {
-                Ok(cstr) => cstr,
-                Err(_) => {
-                    message!("", "  Invalid path");
-                    return;
-                }
-            };
+            let path_cstr = Self::path_to_cstr16(path)?;
 
-            let handle = match root_dir.open(path_cstr, FileMode::Read, FileAttribute::DIRECTORY) {
-                Ok(h) => h,
-                Err(_) => {
-                    message!("", "  Failed to open directory");
-                    return;
-                }
-            };
+            let handle = root_dir.open(path_cstr, FileMode::Read, FileAttribute::DIRECTORY)
+                .map_err(|_| "Failed to open directory")?;
 
-            match handle.into_directory() {
-                Some(dir) => dir,
-                None => {
-                    message!("", "  Path is not a directory");
-                    return;
-                }
-            }
+            handle.into_directory().ok_or("Path is not a directory")?
         };
 
-        // 4. Buffer for directory entries
-        let mut buffer = [0u8; 32768];
+        let mut entries = Vec::new();
+        let mut buffer = [0u8; 4096];
         loop {
             match target_dir.read_entry(&mut buffer) {
                 Ok(Some(entry)) => {
-                    let name = entry.file_name();
-                    let size = entry.file_size();
-                    let attr = entry.attribute();
-
-                    // Add a trailing slash to directories for clarity
-                    let is_dir = attr.contains(FileAttribute::DIRECTORY);
-                    let suffix = if is_dir { "/" } else { "" };
-
-                    message!("\t", "  {}{:<30} ** {} BYTES", name, suffix, size);
+                    let name = entry.file_name().to_string();
+                    if name != "." && name != ".." {
+                        let is_dir = entry.attribute().contains(FileAttribute::DIRECTORY);
+                        entries.push((name, is_dir));
+                    }
                 }
-                Ok(None) => break, // End of directory
-                Err(_) => {
-                    message!("", "  Error reading entry");
-                    break;
-                }
+                Ok(None) => break,
+                Err(_) => return Err("Error reading entry"),
             }
         }
+        Ok(entries)
     }
 
     pub fn get_cwd() -> Result<(String), ()> {

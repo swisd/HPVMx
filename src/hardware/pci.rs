@@ -114,7 +114,7 @@ pub fn scan_bus() -> Vec<PciDeviceInfo> {
     devices
 }
 
-fn pci_config_read_u32(bus: u8, slot: u8, func: u8, offset: u8) -> u32 {
+pub fn pci_config_read_u32(bus: u8, slot: u8, func: u8, offset: u8) -> u32 {
     let address = ((bus as u32) << 16) | ((slot as u32) << 11) |
                   ((func as u32) << 8) | (offset as u32 & 0xFC) | 0x80000000;
     
@@ -124,14 +124,40 @@ fn pci_config_read_u32(bus: u8, slot: u8, func: u8, offset: u8) -> u32 {
     }
 }
 
-fn pci_config_read_u16(bus: u8, slot: u8, func: u8, offset: u8) -> u16 {
+pub fn pci_config_read_u16(bus: u8, slot: u8, func: u8, offset: u8) -> u16 {
     let val = pci_config_read_u32(bus, slot, func, offset);
     ((val >> ((offset & 2) * 8)) & 0xFFFF) as u16
 }
 
-fn pci_config_read_u8(bus: u8, slot: u8, func: u8, offset: u8) -> u8 {
+pub fn pci_config_read_u8(bus: u8, slot: u8, func: u8, offset: u8) -> u8 {
     let val = pci_config_read_u32(bus, slot, func, offset);
     ((val >> ((offset & 3) * 8)) & 0xFF) as u8
+}
+
+pub fn pci_config_write_u32(bus: u8, slot: u8, func: u8, offset: u8, val: u32) {
+    let address = ((bus as u32) << 16) | ((slot as u32) << 11) |
+                  ((func as u32) << 8) | (offset as u32 & 0xFC) | 0x80000000;
+    
+    unsafe {
+        out_l(0xCF8, address);
+        out_l(0xCFC, val);
+    }
+}
+
+pub fn pci_config_write_u16(bus: u8, slot: u8, func: u8, offset: u8, val: u16) {
+    let mut old_val = pci_config_read_u32(bus, slot, func, offset);
+    let shift = (offset & 2) * 8;
+    old_val &= !(0xFFFF << shift);
+    old_val |= (val as u32) << shift;
+    pci_config_write_u32(bus, slot, func, offset, old_val);
+}
+
+pub fn pci_config_write_u8(bus: u8, slot: u8, func: u8, offset: u8, val: u8) {
+    let mut old_val = pci_config_read_u32(bus, slot, func, offset);
+    let shift = (offset & 3) * 8;
+    old_val &= !(0xFF << shift);
+    old_val |= (val as u32) << shift;
+    pci_config_write_u32(bus, slot, func, offset, old_val);
 }
 
 // Inline assembly for IO ports

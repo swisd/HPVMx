@@ -10,6 +10,7 @@ use core::mem::{MaybeUninit, size_of};
 use core::sync::atomic::{AtomicBool, Ordering};
 use crate::{hpvm_info, hpvm_warn};
 
+
 // --- Protocol Constants & Headers ---
 
 pub const ETHERTYPE_IPV4: u16 = 0x0800;
@@ -138,6 +139,8 @@ pub struct NetState {
     pub ping_success: bool,
     pub tcp_rx_data: Vec<u8>,
     pub tcp_connected: bool,
+    pub tcp_src_port: u16,
+    pub tcp_dst_port: u16,
     pub tcp_seq: u32,
     pub tcp_ack: u32,
     pub tcp_fin_received: bool,
@@ -198,6 +201,8 @@ pub fn init(ip: [u8; 4], gw: [u8; 4], mask: [u8; 4]) {
         ping_success: false,
         tcp_rx_data: Vec::new(),
         tcp_connected: false,
+        tcp_src_port: 0,
+        tcp_dst_port: 0,
         tcp_seq: 0,
         tcp_ack: 0,
         tcp_fin_received: false,
@@ -654,7 +659,10 @@ pub fn tcp_connect(dst_ip: [u8; 4], dst_port: u16) -> bool {
     };
 
     // Send SYN
-    send_tcp_packet(dst_ip, mac, 49152, dst_port, state.tcp_seq, 0, TCP_FLAG_SYN, &[]);
+    let src_port = 49152 + (uefi::runtime::get_time().map(|t| t.second()).unwrap_or(0) as u16) % 1000;
+    state.tcp_src_port = src_port;
+    state.tcp_dst_port = dst_port;
+    send_tcp_packet(dst_ip, mac, src_port, dst_port, state.tcp_seq, 0, TCP_FLAG_SYN, &[]);
 
     // Wait for connection
     for _ in 0..500 {
@@ -672,7 +680,7 @@ pub fn tcp_send(dst_ip: [u8; 4], dst_port: u16, data: &[u8]) {
         None => return,
     };
     
-    send_tcp_packet(dst_ip, mac, 49152, dst_port, state.tcp_seq, state.tcp_ack, TCP_FLAG_ACK | TCP_FLAG_PSH, data);
+    send_tcp_packet(dst_ip, mac, state.tcp_src_port, dst_port, state.tcp_seq, state.tcp_ack, TCP_FLAG_ACK | TCP_FLAG_PSH, data);
     state.tcp_seq += data.len() as u32;
 }
 
@@ -682,7 +690,7 @@ pub fn tcp_disconnect(dst_ip: [u8; 4], dst_port: u16) {
         Some(m) => m,
         None => return,
     };
-    send_tcp_packet(dst_ip, mac, 49152, dst_port, state.tcp_seq, state.tcp_ack, TCP_FLAG_ACK | TCP_FLAG_FIN, &[]);
+    send_tcp_packet(dst_ip, mac, state.tcp_src_port, dst_port, state.tcp_seq, state.tcp_ack, TCP_FLAG_ACK | TCP_FLAG_FIN, &[]);
 }
 
 
@@ -849,12 +857,16 @@ pub fn stats() -> NetStats {
 
 pub fn get_state() -> NetState {
     unsafe {
-        if let Some(mut state) = NET_STATE.assume_init_mut().as_mut() {
+        if let Some(state) = NET_STATE.assume_init_mut().as_mut() {
             state.clone()
         } else {
             NetState::default()
         }
     }
+}
+
+pub unsafe fn get_state_mut() -> &'static mut NetState {
+    NET_STATE.assume_init_mut().as_mut().unwrap()
 }
 
 /// Transmit a raw frame via SNP if available. Increments TX counters on success.

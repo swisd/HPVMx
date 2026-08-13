@@ -117,6 +117,114 @@ impl Persistable for crate::ui::UiSettings {
     }
 }
 
+impl Persistable for crate::env::GlobalEnvironment {
+    fn magic() -> u32 { 0x47454E56 } // "GENV"
+
+    fn serialize(&self) -> Vec<u8> {
+        self.data.serialize()
+    }
+}
+
+impl Persistable for crate::env::GlobalEnvironmentData {
+    fn magic() -> u32 { 0x47454441 } // "GEDA"
+
+    fn serialize(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        // Serialize current_path
+        data.extend_from_slice(&(self.current_path.len() as u32).to_le_bytes());
+        data.extend_from_slice(self.current_path.as_bytes());
+
+        // Serialize some key indices and states
+        data.extend_from_slice(&(self.selected_file_idx as u32).to_le_bytes());
+        data.extend_from_slice(&(self.selected_device_idx as u32).to_le_bytes());
+        data.extend_from_slice(&(self.selected_vm_idx as u32).to_le_bytes());
+        data.extend_from_slice(&(self.selected_app_idx as u32).to_le_bytes());
+        data.extend_from_slice(&(self.selected_package_idx as u32).to_le_bytes());
+        data.extend_from_slice(&(self.selected_settings_idx as u32).to_le_bytes());
+
+        // Serialize settings
+        data.extend_from_slice(&self.settings.serialize());
+
+        // Serialize terminal buffer
+        data.extend_from_slice(&(self.term_buf.len() as u32).to_le_bytes());
+        data.extend_from_slice(self.term_buf.as_bytes());
+
+        data
+    }
+}
+
+impl crate::env::GlobalEnvironmentData {
+    pub fn restore(&mut self, data: &[u8]) {
+        let mut offset = 0;
+        if offset + 4 <= data.len() {
+            let path_len = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            offset += 4;
+            if offset + path_len <= data.len() {
+                self.current_path = core::str::from_utf8(&data[offset..offset+path_len]).unwrap().to_string();
+                offset += path_len;
+            }
+        }
+
+        if offset + 24 <= data.len() {
+            self.selected_file_idx = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            offset += 4;
+            self.selected_device_idx = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            offset += 4;
+            self.selected_vm_idx = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            offset += 4;
+            self.selected_app_idx = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            offset += 4;
+            self.selected_package_idx = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            offset += 4;
+            self.selected_settings_idx = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            offset += 4;
+        }
+
+        // Restore settings (using DashboardUI's logic since it's the same UiSettings)
+        if offset < data.len() {
+             // We need to be careful here, settings.serialize() was 10 + 44 = 54 bytes
+             let s_data = &data[offset..];
+             let mut s_offset = 0;
+             if s_offset + 10 <= s_data.len() {
+                 self.settings.extra_debug_info = s_data[s_offset] != 0; s_offset += 1;
+                 self.settings.folder_absolute_sizes = s_data[s_offset] != 0; s_offset += 1;
+                 self.settings.state_save_restore = s_data[s_offset] != 0; s_offset += 1;
+                 self.settings.extended_symbol_library = s_data[s_offset] != 0; s_offset += 1;
+                 self.settings.ring0_udmi_udxi = s_data[s_offset] != 0; s_offset += 1;
+                 self.settings.controllang_support = s_data[s_offset] != 0; s_offset += 1;
+                 self.settings.pg_vshaders = s_data[s_offset] != 0; s_offset += 1;
+                 self.settings.experimental_mem_comp = s_data[s_offset] != 0; s_offset += 1;
+                 self.settings.auto_refresh_storage = s_data[s_offset] != 0; s_offset += 1;
+                 self.settings.show_hidden_files = s_data[s_offset] != 0; s_offset += 1;
+             }
+             if s_offset + 44 <= s_data.len() {
+                 self.settings.general_profile = u32::from_le_bytes(s_data[s_offset..s_offset+4].try_into().unwrap()) as usize; s_offset += 4;
+                 self.settings.boot_target = u32::from_le_bytes(s_data[s_offset..s_offset+4].try_into().unwrap()) as usize; s_offset += 4;
+                 self.settings.interface_density = u32::from_le_bytes(s_data[s_offset..s_offset+4].try_into().unwrap()) as usize; s_offset += 4;
+                 self.settings.vm_safety_policy = u32::from_le_bytes(s_data[s_offset..s_offset+4].try_into().unwrap()) as usize; s_offset += 4;
+                 self.settings.network_profile = u32::from_le_bytes(s_data[s_offset..s_offset+4].try_into().unwrap()) as usize; s_offset += 4;
+                 self.settings.storage_policy = u32::from_le_bytes(s_data[s_offset..s_offset+4].try_into().unwrap()) as usize; s_offset += 4;
+                 self.settings.package_policy = u32::from_le_bytes(s_data[s_offset..s_offset+4].try_into().unwrap()) as usize; s_offset += 4;
+                 self.settings.developer_level = u32::from_le_bytes(s_data[s_offset..s_offset+4].try_into().unwrap()) as usize; s_offset += 4;
+                 self.settings.security_policy = u32::from_le_bytes(s_data[s_offset..s_offset+4].try_into().unwrap()) as usize; s_offset += 4;
+                 self.settings.ui_scaling = u32::from_le_bytes(s_data[s_offset..s_offset+4].try_into().unwrap()) as usize; s_offset += 4;
+                 self.settings.terminal_font = u32::from_le_bytes(s_data[s_offset..s_offset+4].try_into().unwrap()) as usize; s_offset += 4;
+             }
+             offset += s_offset;
+        }
+
+        // Restore terminal buffer
+        if offset + 4 <= data.len() {
+            let buf_len = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
+            offset += 4;
+            if offset + buf_len <= data.len() {
+                self.term_buf = core::str::from_utf8(&data[offset..offset+buf_len]).unwrap().to_string();
+                offset += buf_len;
+            }
+        }
+    }
+}
+
 impl Persistable for crate::ui::DashboardUI {
     fn magic() -> u32 { 0x44425549 } // "DBUI" in hex
 
@@ -251,6 +359,9 @@ pub unsafe fn SAVE(dashboard: Option<&crate::ui::DashboardUI>) {
         if let Some(db) = dashboard {
             PersistenceManager::save("/STATE", db, 'a');
         }
+        if let Some(env) = crate::GLOBALENV.as_ref() {
+            PersistenceManager::save("/STATE", env, 'a');
+        }
     }
 }
 
@@ -342,6 +453,13 @@ pub unsafe fn RESTORE(dashboard: Option<&mut crate::ui::DashboardUI>) {
         if let Some(db) = dashboard {
             if let Some(db_data) = PersistenceManager::restore_data("/STATE", 0x44425549) {
                 db.restore(&db_data);
+            }
+        }
+
+        // 4. Restore Global Environment
+        if let Some(env) = crate::GLOBALENV.as_mut() {
+            if let Some(env_data) = PersistenceManager::restore_data("/STATE", 0x47454E56) {
+                env.data.restore(&env_data);
             }
         }
     }

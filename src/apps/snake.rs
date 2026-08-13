@@ -52,7 +52,7 @@ impl AppInfo for SnakeApp {
 
 impl RunnableClone for SnakeApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        Box::new(SnakeApp::new())
     }
 }
 

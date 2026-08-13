@@ -28,7 +28,7 @@ impl AppInfo for CH64App {
 
 impl RunnableClone for CH64App {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        Box::new(CH64App {})
     }
 }
 

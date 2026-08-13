@@ -80,7 +80,7 @@ impl AppInfo for MicroIdeApp {
 
 impl RunnableClone for MicroIdeApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        Box::new(MicroIdeApp::new())
     }
 }
 

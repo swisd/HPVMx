@@ -21,7 +21,7 @@ impl AppInfo for ClockApp {
 
 impl RunnableClone for ClockApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        Box::new(ClockApp{})
     }
 }
 

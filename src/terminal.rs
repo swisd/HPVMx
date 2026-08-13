@@ -63,7 +63,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                         message!("\n", "\nMicro-C Toolchain:\n  micro-c compile [file.micro] - compile source to .asm\n  micro-c run [file.bin] - run compiled binary\n")
                     }
                     "misc" => {
-                        message!("\n", "\n Misc / Other:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\n  vdebug [on|off|status] - toggle verbose debug console logs\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n")
+                        message!("\n", "\n Misc / Other:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\n  vdebug [on|off|status] - toggle verbose debug console logs\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n  beep [freq] [ms] - play a sound\n")
                     }
                     "prog" => {
                         message!("\n", "no help for '{}' (yet)", parts[2])
@@ -257,6 +257,16 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
         "dashboard" => {
             unsafe {
                 show_dashboard_ui(package_manager);
+            }
+        }
+        "beep" => {
+            let freq = command.get(1).and_then(|s| s.parse().ok()).unwrap_or(440);
+            let duration = command.get(2).and_then(|s| s.parse().ok()).unwrap_or(200);
+            
+            if devices::hda::is_available() {
+                let _ = devices::hda::play_tone(freq, duration);
+            } else {
+                devices::audio::play_tone_nb(freq, duration);
             }
         }
 
@@ -918,6 +928,9 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
     loop {
         unsafe { crate::hpvmlog::BUSY_TSC = 0; }
         let frame_start_tsc = unsafe { core::arch::x86_64::_rdtsc() };
+
+        // update non-blocking audio
+        devices::audio::update();
 
         frame_count += 1;
 

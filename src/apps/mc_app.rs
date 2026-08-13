@@ -105,7 +105,7 @@ impl MinecraftApp {
 
 impl RunnableClone for MinecraftApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        Box::new(MinecraftApp::new())
     }
 }
 

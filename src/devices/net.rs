@@ -337,7 +337,7 @@ fn ensure_hw() {
 }
 
 
-fn ensure_net() {
+pub fn ensure_net() {
     if !net_hw::is_initialized() {
         let _ = net_hw::init();
     }

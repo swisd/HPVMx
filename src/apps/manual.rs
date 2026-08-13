@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use core::any::Any;
 use uefi::proto::console::text::Key;
 use crate::env::{AppInfo, Environment, Runnable, RunnableClone};
+use crate::filesystem::FileSystem;
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
 
 pub struct InstructionManualApp {
@@ -69,7 +70,10 @@ impl AppInfo for InstructionManualApp {
 
 impl RunnableClone for InstructionManualApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        let book = FileSystem::read_file_to_string("/docs/man/manual.md")
+            .unwrap_or_else(|_| include_str!("../../doc/manual.md").to_string());
+        let app = InstructionManualApp::new(&*book, 1100usize);
+        Box::new(app)
     }
 }
 

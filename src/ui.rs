@@ -4,7 +4,7 @@
 //!
 //! This module contains the core UI logic, including the `DashboardUI`
 //! which manages the main display, active applications, and system status.
-pub static DASH_BACK_ENABLED: bool = false;
+pub static mut DASH_BACK_ENABLED: bool = false;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use crate::{hpvm_error, hpvm_info, hpvm_log, vdebug, TSC_PER_US};
@@ -92,6 +92,7 @@ pub struct DashboardUI {
     pub filesys_action_idx: usize,
     pub filesys_pending_action: Option<FilePendingAction>,
     pub filesys_new_counter: usize,
+    pub filesys_rename_buffer: String,
     pub term_selected: bool,
     pub term_buf: String,
     pub editor: Option<TextEditor>,
@@ -378,7 +379,7 @@ impl TextEditor {
             cursor_pos: (0, 0),
             scroll_offset: 0,
             mode: EditorMode::Normal,
-            is_hex: false,
+            is_hex,
             command_buffer: "".to_string(),
         }
     }
@@ -472,6 +473,7 @@ impl DashboardUI {
             filesys_action_idx: 0,
             filesys_pending_action: None,
             filesys_new_counter: 1,
+            filesys_rename_buffer: String::new(),
             term_selected: false,
             term_buf: "".to_string(),
             editor: None,
@@ -749,7 +751,14 @@ impl DashboardUI {
             // for app_ctx in self.active_apps.iter_mut() {
             //     app_ctx.step(None);
             // }
-            pg.draw_icon(0, 0, 1440, 1440, &crate::backgrounds::win_snowtree::ICON_DATA);
+            if !DASH_BACK_ENABLED {
+                // assumes wxga+ resolution of 1440x900
+                pg.draw_icon(0, 0, 1440, 1440, &crate::backgrounds::win_snowtree::ICON_DATA);
+            } else {
+                pg.fill_rect(0, 32, width, 16, 0x444444); // Dark Gray
+                let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
+                pg.draw_text(10, 36, nav_text, 0xFFFFFF);
+            }
 
             pg.draw_header(0, 0, width, 32, TSC_PER_US as usize,
                            [self.ctrl_mode, self.alt_mode, self.fn_mode],
@@ -1549,8 +1558,17 @@ impl DashboardUI {
                                     pg.fill_rect(props_x + 8, confirm_y, props_w - 16, 72, 0x332222);
                                     pg.draw_rect_outline(props_x + 8, confirm_y, props_w - 16, 72, 0xFFAA00);
                                     pg.draw_text(props_x + 16, confirm_y + 10, "Confirm Operation", 0xFFAA00);
-                                    pg.draw_text(props_x + 16, confirm_y + 30, &format!("{:?}", action), 0xFFFFFF);
-                                    pg.draw_text(props_x + 16, confirm_y + 50, "END confirms, ESC cancels", 0xCCCCCC);
+                                    
+                                    if action == FilePendingAction::Rename {
+                                        pg.draw_text(props_x + 16, confirm_y + 30, &format!("New Name: {}", self.filesys_rename_buffer), 0xFFFFFF);
+                                        pg.draw_text(props_x + 16, confirm_y + 50, "ENTER to Rename, ESC to cancel", 0xCCCCCC);
+                                    } else if action == FilePendingAction::Move {
+                                        pg.draw_text(props_x + 16, confirm_y + 30, &format!("Move to: {}_moved", self.files[self.selected_file_idx].name), 0xFFFFFF);
+                                        pg.draw_text(props_x + 16, confirm_y + 50, "END to Move, ESC to cancel", 0xCCCCCC);
+                                    } else {
+                                        pg.draw_text(props_x + 16, confirm_y + 30, &format!("{:?}", action), 0xFFFFFF);
+                                        pg.draw_text(props_x + 16, confirm_y + 50, "END confirms, ESC cancels", 0xCCCCCC);
+                                    }
                                 }
                             }
 
@@ -1758,7 +1776,7 @@ impl DashboardUI {
                                 pg.draw_text(width - 150, content_top + 5, mode_text, 0xFFFF00);
 
                                 let edit_y_start = content_top + 30;
-                                let visible_lines = (height - edit_y_start - 60) / 20;
+                                let visible_lines = core::cmp::min((height - edit_y_start - 150) / 20, 32);
 
                                 if ed.is_hex {
                                     let mut y = content_top + 40;
@@ -1767,9 +1785,10 @@ impl DashboardUI {
                                     let ascii_start_x = margin + 600;
 
                                     for (i, chunk) in ed.buffer.chunks(16).enumerate().skip(ed.scroll_offset) {
-                                        if y > height - 80 { break; }
+                                        if y > height - 150 { break; }
 
                                         let offset = i * 16;
+                                        let current_row = i;
                                         // Draw Offset in Gray
                                         pg.draw_text(margin + 10, y, &format!("{:08X}", offset), 0x888888);
 
@@ -1780,23 +1799,59 @@ impl DashboardUI {
                                                 _ => 0xFF00FF,             // Purple: Other/Extended
                                             };
 
-                                            // Draw Hex Byte
-                                            pg.draw_text(hex_start_x + (j * 30), y, &format!("{:02X}", byte), color);
+                                            let byte_x = hex_start_x + (j * 30);
+                                            let ascii_x = ascii_start_x + (j * 12);
 
-                                            // Draw ASCII Char on the side
-                                            let ascii_char = if byte >= 32 && byte <= 126 { byte as char } else { '.' };
-                                            pg.draw_text(ascii_start_x + (j * 12), y, &ascii_char.to_string(), color);
+                                            // Cursor rendering in Hex View
+                                            if ed.mode != EditorMode::Command && ed.cursor_pos.0 == current_row && ed.cursor_pos.1 == j {
+                                                let cursor_color = if ed.mode == EditorMode::Insert { 0x00FF00 } else { 0xAAAAAA };
+                                                pg.fill_rect(byte_x - 2, y - 2, 22, 16, cursor_color);
+                                                pg.fill_rect(ascii_x - 1, y - 2, 10, 16, cursor_color);
+                                                
+                                                // Re-draw text in black over cursor
+                                                pg.draw_text(byte_x, y, &format!("{:02X}", byte), 0x000000);
+                                                let ascii_char = if byte >= 32 && byte <= 126 { byte as char } else { '.' };
+                                                pg.draw_text(ascii_x, y, &ascii_char.to_string(), 0x000000);
+                                            } else {
+                                                // Draw Hex Byte
+                                                pg.draw_text(byte_x, y, &format!("{:02X}", byte), color);
+
+                                                // Draw ASCII Char on the side
+                                                let ascii_char = if byte >= 32 && byte <= 126 { byte as char } else { '.' };
+                                                pg.draw_text(ascii_x, y, &ascii_char.to_string(), color);
+                                            }
                                         }
                                         y += line_height;
                                     }
                                 } else {
                                     // Text Editor Rendering
                                     let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
-                                    for (i, line) in content.lines().skip(ed.scroll_offset).enumerate() {
+                                    let mut line_y = edit_y_start;
+                                    for (i, line) in content.lines().chain(core::iter::once("")).skip(ed.scroll_offset).enumerate() {
                                         if i >= visible_lines { break; }
-                                        pg.draw_text(margin + 40, edit_y_start + (i * 20), line, 0xFFFFFF);
+                                        let current_line_idx = ed.scroll_offset + i;
+                                        
                                         // Line numbers
-                                        pg.draw_text(margin, edit_y_start + (i * 20), &format!("{:3}", ed.scroll_offset + i + 1), 0x666666);
+                                        pg.draw_text(margin, line_y, &format!("{:3}", current_line_idx + 1), 0x666666);
+                                        
+                                        // Line content
+                                        pg.draw_text(margin + 40, line_y, line, 0xFFFFFF);
+                                        
+                                        // Cursor rendering
+                                        if ed.mode != EditorMode::Command && ed.cursor_pos.0 == current_line_idx {
+                                            let char_x = margin + 40 + (ed.cursor_pos.1 * 8); // Assuming 8px char width
+                                            if char_x < width - margin {
+                                                let cursor_color = if ed.mode == EditorMode::Insert { 0x00FF00 } else { 0xAAAAAA };
+                                                pg.fill_rect(char_x, line_y - 1, 8, 16, cursor_color);
+                                                
+                                                // Re-draw character over cursor if not at end of line
+                                                if let Some(c) = line.chars().nth(ed.cursor_pos.1) {
+                                                    pg.draw_text(char_x, line_y, &c.to_string(), 0x000000);
+                                                }
+                                            }
+                                        }
+                                        
+                                        line_y += 20;
                                     }
                                 }
 
@@ -2005,6 +2060,40 @@ impl DashboardUI {
                         _ => {
                             pg.draw_text(5, page_y - 15, "this page is unavailable", 0xFFFFFF)
                         }
+                    }
+                } else {
+                    // files in /usr/root/home/ in a grid pattern
+                    let home_path = "/usr/root/home/";
+                    let home_entries = crate::filesystem::FileSystem::read_dir(home_path).unwrap_or_else(|_| Vec::new());
+
+                    let grid_x_start = 60;
+                    let grid_y_start = 100;
+                    let cell_width = 100;
+                    let cell_height = 80;
+                    let cols = (width - grid_x_start * 2) / cell_width;
+
+                    for (idx, (name, is_dir)) in home_entries.iter().enumerate() {
+                        let col = idx % cols;
+                        let row = idx / cols;
+                        let x = grid_x_start + col * cell_width;
+                        let y = grid_y_start + row * cell_height;
+
+                        // Draw icon
+                        let icon = if *is_dir {
+                            &crate::ui::pixel_graphics::icons::FOLDER_32_ICON_DATA
+                        } else {
+                            &crate::ui::pixel_graphics::icons::FILE_32_ICON_DATA
+                        };
+                        pg.draw_icon(x + (cell_width - 32) / 2, y, 32, 32, icon);
+
+                        // Draw name below it
+                        let name_display = if name.len() > 10 {
+                            format!("{}...", &name[..7])
+                        } else {
+                            name.clone()
+                        };
+                        let text_x = x + (cell_width - (name_display.len() * 8)) / 2;
+                        pg.draw_text(text_x, y + 40, &name_display, 0xFFFFFF);
                     }
                 }
 
@@ -2831,7 +2920,8 @@ impl DashboardUI {
             let taskbar_y = height.saturating_sub(28);
             pg.fill_rect(0, taskbar_y, width, 28, 0x000080);
             pg.fill_rect(6, taskbar_y + 4, 102, 20, if self.startup_menu_active { 0x008080 } else { 0x444444 });
-            pg.draw_text(14, taskbar_y + 8, "[F1] Start     [X] Shutdown", 0xFFFFFF);
+            let stringx = unsafe { if DASH_BACK_ENABLED {"[F1] Start     [X] Shutdown     [Q] Dev Menu"} else {"[F1] Start     [X] Shutdown     |Q| Dev Menu"} };
+            pg.draw_text(14, taskbar_y + 8, stringx, 0xFFFFFF);
 
             if !self.startup_menu_active { return; }
 
@@ -3162,6 +3252,46 @@ impl DashboardUI {
                     return;
                 }
                 DashboardTab::Storage => {
+                    if let Some(action) = self.filesys_pending_action {
+                        if action == FilePendingAction::Rename {
+                            match key {
+                                Key::Printable(c) => {
+                                    let ch = char::from(c);
+                                    if ch == '\r' || ch == '\n' {
+                                        if !self.files.is_empty() && !self.filesys_rename_buffer.is_empty() {
+                                            let entry = self.files[self.selected_file_idx].clone();
+                                            let sep = if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" };
+                                            let full_path = format!("{}{}{}", self.current_path, sep, entry.name);
+                                            let dst = format!("{}{}{}", self.current_path, sep, self.filesys_rename_buffer);
+                                            
+                                            match crate::FileSystem::rename(&full_path, &dst) {
+                                                Ok(_) => {
+                                                    self.status_line = format!("Renamed {} to {}", entry.name, self.filesys_rename_buffer);
+                                                    self.filesys_pending_action = None;
+                                                    self.refresh_storage();
+                                                }
+                                                Err(e) => {
+                                                    self.status_line = format!("Rename failed: {}", e);
+                                                    self.filesys_pending_action = None;
+                                                }
+                                            }
+                                        }
+                                    } else if ch == '\u{08}' {
+                                        self.filesys_rename_buffer.pop();
+                                    } else if !ch.is_control() {
+                                        self.filesys_rename_buffer.push(ch);
+                                    }
+                                }
+                                Key::Special(ScanCode::ESCAPE) => {
+                                    self.filesys_pending_action = None;
+                                    self.status_line = String::from("Rename canceled");
+                                }
+                                _ => {}
+                            }
+                            return;
+                        }
+                    }
+
                     match key {
                         Key::Special(ScanCode::LEFT) => {
                             if self.filesys_action_idx >= 1 { self.filesys_action_idx -= 1 } else { self.filesys_action_idx = 0 }
@@ -3205,8 +3335,12 @@ impl DashboardUI {
                             if let Some(action) = self.filesys_pending_action {
                                 let result = match action {
                                     FilePendingAction::Rename => {
-                                        let dst = format!("{}{}renamed_{}", self.current_path, sep, entry.name);
-                                        crate::FileSystem::move_file(&full_path, &dst)
+                                        // This branch is now handled above for user input, 
+                                        // but we'll keep a fallback or trigger it here if needed.
+                                        if self.filesys_rename_buffer.is_empty() {
+                                            self.filesys_rename_buffer = entry.name.clone();
+                                        }
+                                        return;
                                     }
                                     FilePendingAction::Copy => {
                                         let dst = format!("{}{}{}_copy", self.current_path, sep, entry.name);
@@ -3218,9 +3352,19 @@ impl DashboardUI {
                                     }
                                     FilePendingAction::Move => {
                                         let dst = format!("{}{}{}_moved", self.current_path, sep, entry.name);
-                                        crate::FileSystem::move_file(&full_path, &dst)
+                                        if entry.is_dir {
+                                            crate::FileSystem::move_directory(&full_path, &dst)
+                                        } else {
+                                            crate::FileSystem::move_file(&full_path, &dst)
+                                        }
                                     }
-                                    FilePendingAction::Delete => crate::FileSystem::remove(&full_path),
+                                    FilePendingAction::Delete => {
+                                        if entry.is_dir {
+                                            crate::FileSystem::remove_dir(&full_path)
+                                        } else {
+                                            crate::FileSystem::remove(&full_path)
+                                        }
+                                    }
                                 };
 
                                 match result {
@@ -3311,7 +3455,8 @@ impl DashboardUI {
                                 }
                                 4 => {
                                     self.filesys_pending_action = Some(FilePendingAction::Rename);
-                                    self.status_line = format!("Confirm rename of {}", entry.name);
+                                    self.filesys_rename_buffer = entry.name.clone();
+                                    self.status_line = format!("Rename: {}", entry.name);
                                 }
                                 5 => {
                                     self.filesys_pending_action = Some(FilePendingAction::Copy);
@@ -3410,6 +3555,15 @@ impl DashboardUI {
                         },
                     };
 
+                    let (width, height) = if let Some(pg) = PixelGraphics::new() {
+                        pg.resolution()
+                    } else {
+                        (1024, 768)
+                    };
+                    let content_top = 48;
+                    let edit_y_start = content_top + 30;
+                    let visible_lines = core::cmp::min((height - edit_y_start - 150) / 20, 32);
+
                     match ed.mode {
                         EditorMode::Normal => match key {
                             Key::Printable(c) => match char::from(c) {
@@ -3418,29 +3572,238 @@ impl DashboardUI {
                                     ed.mode = EditorMode::Command;
                                     ed.command_buffer.clear();
                                 }
-                                'j' => ed.scroll_offset += 1,
-                                'k' => ed.scroll_offset = ed.scroll_offset.saturating_sub(1),
+                                'j' => {
+                                    ed.cursor_pos.0 += 1;
+                                    // Scroll if cursor goes off screen
+                                    if ed.is_hex {
+                                        let row_count = (ed.buffer.len() + 15) / 16;
+                                        if ed.cursor_pos.0 >= row_count {
+                                            ed.cursor_pos.0 = row_count.saturating_sub(1);
+                                        }
+                                    } else {
+                                        let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                                        let line_count = content.lines().count();
+                                        if ed.cursor_pos.0 >= line_count {
+                                            ed.cursor_pos.0 = line_count.saturating_sub(1);
+                                        }
+                                    }
+                                    if ed.cursor_pos.0 >= ed.scroll_offset + visible_lines {
+                                        ed.scroll_offset = ed.cursor_pos.0 - visible_lines + 1;
+                                    }
+                                }
+                                'k' => {
+                                    ed.cursor_pos.0 = ed.cursor_pos.0.saturating_sub(1);
+                                    if ed.cursor_pos.0 < ed.scroll_offset {
+                                        ed.scroll_offset = ed.cursor_pos.0;
+                                    }
+                                }
+                                'h' => ed.cursor_pos.1 = ed.cursor_pos.1.saturating_sub(1),
+                                'l' => {
+                                    ed.cursor_pos.1 += 1;
+                                    if ed.is_hex {
+                                        if ed.cursor_pos.1 >= 16 {
+                                            ed.cursor_pos.1 = 15;
+                                        }
+                                        // Bound check for last row
+                                        let row_count = (ed.buffer.len() + 15) / 16;
+                                        if ed.cursor_pos.0 == row_count - 1 {
+                                            let last_row_len = ed.buffer.len() % 16;
+                                            let last_row_len = if last_row_len == 0 && !ed.buffer.is_empty() { 16 } else { last_row_len };
+                                            if ed.cursor_pos.1 >= last_row_len {
+                                                ed.cursor_pos.1 = last_row_len.saturating_sub(1);
+                                            }
+                                        }
+                                    } else {
+                                        let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                                        if let Some(line) = content.lines().nth(ed.cursor_pos.0) {
+                                            if ed.cursor_pos.1 > line.len() {
+                                                ed.cursor_pos.1 = line.len();
+                                            }
+                                        }
+                                    }
+                                }
                                 _ => {}
                             },
+                            Key::Special(ScanCode::UP) => {
+                                ed.cursor_pos.0 = ed.cursor_pos.0.saturating_sub(1);
+                                if ed.cursor_pos.0 < ed.scroll_offset {
+                                    ed.scroll_offset = ed.cursor_pos.0;
+                                }
+                            }
+                            Key::Special(ScanCode::DOWN) => {
+                                ed.cursor_pos.0 += 1;
+                                if ed.is_hex {
+                                    let row_count = (ed.buffer.len() + 15) / 16;
+                                    if ed.cursor_pos.0 >= row_count {
+                                        ed.cursor_pos.0 = row_count.saturating_sub(1);
+                                    }
+                                } else {
+                                    let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                                    let line_count = content.lines().count();
+                                    if ed.cursor_pos.0 >= line_count {
+                                        ed.cursor_pos.0 = line_count.saturating_sub(1);
+                                    }
+                                }
+                                if ed.cursor_pos.0 >= ed.scroll_offset + visible_lines {
+                                    ed.scroll_offset = ed.cursor_pos.0 - visible_lines + 1;
+                                }
+                            }
+                            Key::Special(ScanCode::LEFT) => ed.cursor_pos.1 = ed.cursor_pos.1.saturating_sub(1),
+                            Key::Special(ScanCode::RIGHT) => {
+                                ed.cursor_pos.1 += 1;
+                                if ed.is_hex {
+                                    if ed.cursor_pos.1 >= 16 {
+                                        ed.cursor_pos.1 = 15;
+                                    }
+                                    let row_count = (ed.buffer.len() + 15) / 16;
+                                    if ed.cursor_pos.0 == row_count - 1 {
+                                        let last_row_len = ed.buffer.len() % 16;
+                                        let last_row_len = if last_row_len == 0 && !ed.buffer.is_empty() { 16 } else { last_row_len };
+                                        if ed.cursor_pos.1 >= last_row_len {
+                                            ed.cursor_pos.1 = last_row_len.saturating_sub(1);
+                                        }
+                                    }
+                                } else {
+                                    let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                                    if let Some(line) = content.lines().nth(ed.cursor_pos.0) {
+                                        if ed.cursor_pos.1 > line.len() {
+                                            ed.cursor_pos.1 = line.len();
+                                        }
+                                    }
+                                }
+                            }
                             _ => {}
                         },
                         EditorMode::Insert => match key {
                             Key::Special(ScanCode::ESCAPE) => ed.mode = EditorMode::Normal,
                             Key::Printable(char16) => {
-                                match char::from(char16) {
-                                    '\u{8}' => {
-                                        ed.buffer.pop(); // Simple end-of-file backspace for now
+                                if ed.is_hex {
+                                    let c = char::from(char16);
+                                    if let Some(digit) = c.to_digit(16) {
+                                        let pos = ed.cursor_pos.0 * 16 + ed.cursor_pos.1;
+                                        if pos < ed.buffer.len() {
+                                            ed.buffer[pos] = (ed.buffer[pos] << 4) | (digit as u8);
+                                        }
                                     }
-                                    _ => {
-                                        let c: char = char16.into();
-                                        if c.is_ascii() {
-                                            ed.buffer.push(c as u8);
-                                        } else {
-                                            // Optional: Handle non-ASCII (e.g., push UTF-8 bytes)
-                                            let mut b = [0; 4];
-                                            for &byte in c.encode_utf8(&mut b).as_bytes() {
-                                                ed.buffer.push(byte);
+                                } else {
+                                    match char::from(char16) {
+                                        '\u{8}' => {
+                                            // Backspace at cursor
+                                            if ed.cursor_pos.1 > 0 {
+                                                let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                                                let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                                                if lines.is_empty() { lines.push(String::new()); }
+                                                
+                                                let line = &mut lines[ed.cursor_pos.0];
+                                                if ed.cursor_pos.1 <= line.len() {
+                                                    line.remove(ed.cursor_pos.1 - 1);
+                                                    ed.cursor_pos.1 -= 1;
+                                                    
+                                                    let new_content = lines.join("\n");
+                                                    ed.buffer = new_content.into_bytes();
+                                                }
+                                            } else if ed.cursor_pos.0 > 0 {
+                                                // Merge with previous line
+                                                let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                                                let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                                                let current_line = lines.remove(ed.cursor_pos.0);
+                                                let prev_line = &mut lines[ed.cursor_pos.0 - 1];
+                                                ed.cursor_pos.1 = prev_line.len();
+                                                prev_line.push_str(&current_line);
+                                                ed.cursor_pos.0 -= 1;
+                                                
+                                                let new_content = lines.join("\n");
+                                                ed.buffer = new_content.into_bytes();
                                             }
+                                        },
+                                        '\r' | '\n' => {
+                                            // New line at cursor
+                                            let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                                            let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                                            if lines.is_empty() { lines.push(String::new()); }
+                                            
+                                            let line = lines[ed.cursor_pos.0].clone();
+                                            let (left, right) = line.split_at(ed.cursor_pos.1.min(line.len()));
+                                            lines[ed.cursor_pos.0] = left.to_string();
+                                            lines.insert(ed.cursor_pos.0 + 1, right.to_string());
+                                            
+                                            ed.cursor_pos.0 += 1;
+                                            ed.cursor_pos.1 = 0;
+                                            
+                                            let new_content = lines.join("\n");
+                                            ed.buffer = new_content.into_bytes();
+                                            
+                                            if ed.cursor_pos.0 >= ed.scroll_offset + visible_lines {
+                                                ed.scroll_offset = ed.cursor_pos.0 - visible_lines + 1;
+                                            }
+                                        }
+                                        _ => {
+                                            let c: char = char16.into();
+                                            if !c.is_control() {
+                                                let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                                                let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                                                if lines.is_empty() { lines.push(String::new()); }
+                                                
+                                                if ed.cursor_pos.0 >= lines.len() {
+                                                    lines.push(String::new());
+                                                }
+                                                
+                                                let line = &mut lines[ed.cursor_pos.0];
+                                                let pos = ed.cursor_pos.1.min(line.len());
+                                                line.insert(pos, c);
+                                                ed.cursor_pos.1 += 1;
+                                                
+                                                let new_content = lines.join("\n");
+                                                ed.buffer = new_content.into_bytes();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Key::Special(ScanCode::UP) => {
+                                ed.cursor_pos.0 = ed.cursor_pos.0.saturating_sub(1);
+                                if ed.cursor_pos.0 < ed.scroll_offset {
+                                    ed.scroll_offset = ed.cursor_pos.0;
+                                }
+                            }
+                            Key::Special(ScanCode::DOWN) => {
+                                ed.cursor_pos.0 += 1;
+                                if ed.is_hex {
+                                    let row_count = (ed.buffer.len() + 15) / 16;
+                                    if ed.cursor_pos.0 >= row_count {
+                                        ed.cursor_pos.0 = row_count.saturating_sub(1);
+                                    }
+                                } else {
+                                    let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                                    let line_count = content.lines().count();
+                                    if ed.cursor_pos.0 >= line_count {
+                                        ed.cursor_pos.0 = line_count.saturating_sub(1);
+                                    }
+                                }
+                                if ed.cursor_pos.0 >= ed.scroll_offset + visible_lines {
+                                    ed.scroll_offset = ed.cursor_pos.0 - visible_lines + 1;
+                                }
+                            }
+                            Key::Special(ScanCode::LEFT) => ed.cursor_pos.1 = ed.cursor_pos.1.saturating_sub(1),
+                            Key::Special(ScanCode::RIGHT) => {
+                                ed.cursor_pos.1 += 1;
+                                if ed.is_hex {
+                                    if ed.cursor_pos.1 >= 16 {
+                                        ed.cursor_pos.1 = 15;
+                                    }
+                                    let row_count = (ed.buffer.len() + 15) / 16;
+                                    if ed.cursor_pos.0 == row_count - 1 {
+                                        let last_row_len = ed.buffer.len() % 16;
+                                        let last_row_len = if last_row_len == 0 && !ed.buffer.is_empty() { 16 } else { last_row_len };
+                                        if ed.cursor_pos.1 >= last_row_len {
+                                            ed.cursor_pos.1 = last_row_len.saturating_sub(1);
+                                        }
+                                    }
+                                } else {
+                                    let content = core::str::from_utf8(&ed.buffer).unwrap_or("");
+                                    if let Some(line) = content.lines().nth(ed.cursor_pos.0) {
+                                        if ed.cursor_pos.1 > line.len() {
+                                            ed.cursor_pos.1 = line.len();
                                         }
                                     }
                                 }
@@ -3592,7 +3955,9 @@ impl DashboardUI {
                     if !(matches!(self.selected_tab, DashboardTab::Editor)) && !self.term_selected {
                         match ch {
                             'q' => {
-                                self.ui_error(22);
+                                unsafe {
+                                    DASH_BACK_ENABLED = !DASH_BACK_ENABLED;
+                                }
                             }
                             'o' => self.set_tab(DashboardTab::Overview),
                             'v' => self.set_tab(DashboardTab::VirtualMachines),

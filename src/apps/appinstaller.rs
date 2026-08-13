@@ -30,7 +30,7 @@ impl AppInfo for AppInstallerApp {
 
 impl RunnableClone for AppInstallerApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        Box::new( AppInstallerApp{} )
     }
 }
 

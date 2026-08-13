@@ -30,7 +30,7 @@ impl AppInfo for NetworkManagerApp {
 
 impl RunnableClone for NetworkManagerApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        Box::new(NetworkManagerApp{})
     }
 }
 
