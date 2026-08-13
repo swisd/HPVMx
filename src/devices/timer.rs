@@ -14,5 +14,5 @@ impl Timer {
 }
 
 pub fn sleep_ms(ms: u64) {
-    let _ = uefi::boot::stall(core::time::Duration::from_millis(ms).as_micros() as usize);
+    let _ = uefi::boot::stall(core::time::Duration::from_millis(ms));
 }
