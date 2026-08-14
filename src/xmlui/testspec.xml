@@ -1,1 +1,19 @@
 <!-- testspec -->
+<?xml version="1.0" encoding="utf-8"?>
+
+<Window
+    window.width="200"
+    window.height="200"
+    var:position="0"
+    title="window"
+    >
+    <include source="path" />
+    <subscript name="testscript" type="module">
+        <!-- either micro-c or a custom scripting language -->
+    </subscript>
+    <DisplayGroup name="container">
+        <Text position.x="20" position.y="20" color="0xFFFFFF">
+            Test Text
+        </Text>
+    </DisplayGroup>
+</Window>
