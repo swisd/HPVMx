@@ -43,6 +43,7 @@ mod c_stems;
 mod registry;
 mod dls;
 mod backgrounds;
+mod xmlui;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;

@@ -210,8 +210,7 @@ impl FileSystem {
 
     /// Scans all drives and writes "alias -> path" to a file
     pub fn scan_and_map_devices(map_file_path: &str) -> Result<(), &'static str> {
-        // 1. ONLY locate handles that explicitly support the DevicePath protocol.
-        // This skips "ghost" PCI handles and internal firmware handles that cause hangs.
+        // 1. Locate handles that support the DevicePath protocol.
         let handles = uefi::boot::locate_handle_buffer(SearchType::ByProtocol(&DevicePath::GUID))
             .map_err(|_| "Failed to locate device path handles")?;
 
@@ -220,17 +219,16 @@ impl FileSystem {
         state.device_map.clear();
         state.drive_handles.clear();
 
-        let mut dsk_i = 0; // Start from 1 as per typical disk naming
+        let mut dsk_i = 0;
         let mut net_i = 0;
         let mut usb_i = 0;
         let mut com_i = 0;
         let mut pci_i = 0;
+        let mut acpi_i = 0;
 
         for handle in handles.as_slice() {
-            // Check if this handle supports SimpleFileSystem
             let has_fs = uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(*handle).is_ok();
 
-            // Use open_protocol with GetProtocol attribute - safest non-locking method
             let device_path_res = unsafe {
                 uefi::boot::open_protocol::<DevicePath>(
                     uefi::boot::OpenProtocolParams {
@@ -248,51 +246,113 @@ impl FileSystem {
                     .map_err(|_| "Path string error")?
                     .to_string();
 
-                let mut alias = String::new();
+                let mut category = if has_fs { "dsk" } else { "dev" };
 
                 for node in device_path.node_iter() {
                     let d_type = node.device_type();
                     let d_sub = node.sub_type();
 
                     match (d_type, d_sub) {
-                        (DeviceType::MEDIA, DeviceSubType::MEDIA_HARD_DRIVE) => {
-                            alias = format!("dsk{}", dsk_i);
+                        (DeviceType::MEDIA, DeviceSubType::MEDIA_HARD_DRIVE)
+                        | (DeviceType::MEDIA, DeviceSubType::MEDIA_CD_ROM)
+                        | (DeviceType::MEDIA, DeviceSubType::MEDIA_RAM_DISK)
+                        | (DeviceType::MEDIA, DeviceSubType::MEDIA_FILE_PATH)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_NVME_NAMESPACE)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_SATA)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_SCSI_SAS_EX)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_SCSI)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_ATAPI)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_SD)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_EMMC)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_UFS) => {
+                            category = "dsk";
                         }
-                        (DeviceType::MESSAGING, DeviceSubType::MESSAGING_MAC_ADDRESS) => {
-                            alias = format!("net{}", net_i);
+                        (DeviceType::MESSAGING, DeviceSubType::MESSAGING_MAC_ADDRESS)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_IPV4)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_IPV6)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_VLAN)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_WIFI)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_BLUETOOTH)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_BLUETOOTH_LE)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_DNS) => {
+                            if category != "dsk" {
+                                category = "net";
+                            }
                         }
-                        (DeviceType::MESSAGING, DeviceSubType::MESSAGING_USB) => {
-                            alias = format!("usb{}", usb_i);
+                        (DeviceType::MESSAGING, DeviceSubType::MESSAGING_USB)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_USB_CLASS)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_USB_WWID) => {
+                            if category != "dsk" && category != "net" {
+                                category = "usb";
+                            }
                         }
                         (DeviceType::MESSAGING, DeviceSubType::MESSAGING_UART) => {
-                            alias = format!("com{}", com_i);
+                            if category != "dsk" {
+                                category = "com";
+                            }
                         }
-                        (DeviceType::HARDWARE, DeviceSubType::HARDWARE_PCI) if alias.is_empty() => {
-                            alias = format!("pci{}", pci_i);
+                        (DeviceType::HARDWARE, DeviceSubType::HARDWARE_PCI) => {
+                            if category == "dev" {
+                                category = "pci";
+                            }
                         }
-                        _ => continue,
+                        (DeviceType::ACPI, _) => {
+                            if category == "dev" {
+                                category = "acpi";
+                            }
+                        }
+                        _ => {}
                     }
                 }
 
-                if alias.is_empty() {
-                    alias = format!("dev{}", state.device_map.len());
-                }
+                let alias = match category {
+                    "dsk" => {
+                        let a = format!("dsk{}", dsk_i);
+                        dsk_i += 1;
+                        a
+                    }
+                    "net" => {
+                        let a = format!("net{}", net_i);
+                        net_i += 1;
+                        a
+                    }
+                    "usb" => {
+                        let a = format!("usb{}", usb_i);
+                        usb_i += 1;
+                        a
+                    }
+                    "com" => {
+                        let a = format!("com{}", com_i);
+                        com_i += 1;
+                        a
+                    }
+                    "pci" => {
+                        let a = format!("pci{}", pci_i);
+                        pci_i += 1;
+                        a
+                    }
+                    "acpi" => {
+                        let a = format!("acpi{}", acpi_i);
+                        acpi_i += 1;
+                        a
+                    }
+                    _ => format!("dev{}", state.device_map.len()),
+                };
 
-                if has_fs && alias.starts_with("dsk") {
+                if has_fs || alias.starts_with("dsk") {
                     state.drive_handles.push((alias.clone(), *handle));
-                    dsk_i += 1;
-                } else if alias.starts_with("net") {
-                    net_i += 1;
-                } else if alias.starts_with("usb") {
-                    usb_i += 1;
-                } else if alias.starts_with("com") {
-                    com_i += 1;
-                } else if alias.starts_with("pci") {
-                    pci_i += 1;
                 }
 
                 state.device_map.push((alias.clone(), full_path.clone()));
                 map_contents.push_str(&format!("{} -> {}\n", alias, full_path));
+            }
+        }
+
+        // If no drive handles mapped yet but SFS exists, add fallback
+        if state.drive_handles.is_empty() {
+            if let Ok(fs_handle) = uefi::boot::get_handle_for_protocol::<SimpleFileSystem>() {
+                state.drive_handles.push((String::from("dsk0"), fs_handle));
+                state.device_map.push((String::from("dsk0"), String::from("SimpleFileSystem Root")));
             }
         }
 
@@ -301,7 +361,8 @@ impl FileSystem {
     }
 
     pub fn mkdir(path: &str) -> Result<(), &'static str> {
-        let mut root = Self::get_root(None)?;
+        let drive = Self::extract_drive_prefix(path);
+        let mut root = Self::get_root(drive.as_deref())?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
         root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::DIRECTORY)
@@ -310,7 +371,8 @@ impl FileSystem {
     }
 
     pub fn touch(path: &str) -> Result<(), &'static str> {
-        let mut root = Self::get_root(None)?;
+        let drive = Self::extract_drive_prefix(path);
+        let mut root = Self::get_root(drive.as_deref())?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
         // 1. Open/create the file
@@ -318,17 +380,16 @@ impl FileSystem {
             .map_err(|_| "Failed to create file")?;
 
         // 2. Explicitly flush or close the file to save it to disk
-        // Note: Replace '.close()' with whatever method your crate uses (e.g., .flush())
         file.close();
 
         Ok(())
     }
 
     pub fn create(path: &str) -> Result<FileHandle, &'static str> {
-        let mut root = Self::get_root(None)?;
+        let drive = Self::extract_drive_prefix(path);
+        let mut root = Self::get_root(drive.as_deref())?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
-        // Store the handle in a variable instead of discarding it
         let file = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
             .map_err(|_| "Failed to create file")?;
 
@@ -337,7 +398,8 @@ impl FileSystem {
 
 
     pub fn copy(src: &str, dst: &str) -> Result<(), &'static str> {
-        let mut root = Self::get_root(None)?;
+        let src_drive = Self::extract_drive_prefix(src);
+        let mut root = Self::get_root(src_drive.as_deref())?;
 
         // Open and read source
         let src_cstr = Self::path_to_cstr16(src)?;
@@ -361,30 +423,17 @@ impl FileSystem {
     }
 
     pub fn rename(src: &str, dst: &str) -> Result<(), &'static str> {
-        let mut root = Self::get_root(None)?;
+        let src_drive = Self::extract_drive_prefix(src);
+        let mut root = Self::get_root(src_drive.as_deref())?;
         let src_cstr = Self::path_to_cstr16(src)?;
         
         // Open the source file or directory
         let mut handle = root.open(src_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
             .map_err(|_| "Failed to open source for rename")?;
         
-        // Get current info
         let mut info_buffer = [0u8; 1024];
         let info = handle.get_info::<FileInfo>(&mut info_buffer)
             .map_err(|_| "Failed to get file info for rename")?;
-        
-        // Create new info with the new name
-        // UEFI rename is done by calling set_info with a new FileInfo containing the new name
-        let dst_path = Self::resolve_path(dst);
-        let dst_cstr = Self::path_to_cstr16(&dst_path)?;
-        
-        // We need to construct a new FileInfo or modify the existing one in the buffer
-        // The uefi-rs FileInfo is a variable-sized struct.
-        // For simplicity and safety in this environment, we'll use copy + remove if set_info is tricky,
-        // but let's try to do it properly if possible.
-        // Actually, many UEFI implementations have issues with set_info(FileInfo).
-        // A safer "rename" that works across all environments is just copy + remove for files
-        // and clone_dir + remove for directories.
         
         let is_dir = info.attribute().contains(FileAttribute::DIRECTORY);
         
@@ -402,7 +451,8 @@ impl FileSystem {
     }
 
     pub fn remove_dir(path: &str) -> Result<(), &'static str> {
-        let mut root = Self::get_root(None)?;
+        let drive = Self::extract_drive_prefix(path);
+        let mut root = Self::get_root(drive.as_deref())?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
         let handle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
@@ -414,7 +464,8 @@ impl FileSystem {
     }
 
     pub fn remove(path: &str) -> Result<(), &'static str> {
-        let mut root = Self::get_root(None)?;
+        let drive = Self::extract_drive_prefix(path);
+        let mut root = Self::get_root(drive.as_deref())?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
         let handle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
@@ -426,7 +477,8 @@ impl FileSystem {
     }
 
     pub fn cat(path: &str) -> Result<(), &'static str> {
-        let mut root = Self::get_root(None)?;
+        let drive = Self::extract_drive_prefix(path);
+        let mut root = Self::get_root(drive.as_deref())?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
         let handle = root.open(path_cstr, FileMode::Read, FileAttribute::empty()).map_err(|_| "Open failed")?;
@@ -452,7 +504,8 @@ impl FileSystem {
 
     pub fn clone_dir(src: &str, dst: &str) -> Result<(), &'static str> {
         Self::mkdir(dst)?;
-        let mut root = Self::get_root(None)?;
+        let src_drive = Self::extract_drive_prefix(src);
+        let mut root = Self::get_root(src_drive.as_deref())?;
         let src_cstr = Self::path_to_cstr16(src)?;
 
         let src_handle = root.open(src_cstr, FileMode::Read, FileAttribute::empty()).map_err(|_| "Open src dir failed")?;
@@ -482,7 +535,8 @@ impl FileSystem {
     }
 
     pub fn write_to_file(path: &str, data: &str, mode: char) -> Result<(), &'static str> {
-        let mut root = Self::get_root(None)?;
+        let drive = Self::extract_drive_prefix(path);
+        let mut root = Self::get_root(drive.as_deref())?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
         let handle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
@@ -497,7 +551,8 @@ impl FileSystem {
     }
 
     pub fn write_to_file_bytes(path: &str, data: &[u8], mode: char) -> Result<(), &'static str> {
-        let mut root = Self::get_root(None)?;
+        let drive = Self::extract_drive_prefix(path);
+        let mut root = Self::get_root(drive.as_deref())?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
         let handle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
@@ -512,7 +567,8 @@ impl FileSystem {
     }
 
     pub fn write_to_file_bytes_position(path: &str, data: &[u8], position: u64) -> Result<(), &'static str> {
-        let mut root = Self::get_root(None)?;
+        let drive = Self::extract_drive_prefix(path);
+        let mut root = Self::get_root(drive.as_deref())?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
         let handle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
@@ -524,7 +580,8 @@ impl FileSystem {
         Ok(())
     }
     pub fn read_from_file_bytes_position(path: &str, buffer: &mut [u8], position: u64) -> Result<(), &'static str> {
-        let mut root = Self::get_root(None)?;
+        let drive = Self::extract_drive_prefix(path);
+        let mut root = Self::get_root(drive.as_deref())?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
         let handle = root.open(path_cstr, FileMode::Read, FileAttribute::empty())
@@ -539,9 +596,28 @@ impl FileSystem {
 
     // --- Private Helpers ---
 
+    pub fn extract_drive_prefix(path: &str) -> Option<String> {
+        let input = path.replace('/', "\\");
+        if let Some(colon_idx) = input.find(':') {
+            Some(input[..colon_idx].to_string())
+        } else {
+            None
+        }
+    }
+
     fn path_to_cstr16(path: &str) -> Result<&CStr16, &'static str> {
         let resolved = Self::resolve_path(path);
-        let mut u16_path: Vec<u16> = resolved.encode_utf16().collect();
+        let sub_path = if let Some(colon_idx) = resolved.find(':') {
+            &resolved[colon_idx + 1..]
+        } else {
+            &resolved
+        };
+        let formatted = if sub_path.is_empty() {
+            "\\"
+        } else {
+            sub_path
+        };
+        let mut u16_path: Vec<u16> = formatted.encode_utf16().collect();
         u16_path.push(0);
         // Leak the vector to get a 'static reference (common in UEFI no_std logic for CStr16)
         let leaked = Box::leak(u16_path.into_boxed_slice());

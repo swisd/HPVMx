@@ -54,6 +54,17 @@ pub struct DeviceCategory {
     pub icon: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct DiskTabInfo {
+    pub alias: String,
+    pub volume_label: String,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+    pub block_size: u32,
+    pub media_type: String,
+    pub handle: Option<uefi::Handle>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FilePendingAction {
     Rename,
@@ -77,6 +88,8 @@ pub struct DashboardUI {
     pub current_path: String,
     pub files: Vec<FileEntry>,
     pub selected_file_idx: usize,
+    pub storage_disks: Vec<DiskTabInfo>,
+    pub selected_disk_idx: usize,
     pub categories: Vec<DeviceCategory>,
     pub selected_device_idx: usize,
     pub device_action_idx: usize,
@@ -460,6 +473,8 @@ impl DashboardUI {
             current_path: String::from("\\"),
             files: Vec::new(),
             selected_file_idx: 0,
+            storage_disks: Vec::new(),
+            selected_disk_idx: 0,
             categories: Vec::new(),
             selected_device_idx: 0,
             device_action_idx: 0,
@@ -1477,16 +1492,58 @@ impl DashboardUI {
                             }
                         }
                         DashboardTab::Storage => {
-                            // Title and path
                             let base_y = content_top + margin;
-                            pg.draw_text(margin, base_y - 4, "File Explorer", 0x00FF00);
-                            pg.draw_text(margin, base_y + 8, &alloc::format!("Path: {}", self.current_path), 0xAAAAAA);
+                            pg.draw_text(margin, base_y - 4, "Storage & Disk Explorer", 0x00FF00);
+
+                            // Render Disk Tabs for individual disks
+                            let disk_tab_y = base_y + 12;
+                            let mut tab_x = margin;
+                            for (d_idx, disk) in self.storage_disks.iter().enumerate() {
+                                let is_active = d_idx == self.selected_disk_idx;
+                                let label_text = if !disk.volume_label.is_empty() {
+                                    format!("{}: [{}]", disk.alias, disk.volume_label)
+                                } else if disk.total_bytes > 0 {
+                                    let size_str = if disk.total_bytes >= 1024 * 1024 * 1024 {
+                                        format!("{}GB", disk.total_bytes / (1024 * 1024 * 1024))
+                                    } else {
+                                        format!("{}MB", disk.total_bytes / (1024 * 1024))
+                                    };
+                                    format!("{}: ({})", disk.alias, size_str)
+                                } else {
+                                    format!("{}: {}", disk.alias, disk.media_type)
+                                };
+
+                                let tab_w = (label_text.len() * 8 + 16).max(84);
+                                let bg = if is_active { 0x0055AA } else { 0x2A2A2A };
+                                let border = if is_active { 0x00AAFF } else { 0x555555 };
+                                let text_color = if is_active { 0xFFFFFF } else { 0xAAAAAA };
+
+                                pg.fill_rect(tab_x, disk_tab_y, tab_w, 20, bg);
+                                pg.draw_rect_outline(tab_x, disk_tab_y, tab_w, 20, border);
+                                pg.draw_text(tab_x + 8, disk_tab_y + 3, &label_text, text_color);
+
+                                tab_x += tab_w + 6;
+                            }
+
+                            // Current path and disk summary
+                            let path_y = disk_tab_y + 24;
+                            pg.draw_text(margin, path_y, &alloc::format!("Path: {}", self.current_path), 0x00EEEE);
+                            if let Some(disk) = self.storage_disks.get(self.selected_disk_idx) {
+                                let disk_summary = if disk.total_bytes > 0 {
+                                    let total_mb = disk.total_bytes / (1024 * 1024);
+                                    let free_mb = disk.free_bytes / (1024 * 1024);
+                                    format!("Type: {} | Free: {} MB / {} MB", disk.media_type, free_mb, total_mb)
+                                } else {
+                                    format!("Type: {}", disk.media_type)
+                                };
+                                pg.draw_text(margin + 360, path_y, &disk_summary, 0x88CC88);
+                            }
 
                             // Table area
                             let list_x = margin;
-                            let list_y = base_y + 28;
+                            let list_y = path_y + 18;
                             let list_w = core::cmp::min(width - margin * 2, 720);
-                            let list_h = core::cmp::min(height - list_y - 90, 460);
+                            let list_h = core::cmp::min(height.saturating_sub(list_y + 90), 440);
                             pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
 
                             // Header row with better spacing and column guides
@@ -1584,7 +1641,7 @@ impl DashboardUI {
                                 pg.draw_text(action_x + 6, action_y + 4, action, 0xFFFFFF);
                                 action_x += 100;
                             }
-                            pg.draw_text(margin, action_y + 34, "LEFT/RIGHT chooses action, END runs it; rename/copy/move/delete ask for confirmation", 0x888888);
+                            pg.draw_text(margin, action_y + 34, "[ / ] Switch Disk Tab | LEFT/RIGHT Select Action | END Run Action | ESC Cancel", 0x888888);
                             pg.draw_text(margin, action_y + 52, &self.status_line, 0xFFFF00);
                         }
                         DashboardTab::Test => {
@@ -2211,21 +2268,72 @@ impl DashboardUI {
                 .count()
         }
 
+        pub fn select_disk_tab(&mut self, idx: usize) {
+            if idx < self.storage_disks.len() {
+                self.selected_disk_idx = idx;
+                let alias = self.storage_disks[idx].alias.clone();
+                self.current_path = format!("{}:\\", alias);
+                self.selected_file_idx = 0;
+                self.refresh_storage();
+            }
+        }
+
         pub fn refresh_devices(&mut self) {
             self.pci_devices = crate::hardware::pci::scan_bus();
             let device_map = &crate::filesystem::FileSystem::get_state().device_map;
 
             // Group devices by categories
-            let mut disks = Vec::new();
-            let mut nets = Vec::new();
-            let mut usbs = Vec::new();
-            let mut coms = Vec::new();
-            let mut pcis = Vec::new();
-            let mut others = Vec::new();
+            let mut storage_entries = Vec::new();
+            let mut net_entries = Vec::new();
+            let mut display_entries = Vec::new();
+            let mut usb_entries = Vec::new();
+            let mut serial_entries = Vec::new();
+            let mut bridge_entries = Vec::new();
+            let mut audio_entries = Vec::new();
+            let mut pci_all_entries = Vec::new();
+            let mut other_entries = Vec::new();
 
+            // Map UEFI devices
             for (alias, path) in device_map {
                 let entry = DeviceEntry { name: alias.clone(), path: path.clone() };
-                if alias.starts_with("dsk") { disks.push(entry); } else if alias.starts_with("net") { nets.push(entry); } else if alias.starts_with("usb") { usbs.push(entry); } else if alias.starts_with("com") { coms.push(entry); } else if alias.starts_with("pci") { pcis.push(entry); } else { others.push(entry); }
+                if alias.starts_with("dsk") {
+                    storage_entries.push(entry);
+                } else if alias.starts_with("net") {
+                    net_entries.push(entry);
+                } else if alias.starts_with("usb") {
+                    usb_entries.push(entry);
+                } else if alias.starts_with("com") {
+                    serial_entries.push(entry);
+                } else if alias.starts_with("acpi") {
+                    bridge_entries.push(entry);
+                } else if alias.starts_with("pci") {
+                    pci_all_entries.push(entry);
+                } else {
+                    other_entries.push(entry);
+                }
+            }
+
+            // Classify PCI devices into corresponding categories as well as full PCI list
+            for pci in &self.pci_devices {
+                let addr = format!("{:02X}:{:02X}.{}", pci.bus, pci.device, pci.function);
+                let desc = format!("{} [{:04X}:{:04X}] - {}", pci.device_name(), pci.vendor_id, pci.device_id, pci.subclass_name());
+                let pci_item = DeviceEntry {
+                    name: addr,
+                    path: desc,
+                };
+
+                match pci.class_id {
+                    0x01 => storage_entries.push(pci_item.clone()),
+                    0x02 => net_entries.push(pci_item.clone()),
+                    0x03 => display_entries.push(pci_item.clone()),
+                    0x04 => audio_entries.push(pci_item.clone()),
+                    0x06 | 0x08 => bridge_entries.push(pci_item.clone()),
+                    0x07 => serial_entries.push(pci_item.clone()),
+                    0x0C => usb_entries.push(pci_item.clone()),
+                    _ => other_entries.push(pci_item.clone()),
+                }
+
+                pci_all_entries.push(pci_item);
             }
 
             // Preserve expansion state if categories already exist
@@ -2235,57 +2343,74 @@ impl DashboardUI {
             }
 
             self.categories.clear();
-            if !disks.is_empty() {
+            if !storage_entries.is_empty() {
                 self.categories.push(DeviceCategory {
-                    name: String::from("Disk Drives"),
-                    devices: disks,
-                    expanded: *expanded_map.get("Disk Drives").unwrap_or(&true),
+                    name: String::from("Storage Controllers & Drives"),
+                    devices: storage_entries,
+                    expanded: *expanded_map.get("Storage Controllers & Drives").unwrap_or(&true),
                     icon: String::from("[D] "),
                 });
             }
-            if !nets.is_empty() {
+            if !net_entries.is_empty() {
                 self.categories.push(DeviceCategory {
                     name: String::from("Network Adapters"),
-                    devices: nets,
+                    devices: net_entries,
                     expanded: *expanded_map.get("Network Adapters").unwrap_or(&true),
                     icon: String::from("[N] "),
                 });
             }
-            if !usbs.is_empty() {
+            if !display_entries.is_empty() {
                 self.categories.push(DeviceCategory {
-                    name: String::from("USB Controllers"),
-                    devices: usbs,
-                    expanded: *expanded_map.get("USB Controllers").unwrap_or(&true),
+                    name: String::from("Display & Graphics"),
+                    devices: display_entries,
+                    expanded: *expanded_map.get("Display & Graphics").unwrap_or(&true),
+                    icon: String::from("[G] "),
+                });
+            }
+            if !usb_entries.is_empty() {
+                self.categories.push(DeviceCategory {
+                    name: String::from("USB & Serial Bus Controllers"),
+                    devices: usb_entries,
+                    expanded: *expanded_map.get("USB & Serial Bus Controllers").unwrap_or(&true),
                     icon: String::from("[U] "),
                 });
             }
-            if !coms.is_empty() {
+            if !audio_entries.is_empty() {
                 self.categories.push(DeviceCategory {
-                    name: String::from("Serial Ports"),
-                    devices: coms,
-                    expanded: *expanded_map.get("Serial Ports").unwrap_or(&true),
+                    name: String::from("Multimedia & Audio"),
+                    devices: audio_entries,
+                    expanded: *expanded_map.get("Multimedia & Audio").unwrap_or(&true),
+                    icon: String::from("[A] "),
+                });
+            }
+            if !serial_entries.is_empty() {
+                self.categories.push(DeviceCategory {
+                    name: String::from("Serial & Communication Ports"),
+                    devices: serial_entries,
+                    expanded: *expanded_map.get("Serial & Communication Ports").unwrap_or(&true),
                     icon: String::from("[C] "),
                 });
             }
-            if !pcis.is_empty() || !self.pci_devices.is_empty() {
-                let mut pci_entries = pcis;
-                for pci in &self.pci_devices {
-                    pci_entries.push(DeviceEntry {
-                        name: format!("{:02X}:{:02X}.{}", pci.bus, pci.device, pci.function),
-                        path: format!("{} [0x{:04X}:0x{:04X}]", pci.class_name(), pci.vendor_id, pci.device_id),
-                    });
-                }
+            if !bridge_entries.is_empty() {
                 self.categories.push(DeviceCategory {
-                    name: String::from("PCI Devices"),
-                    devices: pci_entries,
-                    expanded: *expanded_map.get("PCI Devices").unwrap_or(&false),
+                    name: String::from("Bridges & System Peripherals"),
+                    devices: bridge_entries,
+                    expanded: *expanded_map.get("Bridges & System Peripherals").unwrap_or(&false),
+                    icon: String::from("[B] "),
+                });
+            }
+            if !pci_all_entries.is_empty() {
+                self.categories.push(DeviceCategory {
+                    name: String::from("All PCI Bus Devices"),
+                    devices: pci_all_entries,
+                    expanded: *expanded_map.get("All PCI Bus Devices").unwrap_or(&false),
                     icon: String::from("[P] "),
                 });
             }
-            if !others.is_empty() {
+            if !other_entries.is_empty() {
                 self.categories.push(DeviceCategory {
                     name: String::from("Other Devices"),
-                    devices: others,
+                    devices: other_entries,
                     expanded: *expanded_map.get("Other Devices").unwrap_or(&false),
                     icon: String::from("[?] "),
                 });
@@ -2298,55 +2423,188 @@ impl DashboardUI {
 
             self.files.clear();
 
-            let handle = match uefi::boot::get_handle_for_protocol::<SimpleFileSystem>() {
-                Ok(h) => h,
-                Err(_) => {
+            // Refresh and query all detected disk filesystems
+            let fs_handles = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::ByProtocol(&SimpleFileSystem::GUID))
+                .map(|hb| hb.to_vec())
+                .unwrap_or_default();
+
+            let fs_state = crate::filesystem::FileSystem::get_state();
+            let mut detected_disks = Vec::new();
+            let mut disk_handles: Vec<(String, uefi::Handle)> = Vec::new();
+
+            for (alias, handle) in &fs_state.drive_handles {
+                if alias.starts_with("dsk") && !disk_handles.iter().any(|(_, h)| *h == *handle) {
+                    disk_handles.push((alias.clone(), *handle));
+                }
+            }
+
+            for handle in &fs_handles {
+                if !disk_handles.iter().any(|(_, h)| *h == *handle) {
+                    disk_handles.push((format!("dsk{}", disk_handles.len()), *handle));
+                }
+            }
+
+            if disk_handles.is_empty() {
+                if let Ok(h) = uefi::boot::get_handle_for_protocol::<SimpleFileSystem>() {
+                    disk_handles.push((String::from("dsk0"), h));
+                }
+            }
+
+            for (alias, handle) in &disk_handles {
+                let mut volume_label = String::new();
+                let mut total_bytes = 0u64;
+                let mut free_bytes = 0u64;
+                let mut block_size = 512u32;
+                let mut media_type = String::from("Storage Volume");
+
+                let dp_res = unsafe {
+                    uefi::boot::open_protocol::<uefi::proto::device_path::DevicePath>(
+                        uefi::boot::OpenProtocolParams {
+                            handle: *handle,
+                            agent: uefi::boot::image_handle(),
+                            controller: None,
+                        },
+                        uefi::boot::OpenProtocolAttributes::GetProtocol,
+                    )
+                };
+
+                if let Ok(dp) = dp_res {
+                    for node in dp.node_iter() {
+                        use uefi_raw::protocol::device_path::{DeviceType, DeviceSubType};
+                        match (node.device_type(), node.sub_type()) {
+                            (DeviceType::MESSAGING, DeviceSubType::MESSAGING_NVME_NAMESPACE) => {
+                                media_type = String::from("NVMe SSD");
+                            }
+                            (DeviceType::MESSAGING, DeviceSubType::MESSAGING_SATA) => {
+                                media_type = String::from("SATA AHCI");
+                            }
+                            (DeviceType::MESSAGING, DeviceSubType::MESSAGING_USB)
+                            | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_USB_CLASS) => {
+                                media_type = String::from("USB Drive");
+                            }
+                            (DeviceType::MEDIA, DeviceSubType::MEDIA_CD_ROM) => {
+                                media_type = String::from("CD/DVD-ROM");
+                            }
+                            (DeviceType::MEDIA, DeviceSubType::MEDIA_RAM_DISK) => {
+                                media_type = String::from("RAM Disk");
+                            }
+                            (DeviceType::MEDIA, DeviceSubType::MEDIA_HARD_DRIVE) => {
+                                if media_type == "Storage Volume" {
+                                    media_type = String::from("Hard Disk");
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                if let Ok(mut sfs) = uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(*handle) {
+                    if let Ok(mut root_dir) = sfs.open_volume() {
+                        let mut info_buf = [0u8; 1024];
+                        if let Ok(fs_info) = root_dir.get_info::<uefi::proto::media::file::FileSystemInfo>(&mut info_buf) {
+                            volume_label = fs_info.volume_label().to_string();
+                            total_bytes = fs_info.volume_size();
+                            free_bytes = fs_info.free_space();
+                            block_size = fs_info.block_size();
+                        }
+                    }
+                }
+
+                detected_disks.push(DiskTabInfo {
+                    alias: alias.clone(),
+                    volume_label,
+                    total_bytes,
+                    free_bytes,
+                    block_size,
+                    media_type,
+                    handle: Some(*handle),
+                });
+            }
+
+            if detected_disks.is_empty() {
+                detected_disks.push(DiskTabInfo {
+                    alias: String::from("dsk0"),
+                    volume_label: String::from("System"),
+                    total_bytes: 0,
+                    free_bytes: 0,
+                    block_size: 512,
+                    media_type: String::from("Default Volume"),
+                    handle: None,
+                });
+            }
+
+            self.storage_disks = detected_disks;
+
+            if self.selected_disk_idx >= self.storage_disks.len() {
+                self.selected_disk_idx = self.storage_disks.len().saturating_sub(1);
+            }
+
+            let active_disk = self.storage_disks.get(self.selected_disk_idx);
+            let disk_handle = active_disk.and_then(|d| d.handle);
+            let sfs_handle = disk_handle.or_else(|| uefi::boot::get_handle_for_protocol::<SimpleFileSystem>().ok());
+
+            let handle = match sfs_handle {
+                Some(h) => h,
+                None => {
                     self.ui_error(27);
                     return;
-                },
+                }
             };
+
             let mut sfs = match uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle) {
                 Ok(s) => s,
                 Err(_) => {
                     self.ui_error(19);
                     return;
-                },
+                }
             };
+
             let mut root_dir = match sfs.open_volume() {
                 Ok(d) => d,
                 Err(_) => {
                     self.ui_error(28);
                     return;
-                },
+                }
             };
 
-            let mut target_dir = if self.current_path == "\\" || self.current_path == "/" {
+            let sub_path = if let Some(colon_idx) = self.current_path.find(':') {
+                &self.current_path[colon_idx + 1..]
+            } else {
+                &self.current_path
+            };
+
+            let mut target_dir = if sub_path == "\\" || sub_path == "/" || sub_path.is_empty() {
                 root_dir
             } else {
-                let mut u16_path: Vec<u16> = self.current_path.encode_utf16().collect();
-                u16_path.push(0);
-                let path_cstr = match uefi::data_types::CStr16::from_u16_with_nul(&u16_path) {
-                    Ok(c) => c,
-                    Err(_) => {
-                        self.ui_error(24);
-                        return;
-                    },
-                };
+                let clean_path = sub_path.trim_start_matches('\\').trim_start_matches('/');
+                if clean_path.is_empty() {
+                    root_dir
+                } else {
+                    let mut u16_path: Vec<u16> = clean_path.encode_utf16().collect();
+                    u16_path.push(0);
+                    let path_cstr = match uefi::data_types::CStr16::from_u16_with_nul(&u16_path) {
+                        Ok(c) => c,
+                        Err(_) => {
+                            self.ui_error(24);
+                            return;
+                        }
+                    };
 
-                let handle = match root_dir.open(path_cstr, FileMode::Read, FileAttribute::DIRECTORY) {
-                    Ok(h) => h,
-                    Err(_) => {
-                        self.ui_error(10);
-                        return;
-                    },
-                };
+                    let handle = match root_dir.open(path_cstr, FileMode::Read, FileAttribute::DIRECTORY) {
+                        Ok(h) => h,
+                        Err(_) => {
+                            self.ui_error(10);
+                            return;
+                        }
+                    };
 
-                match handle.into_directory() {
-                    Some(d) => d,
-                    None => {
-                        self.ui_error(28);
-                        return;
-                    },
+                    match handle.into_directory() {
+                        Some(d) => d,
+                        None => {
+                            self.ui_error(28);
+                            return;
+                        }
+                    }
                 }
             };
 
@@ -3293,6 +3551,43 @@ impl DashboardUI {
                     }
 
                     match key {
+                        Key::Printable(c) => {
+                            let ch = char::from(c);
+                            if ch == '[' || ch == '{' {
+                                if self.selected_disk_idx > 0 {
+                                    self.select_disk_tab(self.selected_disk_idx - 1);
+                                }
+                            } else if ch == ']' || ch == '}' {
+                                if self.selected_disk_idx + 1 < self.storage_disks.len() {
+                                    self.select_disk_tab(self.selected_disk_idx + 1);
+                                }
+                            } else if ch >= '1' && ch <= '9' {
+                                let idx = (ch as u8 - b'1') as usize;
+                                if idx < self.storage_disks.len() {
+                                    self.select_disk_tab(idx);
+                                }
+                            } else if ch == '\t' {
+                                if !self.storage_disks.is_empty() {
+                                    let next = (self.selected_disk_idx + 1) % self.storage_disks.len();
+                                    self.select_disk_tab(next);
+                                }
+                            } else if ch == '\r' || ch == '\n' {
+                                let saved_action = self.filesys_action_idx;
+                                self.filesys_action_idx = 0;
+                                self.handle_input(Key::Special(ScanCode::END));
+                                self.filesys_action_idx = saved_action;
+                            }
+                        }
+                        Key::Special(ScanCode::PAGE_UP) => {
+                            if self.selected_disk_idx > 0 {
+                                self.select_disk_tab(self.selected_disk_idx - 1);
+                            }
+                        }
+                        Key::Special(ScanCode::PAGE_DOWN) => {
+                            if self.selected_disk_idx + 1 < self.storage_disks.len() {
+                                self.select_disk_tab(self.selected_disk_idx + 1);
+                            }
+                        }
                         Key::Special(ScanCode::LEFT) => {
                             if self.filesys_action_idx >= 1 { self.filesys_action_idx -= 1 } else { self.filesys_action_idx = 0 }
                         }
@@ -3388,8 +3683,14 @@ impl DashboardUI {
                                             return;
                                         } else if entry.name == ".." {
                                             if let Some(pos) = self.current_path.rfind('\\') {
-                                                if pos == 0 {
-                                                    self.current_path = String::from("\\");
+                                                let colon_pos = self.current_path.find(':');
+                                                let min_pos = if let Some(cp) = colon_pos { cp + 1 } else { 0 };
+                                                if pos <= min_pos {
+                                                    if let Some(cp) = colon_pos {
+                                                        self.current_path = format!("{}:\\", &self.current_path[..cp]);
+                                                    } else {
+                                                        self.current_path = String::from("\\");
+                                                    }
                                                 } else {
                                                     self.current_path.truncate(pos);
                                                 }
@@ -4204,6 +4505,30 @@ impl DashboardUI {
                     else if x < 880 { self.selected_tab = DashboardTab::Settings; }
                     else if x < 980 { self.selected_tab = DashboardTab::Packages; }
                     else if x < 1080 { self.selected_tab = DashboardTab::Apps; }
+                } else if matches!(self.selected_tab, DashboardTab::Storage) {
+                    if self.cursor.y >= 96 && self.cursor.y <= 130 {
+                        let mut tab_x = 16usize;
+                        for (d_idx, disk) in self.storage_disks.iter().enumerate() {
+                            let label_text = if !disk.volume_label.is_empty() {
+                                format!("{}: [{}]", disk.alias, disk.volume_label)
+                            } else if disk.total_bytes > 0 {
+                                let size_str = if disk.total_bytes >= 1024 * 1024 * 1024 {
+                                    format!("{}GB", disk.total_bytes / (1024 * 1024 * 1024))
+                                } else {
+                                    format!("{}MB", disk.total_bytes / (1024 * 1024))
+                                };
+                                format!("{}: ({})", disk.alias, size_str)
+                            } else {
+                                format!("{}: {}", disk.alias, disk.media_type)
+                            };
+                            let tab_w = (label_text.len() * 8 + 16).max(84);
+                            if self.cursor.x >= tab_x && self.cursor.x <= tab_x + tab_w {
+                                self.select_disk_tab(d_idx);
+                                break;
+                            }
+                            tab_x += tab_w + 6;
+                        }
+                    }
                 }
             }
         }

@@ -3,8 +3,9 @@ use alloc::fmt::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::proto::console::text::{Key, ScanCode};
+use uefi::Identify;
 use crate::env::{AppInfo, Environment, Runnable};
-use crate::ui::{pixel_graphics, DashboardTab, EditorMode, FileEntry, FilePendingAction, TextEditor};
+use crate::ui::{pixel_graphics, DashboardTab, EditorMode, FileEntry, FilePendingAction, TextEditor, DiskTabInfo};
 use crate::ui::pixel_graphics::PixelGraphics;
 use crate::vdebug;
 
@@ -13,6 +14,8 @@ pub struct X_Storage {
     pub current_path: String,
     pub files: Vec<FileEntry>,
     pub selected_file_idx: usize,
+    pub storage_disks: Vec<DiskTabInfo>,
+    pub selected_disk_idx: usize,
     pub filesys_action_idx: usize,
     pub filesys_pending_action: Option<FilePendingAction>,
     pub status_line: String,
@@ -25,10 +28,22 @@ impl X_Storage {
             current_path: "/".to_string(),
             files: vec![],
             selected_file_idx: 0,
+            storage_disks: vec![],
+            selected_disk_idx: 0,
             filesys_action_idx: 0,
             filesys_pending_action: None,
             status_line: "".to_string(),
             filesys_new_counter: 0,
+        }
+    }
+
+    pub fn select_disk_tab(&mut self, idx: usize) {
+        if idx < self.storage_disks.len() {
+            self.selected_disk_idx = idx;
+            let alias = self.storage_disks[idx].alias.clone();
+            self.current_path = format!("{}:\\", alias);
+            self.selected_file_idx = 0;
+            self.refresh_storage();
         }
     }
 
@@ -38,55 +53,188 @@ impl X_Storage {
 
         self.files.clear();
 
-        let handle = match uefi::boot::get_handle_for_protocol::<SimpleFileSystem>() {
-            Ok(h) => h,
-            Err(_) => {
+        // Refresh and query all detected disk filesystems
+        let fs_handles = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::ByProtocol(&SimpleFileSystem::GUID))
+            .map(|hb| hb.to_vec())
+            .unwrap_or_default();
+
+        let fs_state = crate::filesystem::FileSystem::get_state();
+        let mut detected_disks = Vec::new();
+        let mut disk_handles: Vec<(String, uefi::Handle)> = Vec::new();
+
+        for (alias, handle) in &fs_state.drive_handles {
+            if alias.starts_with("dsk") && !disk_handles.iter().any(|(_, h)| *h == *handle) {
+                disk_handles.push((alias.clone(), *handle));
+            }
+        }
+
+        for handle in &fs_handles {
+            if !disk_handles.iter().any(|(_, h)| *h == *handle) {
+                disk_handles.push((format!("dsk{}", disk_handles.len()), *handle));
+            }
+        }
+
+        if disk_handles.is_empty() {
+            if let Ok(h) = uefi::boot::get_handle_for_protocol::<SimpleFileSystem>() {
+                disk_handles.push((String::from("dsk0"), h));
+            }
+        }
+
+        for (alias, handle) in &disk_handles {
+            let mut volume_label = String::new();
+            let mut total_bytes = 0u64;
+            let mut free_bytes = 0u64;
+            let mut block_size = 512u32;
+            let mut media_type = String::from("Storage Volume");
+
+            let dp_res = unsafe {
+                uefi::boot::open_protocol::<uefi::proto::device_path::DevicePath>(
+                    uefi::boot::OpenProtocolParams {
+                        handle: *handle,
+                        agent: uefi::boot::image_handle(),
+                        controller: None,
+                    },
+                    uefi::boot::OpenProtocolAttributes::GetProtocol,
+                )
+            };
+
+            if let Ok(dp) = dp_res {
+                for node in dp.node_iter() {
+                    use uefi_raw::protocol::device_path::{DeviceType, DeviceSubType};
+                    match (node.device_type(), node.sub_type()) {
+                        (DeviceType::MESSAGING, DeviceSubType::MESSAGING_NVME_NAMESPACE) => {
+                            media_type = String::from("NVMe SSD");
+                        }
+                        (DeviceType::MESSAGING, DeviceSubType::MESSAGING_SATA) => {
+                            media_type = String::from("SATA AHCI");
+                        }
+                        (DeviceType::MESSAGING, DeviceSubType::MESSAGING_USB)
+                        | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_USB_CLASS) => {
+                            media_type = String::from("USB Drive");
+                        }
+                        (DeviceType::MEDIA, DeviceSubType::MEDIA_CD_ROM) => {
+                            media_type = String::from("CD/DVD-ROM");
+                        }
+                        (DeviceType::MEDIA, DeviceSubType::MEDIA_RAM_DISK) => {
+                            media_type = String::from("RAM Disk");
+                        }
+                        (DeviceType::MEDIA, DeviceSubType::MEDIA_HARD_DRIVE) => {
+                            if media_type == "Storage Volume" {
+                                media_type = String::from("Hard Disk");
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            if let Ok(mut sfs) = uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(*handle) {
+                if let Ok(mut root_dir) = sfs.open_volume() {
+                    let mut info_buf = [0u8; 1024];
+                    if let Ok(fs_info) = root_dir.get_info::<uefi::proto::media::file::FileSystemInfo>(&mut info_buf) {
+                        volume_label = fs_info.volume_label().to_string();
+                        total_bytes = fs_info.volume_size();
+                        free_bytes = fs_info.free_space();
+                        block_size = fs_info.block_size();
+                    }
+                }
+            }
+
+            detected_disks.push(DiskTabInfo {
+                alias: alias.clone(),
+                volume_label,
+                total_bytes,
+                free_bytes,
+                block_size,
+                media_type,
+                handle: Some(*handle),
+            });
+        }
+
+        if detected_disks.is_empty() {
+            detected_disks.push(DiskTabInfo {
+                alias: String::from("dsk0"),
+                volume_label: String::from("System"),
+                total_bytes: 0,
+                free_bytes: 0,
+                block_size: 512,
+                media_type: String::from("Default Volume"),
+                handle: None,
+            });
+        }
+
+        self.storage_disks = detected_disks;
+
+        if self.selected_disk_idx >= self.storage_disks.len() {
+            self.selected_disk_idx = self.storage_disks.len().saturating_sub(1);
+        }
+
+        let active_disk = self.storage_disks.get(self.selected_disk_idx);
+        let disk_handle = active_disk.and_then(|d| d.handle);
+        let sfs_handle = disk_handle.or_else(|| uefi::boot::get_handle_for_protocol::<SimpleFileSystem>().ok());
+
+        let handle = match sfs_handle {
+            Some(h) => h,
+            None => {
                 ui_error(27);
                 return;
-            },
+            }
         };
+
         let mut sfs = match uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle) {
             Ok(s) => s,
             Err(_) => {
                 ui_error(19);
                 return;
-            },
+            }
         };
+
         let mut root_dir = match sfs.open_volume() {
             Ok(d) => d,
             Err(_) => {
                 ui_error(28);
                 return;
-            },
+            }
         };
 
-        let mut target_dir = if self.current_path == "\\" || self.current_path == "/" {
+        let sub_path = if let Some(colon_idx) = self.current_path.find(':') {
+            &self.current_path[colon_idx + 1..]
+        } else {
+            &self.current_path
+        };
+
+        let mut target_dir = if sub_path == "\\" || sub_path == "/" || sub_path.is_empty() {
             root_dir
         } else {
-            let mut u16_path: Vec<u16> = self.current_path.encode_utf16().collect();
-            u16_path.push(0);
-            let path_cstr = match uefi::data_types::CStr16::from_u16_with_nul(&u16_path) {
-                Ok(c) => c,
-                Err(_) => {
-                    ui_error(24);
-                    return;
-                },
-            };
+            let clean_path = sub_path.trim_start_matches('\\').trim_start_matches('/');
+            if clean_path.is_empty() {
+                root_dir
+            } else {
+                let mut u16_path: Vec<u16> = clean_path.encode_utf16().collect();
+                u16_path.push(0);
+                let path_cstr = match uefi::data_types::CStr16::from_u16_with_nul(&u16_path) {
+                    Ok(c) => c,
+                    Err(_) => {
+                        ui_error(24);
+                        return;
+                    }
+                };
 
-            let handle = match root_dir.open(path_cstr, FileMode::Read, FileAttribute::DIRECTORY) {
-                Ok(h) => h,
-                Err(_) => {
-                    ui_error(10);
-                    return;
-                },
-            };
+                let handle = match root_dir.open(path_cstr, FileMode::Read, FileAttribute::DIRECTORY) {
+                    Ok(h) => h,
+                    Err(_) => {
+                        ui_error(10);
+                        return;
+                    }
+                };
 
-            match handle.into_directory() {
-                Some(d) => d,
-                None => {
-                    ui_error(28);
-                    return;
-                },
+                match handle.into_directory() {
+                    Some(d) => d,
+                    None => {
+                        ui_error(28);
+                        return;
+                    }
+                }
             }
         };
 
@@ -148,6 +296,38 @@ impl Runnable for X_Storage {
                     self.filesys_action_idx = 0; // "Open" enters a directory.
                     self.input(Key::Special(ScanCode::END));
                     self.filesys_action_idx = selected_action;
+                }
+            }
+            Key::Printable(c) => {
+                let ch = char::from(c);
+                if ch == '[' || ch == '{' {
+                    if self.selected_disk_idx > 0 {
+                        self.select_disk_tab(self.selected_disk_idx - 1);
+                    }
+                } else if ch == ']' || ch == '}' {
+                    if self.selected_disk_idx + 1 < self.storage_disks.len() {
+                        self.select_disk_tab(self.selected_disk_idx + 1);
+                    }
+                } else if ch >= '1' && ch <= '9' {
+                    let idx = (ch as u8 - b'1') as usize;
+                    if idx < self.storage_disks.len() {
+                        self.select_disk_tab(idx);
+                    }
+                } else if ch == '\t' {
+                    if !self.storage_disks.is_empty() {
+                        let next = (self.selected_disk_idx + 1) % self.storage_disks.len();
+                        self.select_disk_tab(next);
+                    }
+                }
+            }
+            Key::Special(ScanCode::PAGE_UP) => {
+                if self.selected_disk_idx > 0 {
+                    self.select_disk_tab(self.selected_disk_idx - 1);
+                }
+            }
+            Key::Special(ScanCode::PAGE_DOWN) => {
+                if self.selected_disk_idx + 1 < self.storage_disks.len() {
+                    self.select_disk_tab(self.selected_disk_idx + 1);
                 }
             }
             Key::Special(ScanCode::UP) => {
