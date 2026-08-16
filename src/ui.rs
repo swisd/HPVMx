@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 use core::any::Any;
 use core::char;
 use uefi::proto::console::text::{Color, Key, ScanCode};
-use uefi::runtime;
+use uefi::{runtime, Identify};
 use uefi::runtime::VariableKey;
 use uefi_raw::Status;
 use uefi_raw::table::runtime::ResetType;
@@ -2424,39 +2424,49 @@ impl DashboardUI {
             self.files.clear();
 
             // Refresh and query all detected disk filesystems
+            // 1. Gather all SimpleFileSystem handles
             let fs_handles = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::ByProtocol(&SimpleFileSystem::GUID))
                 .map(|hb| hb.to_vec())
                 .unwrap_or_default();
 
-            let fs_state = crate::filesystem::FileSystem::get_state();
-            let mut detected_disks = Vec::new();
-            let mut disk_handles: Vec<(String, uefi::Handle)> = Vec::new();
-
-            for (alias, handle) in &fs_state.drive_handles {
-                if alias.starts_with("dsk") && !disk_handles.iter().any(|(_, h)| *h == *handle) {
-                    disk_handles.push((alias.clone(), *handle));
-                }
+            // Temporary structure to hold metadata before assigning final aliases
+            struct TempDisk {
+                handle: uefi::Handle,
+                volume_label: String,
+                total_bytes: u64,
+                free_bytes: u64,
+                block_size: u32,
+                media_type: String,
             }
+
+            let mut valid_disks = Vec::new();
 
             for handle in &fs_handles {
-                if !disk_handles.iter().any(|(_, h)| *h == *handle) {
-                    disk_handles.push((format!("dsk{}", disk_handles.len()), *handle));
-                }
-            }
-
-            if disk_handles.is_empty() {
-                if let Ok(h) = uefi::boot::get_handle_for_protocol::<SimpleFileSystem>() {
-                    disk_handles.push((String::from("dsk0"), h));
-                }
-            }
-
-            for (alias, handle) in &disk_handles {
                 let mut volume_label = String::new();
                 let mut total_bytes = 0u64;
                 let mut free_bytes = 0u64;
                 let mut block_size = 512u32;
                 let mut media_type = String::from("Storage Volume");
 
+                // Retrieve Volume Label & FileSystem Info
+                if let Ok(mut sfs) = uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(*handle) {
+                    if let Ok(mut root_dir) = sfs.open_volume() {
+                        let mut info_buf = [0u8; 1024];
+                        if let Ok(fs_info) = root_dir.get_info::<uefi::proto::media::file::FileSystemInfo>(&mut info_buf) {
+                            volume_label = fs_info.volume_label().to_string();
+                            total_bytes = fs_info.volume_size();
+                            free_bytes = fs_info.free_space();
+                            block_size = fs_info.block_size();
+                        }
+                    }
+                }
+
+                // Skip entries with no volume label
+                if volume_label.trim().is_empty() {
+                    continue;
+                }
+
+                // Determine Media Type from Device Path
                 let dp_res = unsafe {
                     uefi::boot::open_protocol::<uefi::proto::device_path::DevicePath>(
                         uefi::boot::OpenProtocolParams {
@@ -2498,26 +2508,34 @@ impl DashboardUI {
                     }
                 }
 
-                if let Ok(mut sfs) = uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(*handle) {
-                    if let Ok(mut root_dir) = sfs.open_volume() {
-                        let mut info_buf = [0u8; 1024];
-                        if let Ok(fs_info) = root_dir.get_info::<uefi::proto::media::file::FileSystemInfo>(&mut info_buf) {
-                            volume_label = fs_info.volume_label().to_string();
-                            total_bytes = fs_info.volume_size();
-                            free_bytes = fs_info.free_space();
-                            block_size = fs_info.block_size();
-                        }
-                    }
-                }
-
-                detected_disks.push(DiskTabInfo {
-                    alias: alias.clone(),
+                valid_disks.push(TempDisk {
+                    handle: *handle,
                     volume_label,
                     total_bytes,
                     free_bytes,
                     block_size,
                     media_type,
-                    handle: Some(*handle),
+                });
+            }
+
+            // 2. Sort/Reorder: Put volume labeled "boot" first
+            valid_disks.sort_by(|a, b| {
+                let a_is_boot = a.volume_label.eq_ignore_ascii_case("boot");
+                let b_is_boot = b.volume_label.eq_ignore_ascii_case("boot");
+                b_is_boot.cmp(&a_is_boot)
+            });
+
+            // 3. Construct detected_disks with dsk0 assigned to boot (or first item)
+            let mut detected_disks = Vec::new();
+            for (idx, disk) in valid_disks.into_iter().enumerate() {
+                detected_disks.push(DiskTabInfo {
+                    alias: format!("dsk{}", idx),
+                    volume_label: disk.volume_label,
+                    total_bytes: disk.total_bytes,
+                    free_bytes: disk.free_bytes,
+                    block_size: disk.block_size,
+                    media_type: disk.media_type,
+                    handle: Some(disk.handle),
                 });
             }
 
@@ -2554,7 +2572,7 @@ impl DashboardUI {
             let mut sfs = match uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle) {
                 Ok(s) => s,
                 Err(_) => {
-                    self.ui_error(19);
+                    // self.ui_error(19); skip if device busy
                     return;
                 }
             };
@@ -4522,7 +4540,7 @@ impl DashboardUI {
                                 format!("{}: {}", disk.alias, disk.media_type)
                             };
                             let tab_w = (label_text.len() * 8 + 16).max(84);
-                            if self.cursor.x >= tab_x && self.cursor.x <= tab_x + tab_w {
+                            if self.cursor.x >= tab_x as i32 && self.cursor.x <= (tab_x + tab_w) as i32 {
                                 self.select_disk_tab(d_idx);
                                 break;
                             }

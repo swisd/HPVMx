@@ -34,6 +34,15 @@ pub struct State {
     pub drive_handles: Vec<(String, uefi::Handle)>,
 }
 
+pub struct TempDisk {
+    handle: Handle,
+    volume_label: String,
+    total_bytes: u64,
+    free_bytes: u64,
+    block_size: u32,
+    media_type: String,
+}
+
 
 impl Persistable for State {
     fn magic() -> u32 { 0x54535346 } // "FSST" in hex

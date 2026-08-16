@@ -5,15 +5,23 @@
     window:width="200"
     window:height="200"
     var:position="0"
-    title="window"
+    window:type="app"
+    title="test-window"
     >
     <include source="path" />
+
+    <!-- either micro-c or a custom scripting language -->
     <subscript name="testscript" type="module">
-        <!-- either micro-c or a custom scripting language -->
+        fn add(a, b) {
+            return a + b;
+        }
     </subscript>
     <DisplayGroup name="container">
         <Text position:x="20" position:y="20" color="0xFFFFFF">
             Test Text
+        </Text>
+        <Text position:x="20" position:y="50" color="0xFFFFFF">
+            Add: {testscript::add(1,2)}
         </Text>
     </DisplayGroup>
 </Window>

@@ -37,7 +37,9 @@ impl AppInfo for ErrorApp {
 
 impl RunnableClone for ErrorApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
-        todo!()
+        Box::new(ErrorApp {
+            error: self.error.clone(),
+        })
     }
 }
 
