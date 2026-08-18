@@ -44,6 +44,7 @@ mod registry;
 mod dls;
 mod backgrounds;
 mod xmlui;
+mod multipar;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -70,6 +71,7 @@ use core::fmt::Write;
 use core::ptr::addr_of_mut;
 use core::time::Duration;
 use uefi::prelude::*;
+use uefi::Identify;
 use uefi::Char16;
 use log::error;
 use uefi::boot;
@@ -236,20 +238,8 @@ fn main() -> Status {
     }
 
 
-    // 1. Get all handles
-    let handles = boot::find_handles::<DevicePath>().unwrap();
-
-    // 2. Force UEFI to connect drivers to every handle it finds
-    for handle in handles {
-        let _ = boot::connect_controller(handle, None, None, true);
-    }
-
-    // 3. Now check for SimplePointer again
-    let mouse_handles = boot::find_handles::<SimplePointer>().unwrap_or_default();
-    vdebug!("mouse", "Now found {} pointer handles", mouse_handles.len());
-
     unsafe {
-        init_mouse_deep_scan();
+        init_mouse();
     }
 
     if let Ok(result) = devices::net_hw::init() {
@@ -268,6 +258,12 @@ fn main() -> Status {
     vdebug!("env", "creating globalenv");
     unsafe {
         GLOBALENV = Some(GlobalEnvironment::new());
+    }
+
+    if crate::env::run_async_tests() {
+        crate::vdebug!("async", "async/await multitasking verified");
+    } else {
+        crate::hpvm_error!("async", "async multitasking self-test failed");
     }
 
 
@@ -949,62 +945,65 @@ fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
     }
 }
 
-fn init_mouse() {
-    if let Ok(handle) = boot::get_handle_for_protocol::<SimplePointer>() {
-        let _ = boot::connect_controller(handle, None, None, true);
-        if let Ok(mut mouse) = boot::open_protocol_exclusive::<SimplePointer>(handle) {
+pub fn init_mouse() {
+    unsafe {
+        init_mouse_deep_scan();
+    }
+}
 
-
-            // This is the "magic" line for VirtualBox PS/2
-            // We try non-extended first, then extended if it doesn't fail but isn't working
-            let rx = mouse.reset(false);
-            crate::vdebug!("usbhid", "mouse reset ev=false  {:?}", rx);
-            // Some firmwares require extended verification
-            let ry = mouse.reset(true);
-            crate::vdebug!("usbhid", "mouse reset ev=true  {:?}", ry);
+pub unsafe fn init_mouse_deep_scan() {
+    // 1. Multi-pass connect all controllers (EDK2 BdsConnectAll style)
+    // Connecting PCI controllers creates child USB controller handles;
+    // connecting USB controllers creates child USB device (mouse/tablet) handles.
+    for pass in 0..4 {
+        if let Ok(all_handles) = boot::locate_handle_buffer(boot::SearchType::AllHandles) {
+            crate::vdebug!("usbhid", "ConnectAll pass {}: scanning {} handles", pass, all_handles.len());
+            for handle in all_handles.iter() {
+                let _ = boot::connect_controller(*handle, None, None, true);
+            }
         }
     }
 
-    // Also try to reset AbsolutePointer if present
-    // Since it's a manual protocol in graphics.rs, we use its GUID directly or just skip here
-    // as we don't have easy access to the type without importing it.
-    // Actually, let's keep it simple for now as the Dashboard loop will call update_from_mouse
-    // which will open it.
-}
+    // 2. Scan & reset SimplePointer handles
+    if let Ok(handles) = boot::locate_handle_buffer(boot::SearchType::ByProtocol(&SimplePointer::GUID)) {
+        crate::vdebug!("usbhid", "Found {} SimplePointer handles", handles.len());
 
-unsafe fn init_mouse_deep_scan() {
-    unsafe {
-
-
-        // 1. Force UEFI to connect every device it sees on the PCI/USB bus
-        // This is critical because passed-through USB devices aren't always auto-started
-        if let Ok(all_handles) = boot::find_handles::<DevicePath>() {
-            for handle in all_handles {
-                let _ = boot::connect_controller(handle, None, None, true);
-            }
-        }
-
-        // 2. Now find ALL SimplePointer handles (expecting 2: Virtual and Physical)
-        if let Ok(handles) = boot::find_handles::<SimplePointer>() {
-            crate::vdebug!("usbhid", "Found {} SimplePointer handles", handles.len());
-
-            for (i, handle) in handles.iter().enumerate() {
-                if let Ok(mut mouse) = boot::open_protocol::<SimplePointer>(boot::OpenProtocolParams {
+        for (i, handle) in handles.iter().enumerate() {
+            if let Ok(mut mouse) = boot::open_protocol::<SimplePointer>(
+                boot::OpenProtocolParams {
                     handle: *handle,
                     agent: boot::image_handle(),
                     controller: None,
-                }, boot::OpenProtocolAttributes::GetProtocol) {
+                },
+                boot::OpenProtocolAttributes::GetProtocol,
+            ) {
+                let r = mouse.reset(false);
+                crate::vdebug!("usbhid", "Handle [{}]: Reset result {:?}", i, r);
+                #[allow(irrefutable_let_patterns)]
+                if let mode = mouse.mode() {
+                    crate::vdebug!("usbhid", "Handle [{}]: Res X={}", i, mode.resolution[0]);
+                }
+            }
+        }
+    }
 
-                    let r = mouse.reset(false);
-                    boot::stall(Duration::from_millis(100));
-                    crate::vdebug!("usbhid", "Handle [{}]: Reset result {:?}", i, r);
+    // 3. Scan & reset AbsolutePointer handles
+    if let Ok(handles) = boot::locate_handle_buffer(boot::SearchType::ByProtocol(&crate::graphics::AbsolutePointerProtocol::GUID)) {
+        crate::vdebug!("usbhid", "Found {} AbsolutePointer handles", handles.len());
 
-                    // Read the resolution - physical mice usually have small numbers (1, 2, 4)
-                    // unlike the virtual tablet's 65536
-                    #[allow(irrefutable_let_patterns)]
-                    if let mode = mouse.mode() {
-                        crate::vdebug!("usbhid", "Handle [{}]: Res X={}", i, mode.resolution[0]);
-                    }
+        for (i, handle) in handles.iter().enumerate() {
+            if let Ok(mut mouse) = boot::open_protocol::<crate::graphics::AbsolutePointer>(
+                boot::OpenProtocolParams {
+                    handle: *handle,
+                    agent: boot::image_handle(),
+                    controller: None,
+                },
+                boot::OpenProtocolAttributes::GetProtocol,
+            ) {
+                let r = mouse.reset(false);
+                crate::vdebug!("usbhid", "Abs Handle [{}]: Reset result {:?}", i, r);
+                if let Some(mode) = mouse.mode() {
+                    crate::vdebug!("usbhid", "Abs Handle [{}]: Max X={}, Max Y={}", i, mode.absolute_max_x, mode.absolute_max_y);
                 }
             }
         }

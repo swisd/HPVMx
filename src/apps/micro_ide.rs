@@ -35,6 +35,7 @@ impl MicroIdeApp {
             0 => "x86_64",
             1 => "win64",
             2 => "arm64",
+            3 => "bytecode64",
             _ => "x86_64",
         }
     }
@@ -125,7 +126,7 @@ impl Runnable for MicroIdeApp {
         match key {
             Key::Special(ScanCode::FUNCTION_5) => self.compile(),
             Key::Special(ScanCode::FUNCTION_6) => {
-                self.target_idx = (self.target_idx + 1) % 3;
+                self.target_idx = (self.target_idx + 1) % 4;
                 self.status = format!("Target changed to {}", self.target());
             }
             Key::Special(ScanCode::FUNCTION_7) => {

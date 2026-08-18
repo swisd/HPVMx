@@ -24,7 +24,7 @@ use uefi_raw::table::runtime::ResetType;
 mod graphics;
 pub mod pixel_graphics;
 pub mod graphics3d;
-
+pub mod tabui;
 
 use crate::{handle_vm_command, hpvm_warn, message, terminal};
 use crate::pm::{Package, PackageManager, PackageType};
@@ -143,6 +143,8 @@ pub struct DashboardUI {
     pub tab_apps: BTreeMap<DashboardTab, XSteppedApplicationContext>,
     pub resmon_tab: ResourceMonitorTab,
     pub cycles: usize,
+    pub selected_process_idx: usize,
+    pub dragging_window: Option<(usize, usize, usize)>,
 }
 
 #[derive(Clone, Debug)]
@@ -550,6 +552,8 @@ impl DashboardUI {
             tab_apps: BTreeMap::new(),
             resmon_tab: ResourceMonitorTab::Resources,
             cycles: 0,
+            selected_process_idx: 0,
+            dragging_window: None,
         };
         ui.ensure_tab_app(DashboardTab::Overview);
         ui
@@ -802,90 +806,8 @@ impl DashboardUI {
             // } else {
                 if DASH_BACK_ENABLED {
                     match self.selected_tab {
-                        DashboardTab::Overview => {
-                            pg.draw_text(20, 100, "System Overview", 0x00FF00);
-
-                            let mut y = 130;
-                            pg.draw_text(20, y, "System Health: OK", 0x00FF00);
-                            y += 30;
-                            pg.draw_text(20, y, &alloc::format!("CPU:   {} Cores, {}% Usage", self.resources.cpu_count, self.resources.cpu_usage), 0xFFFFFF);
-                            y += 20;
-                            pg.draw_text(20, y, &alloc::format!("Memory: {} / {} MB", self.resources.used_memory_mb, self.resources.total_memory_mb), 0xFFFFFF);
-                            y += 30;
-
-                            pg.draw_text(20, y, "I/O Performance:", 0xAAAAAA);
-                            y += 20;
-                            pg.draw_text(40, y, &alloc::format!("Disk:   Read {} KB/s, Write {} KB/s", self.resources.disk_read_kbps, self.resources.disk_write_kbps), 0xCCCCCC);
-                            y += 20;
-                            pg.draw_text(40, y, &alloc::format!("Network: RX {} KB/s, TX {} KB/s", self.resources.net_rx_kbps, self.resources.net_tx_kbps), 0xCCCCCC);
-                            y += 30;
-
-                            pg.draw_text(20, y, &alloc::format!("Virtualization: {} VMs Running", self.vms.iter().filter(|v| v.state.contains("Running")).count()), 0xFFFFFF);
-                            y += 20;
-                            pg.draw_text(20, y, &alloc::format!("Total VMs: {}", self.vms.len()), 0xCCCCCC);
-                            y += 30;
-
-                            pg.draw_text(20, y, "Hardware Categories:", 0xAAAAAA);
-                            y += 20;
-                            pg.draw_text(40, y, &alloc::format!("Storage: {} Files in current path", self.files.len()), 0xCCCCCC);
-                            y += 20;
-                            pg.draw_text(40, y, &alloc::format!("Devices: {} Categories detected", self.categories.len()), 0xCCCCCC);
-                            y += 60;
-                            pg.draw_text_bg(40, y, "STATE BACKUP", 0xFF7700, 0x444444);
-                            y += 20;
-                            pg.fill_rect(40, y, 70, 30, 0x553333);
-                            pg.draw_text(42, y + 2, "SAVE [/]", 0xBBBBAA);
-
-
-                            y = 100;
-                            //pg.draw_rect_outline(420, y, 320, 420, 0xCCCCCC);
-                            let time_data_0 = format!("{:?}", runtime::get_time_and_caps().unwrap().0);
-                            let time_data_1 = format!("{:?}", runtime::get_time_and_caps().unwrap().1);
-                            pg.draw_text(420, y, &*time_data_0, 0xFFFFFF);
-                            y += 10;
-                            pg.draw_text(420, y, &*time_data_1, 0xFFFFFF);
-
-
-                            // let text_new_0 = format!("{:?}", uefi::runtime::get_variable(VariableKey::));
-                        }
-                        DashboardTab::Apps => {
-                            pg.draw_text(margin, content_top + margin, "Application Registry", 0x00FF00);
-                            pg.draw_text(margin, content_top + margin + 20, "Select an app to launch it in a stepped context", 0xAAAAAA);
-
-                            let start_y = content_top + margin + 60;
-                            let card_w = 100usize;
-                            let card_h = 75usize;
-                            let cols = (width - margin * 2) / (card_w + gutter);
-                            let cols = if cols == 0 { 1 } else { cols };
-
-                            for (idx, (name, _, icon, version)) in crate::apps::APP_REGISTRY.iter().enumerate() {
-                                let row = idx / cols;
-                                let col = idx % cols;
-                                let x = margin + col * (card_w + gutter);
-                                let y = start_y + row * (card_h + gutter);
-
-                                let is_selected = idx == self.selected_app_idx;
-                                let border_color = if is_selected { 0x00FF00 } else { 0x666666 };
-                                let bg_color = if is_selected { 0x334433 } else { 0x333333 };
-
-                                pg.fill_rect(x, y, card_w, card_h, bg_color);
-                                pg.draw_rect_outline(x, y, card_w, card_h, border_color);
-
-                                // Icon placeholder
-                                pg.draw_icon(x + card_w / 2 - 20, y + 20, 32, 32, icon);
-                                pg.draw_text(x + 10, y + card_h - 20, name, 0xFFFFFF);
-
-                                // Grid position info
-                                let pos_info = alloc::format!("v{}", version);
-                                pg.draw_text(x + 10, y + 5, &pos_info, 0x888888);
-
-                                if is_selected {
-                                    pg.draw_text(x + card_w - 30, y + 5, "[*]", 0xFFFF00);
-                                }
-                            }
-
-                            pg.draw_text(margin, height - 40, "Use ARROWS to navigate | ENTER to Launch | ESC to close Apps", 0x888888);
-                        }
+                        DashboardTab::Overview => crate::ui::tabui::overview::draw(self, &mut pg, 0, 0, width, height),
+                        DashboardTab::Apps => crate::ui::tabui::apps::draw(self, &mut pg, 0, 0, width, height),
                         DashboardTab::VirtualMachines => {
                             // Title
                             pg.draw_text(margin, content_top + margin + 4, "Virtual Machines", 0x00FF00);
@@ -1094,146 +1016,7 @@ impl DashboardUI {
                                     pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.gpu_usage as u64, 0xFFFFFF);
                                 }
                                 ResourceMonitorTab::Processes => {
-                                    pg.draw_text(margin, content_top - 6, "| Resources |  [ Processes ]", 0xFFFFFF);
-
-                                    let panel_x = margin;
-                                    let panel_y = content_top + margin;
-                                    let panel_w = 600usize;
-                                    let panel_h = 480usize;
-
-                                    pg.draw_text_bg(panel_x, panel_y - 4, "Process Monitor", 0x20FF20, 0x222222);
-                                    let headers: &[&str] = &["name", "pid", "cycles", "cpu time"];
-                                    let cycles_string = format!("{:#?}", self.cycles);
-                                    let cycles_str = cycles_string.as_str();
-                                    let mut rows: Vec<&[&str]> = vec![
-                                        &["system", "0", "x", "x"],
-                                        &["hardware", "9", "x", "x"],
-                                    ];
-
-                                    // // 1. Store actual fixed-size String arrays in memory
-                                    // let mut row_storage: Vec<[String; 3]> = Vec::with_capacity(self.active_apps.len());
-                                    //
-                                    // for app in &self.active_apps {
-                                    //     let name = app.application.name.to_string();
-                                    //     let pid = format!("{:#?}", app.pid);
-                                    //     let cycles = "x".to_string();
-                                    //
-                                    //     row_storage.push([name, pid, cycles]);
-                                    // }
-                                    //
-                                    // // 2. Build slice references into the stored arrays
-                                    // // Constructing &[&str] views referencing the backing String data
-                                    // let row_refs: Vec<[&str; 3]> = row_storage
-                                    //     .iter()
-                                    //     .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str()])
-                                    //     .collect();
-                                    //
-                                    // // 3. Push slice views into rows
-                                    // for row in &row_refs {
-                                    //     rows.push(row);
-                                    // }
-
-                                    // 2. Hoist the backing storage variables OUTSIDE the fallback scope
-                                    // These must stay alive as long as `rows` is being used
-                                    let mut row_storage: Vec<[String; 4]> = Vec::new();
-                                    let mut row_refs: Vec<[&str; 4]> = Vec::new();
-
-                                    // Wrap the logic in a closure or function that returns an Option/Result
-                                    // 3. Fallible logic scope (your "try" block)
-                                    // let mut allocate_rows = || -> Option<()> {
-                                    //     // Safely allocate room for the strings
-                                    //     row_storage.try_reserve(self.active_apps.len()).ok()?;
-                                    //
-                                    //     for app in &self.active_apps {
-                                    //         let name = app.application.name.to_string();
-                                    //         let pid = format!("{:#?}", app.pid);
-                                    //         let cycles = "x".to_string();
-                                    //
-                                    //         row_storage.push([name, pid, cycles]);
-                                    //     }
-                                    //
-                                    //     // Safely reserve room for the slice references
-                                    //     row_refs.try_reserve(self.active_apps.len()).ok()?;
-                                    //
-                                    //     // Build the string views into the outer row_refs
-                                    //     row_refs.extend(
-                                    //         row_storage
-                                    //             .iter()
-                                    //             .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str()])
-                                    //     );
-                                    //
-                                    //     // Push slice views into rows
-                                    //     for row in &row_refs {
-                                    //         rows.push(row);
-                                    //     }
-                                    //
-                                    //     Some(())
-                                    // };
-                                    //
-                                    // // "Try/Except" wrapper: If it returns None, execution safely skips the rest
-                                    // if allocate_rows().is_none() {
-                                    //     vdebug!("ui", "OOM alloc error DashboardTab::Resources.ResourceMonitorTab::Processes.var:rows")
-                                    // }
-
-                                    // 2. Use a labeled loop as a "try" block that we can break out of early
-                                    vdebug!("ui", "[TRY] Entering 'try_block loop...");
-
-                                    'try_block: loop {
-                                        vdebug!("ui", "[TRY] Checking capacity for row_storage...");
-                                        // Fallibly allocate capacity for strings
-                                        if row_storage.try_reserve(self.active_apps.len()).is_err() {
-                                            vdebug!("ui", "[FAIL] Allocation failed inside row_storage.try_reserve!");
-                                            break 'try_block;
-                                        }
-                                        vdebug!("ui", "[SUCCESS] row_storage memory reserved.");
-
-                                        vdebug!("ui", "[TRY] Beginning active_apps iteration loop...");
-
-                                        row_storage.push([String::from("dashboard"), String::from("14"), format!("{:#?}", self.cycles), format!("{:#?}", ((self.resources.fps as u64 * self.cycles as u64) / (TSC_PER_US * 1000000)) * 100)]);
-
-                                        for (index, app) in self.active_apps.iter().enumerate() {
-                                            // NOTE: If your UEFI app freezes right here, one of these three allocations is failing.
-                                            // Rust's default allocator will panic on OOM here unless custom catch mechanics are present.
-                                            let name = app.application.name.to_string();
-                                            let pid = format!("{:#?}", app.pid);
-                                            let total_cyc = app.ui_time + app.cpu_time;
-                                            let cycles = format!("{:#?}", total_cyc);
-
-                                            row_storage.push([name, pid, cycles, format!("{:#?}", ((self.resources.fps as u64 * app.cpu_time as u64) / TSC_PER_US * 1000000) * 100)]);
-                                        }
-                                        vdebug!("ui", "[SUCCESS] Finished active_apps loop. row_storage populated.");
-
-                                        vdebug!("ui", "[TRY] Checking capacity for row_refs...");
-                                        // Fallibly allocate capacity for the slice references
-                                        if row_refs.try_reserve(self.active_apps.len()).is_err() {
-                                            vdebug!("ui", "[FAIL] Allocation failed inside row_refs.try_reserve!");
-                                            break 'try_block;
-                                        }
-                                        vdebug!("ui", "[SUCCESS] row_refs memory reserved.");
-
-                                        vdebug!("ui", "[TRY] Extending row_refs mapping...");
-                                        // Build views using references pointing directly to row_storage strings
-                                        row_refs.extend(
-                                            row_storage
-                                                .iter()
-                                                .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str(), row[3].as_str()])
-                                        );
-                                        vdebug!("ui", "[SUCCESS] row_refs extended successfully.");
-
-                                        vdebug!("ui", "[TRY] Pushing slice views into rows vector...");
-                                        // Safely push slice views into rows
-                                        for row in &row_refs {
-                                            rows.push(&row[..]);
-                                        }
-                                        vdebug!("ui", "[SUCCESS] All elements safely integrated into rows.");
-
-                                        break 'try_block;
-                                    }
-
-                                    vdebug!("ui", "[EXIT] Left the 'try_block loop.");
-
-
-                                    pg.draw_table_view(panel_x, panel_y + 4, panel_w, panel_h, headers, rows);
+                                    self.draw_processes_tab(&mut pg, margin, content_top, width, height);
                                 }
                             }
                         }
@@ -2158,12 +1941,11 @@ impl DashboardUI {
                 pg.fill_rect(0, height - 18, width, 18, 0x000080); // Blue
                 // pg.draw_text(10, height - 32, " Use keys O, V, R, S, N, D, C, T, Z to switch tabs | X to shutdown", 0xFFFFFF);
 
-                // Update and draw cursor
-                if self.iter % 20 == 0 {
-                    unsafe {
-                        //self.cursor.update_from_mouse(width, height);
-                    }
+                // Update and handle mouse
+                unsafe {
+                    self.cursor.update_from_mouse(width, height);
                 }
+                self.handle_mouse(width, height);
 
 
                 // apply settings to these items
@@ -2182,13 +1964,39 @@ impl DashboardUI {
                     let win_w = app_ctx.window.width;
                     let win_h = app_ctx.window.height;
 
-                    pg.fill_rect(win_x, win_y, win_w, win_h, 0x111111);
-                    pg.draw_rect_outline(win_x, win_y, win_w, win_h, if is_focused { 0x00FFFF } else { 0x888888 });
-                    pg.fill_rect(win_x, win_y, win_w, WindowState::TITLE_BAR_HEIGHT, if is_focused { 0x008080 } else { 0x444444 });
-                    pg.fill_rect(win_x + win_w - 20, win_y, 20, WindowState::TITLE_BAR_HEIGHT, if is_focused { 0xAA0000 } else { 0x440000 });
-                    pg.draw_text(win_x + win_w - 15, win_y + 2, "X", 0xFFFFFF);
-                    pg.draw_text(win_x + 5, win_y + 2, &app_ctx.application.name, 0xFFFFFF);
+                    if !app_ctx.window.is_minimized {
+                        pg.fill_rect(win_x, win_y, win_w, win_h, 0x111111);
+                        pg.draw_rect_outline(win_x, win_y, win_w, win_h, if is_focused { 0x00FFFF } else { 0x888888 });
+                        pg.fill_rect(win_x, win_y, win_w, WindowState::TITLE_BAR_HEIGHT, if is_focused { 0x008080 } else { 0x444444 });
 
+                        // 1. Minimize Button [-]
+                        let min_btn_x = win_x + win_w.saturating_sub(60);
+                        pg.fill_rect(min_btn_x, win_y, 20, WindowState::TITLE_BAR_HEIGHT, if is_focused { 0x005555 } else { 0x333333 });
+                        pg.draw_line(min_btn_x, win_y, min_btn_x, win_y + WindowState::TITLE_BAR_HEIGHT, 0x555555);
+                        pg.draw_text(min_btn_x + 6, win_y + 2, "-", 0xFFFFFF);
+
+                        // 2. Maximize / Restore Button [^] or [=]
+                        let max_btn_x = win_x + win_w.saturating_sub(40);
+                        pg.fill_rect(max_btn_x, win_y, 20, WindowState::TITLE_BAR_HEIGHT, if is_focused { 0x006666 } else { 0x3a3a3a });
+                        pg.draw_line(max_btn_x, win_y, max_btn_x, win_y + WindowState::TITLE_BAR_HEIGHT, 0x555555);
+                        let max_sym = if app_ctx.window.is_maximized { "=" } else { "^" };
+                        pg.draw_text(max_btn_x + 6, win_y + 2, max_sym, 0xFFFFFF);
+
+                        // 3. Close Button [X]
+                        let close_btn_x = win_x + win_w.saturating_sub(20);
+                        pg.fill_rect(close_btn_x, win_y, 20, WindowState::TITLE_BAR_HEIGHT, if is_focused { 0xAA0000 } else { 0x440000 });
+                        pg.draw_line(close_btn_x, win_y, close_btn_x, win_y + WindowState::TITLE_BAR_HEIGHT, 0x555555);
+                        pg.draw_text(close_btn_x + 6, win_y + 2, "X", 0xFFFFFF);
+
+                        let title_max_w = win_w.saturating_sub(68);
+                        let max_chars = title_max_w / 8;
+                        let display_title = if app_ctx.application.name.len() > max_chars && max_chars > 3 {
+                            &app_ctx.application.name[..max_chars]
+                        } else {
+                            &app_ctx.application.name
+                        };
+                        pg.draw_text(win_x + 6, win_y + 2, display_title, 0xFFFFFF);
+                    }
 
                     let step_tsc_begin = unsafe { core::arch::x86_64::_rdtsc() };
                     if !app_ctx.step(None) {
@@ -2197,7 +2005,9 @@ impl DashboardUI {
                     let step_tsc_end = unsafe { core::arch::x86_64::_rdtsc() };
 
                     let draw_tsc_begin = unsafe { core::arch::x86_64::_rdtsc() };
-                    app_ctx.draw(&mut pg);
+                    if !app_ctx.window.is_minimized {
+                        app_ctx.draw(&mut pg);
+                    }
                     let draw_tsc_end = unsafe { core::arch::x86_64::_rdtsc() };
 
                     app_ctx.ui_time = draw_tsc_end.saturating_sub(draw_tsc_begin) as usize;
@@ -3172,6 +2982,9 @@ impl DashboardUI {
         }
 
         fn draw_windowed_app(pg: &mut PixelGraphics, app_ctx: &mut SteppedApplicationContext, focused: bool) {
+            if app_ctx.window.is_minimized {
+                return;
+            }
             let window = app_ctx.window;
             let border = if focused { 0x00FFFF } else { 0x888888 };
             let title = if focused { 0x008080 } else { 0x444444 };
@@ -3179,9 +2992,34 @@ impl DashboardUI {
             pg.fill_rect(window.x, window.y, window.width, window.height, 0x111111);
             pg.draw_rect_outline(window.x, window.y, window.width, window.height, border);
             pg.fill_rect(window.x, window.y, window.width, WindowState::TITLE_BAR_HEIGHT, title);
-            pg.fill_rect(window.x + window.width.saturating_sub(20), window.y, 20, WindowState::TITLE_BAR_HEIGHT, if focused { 0xAA0000 } else { 0x440000 });
-            pg.draw_text(window.x + 5, window.y + 2, &app_ctx.application.name, 0xFFFFFF);
-            pg.draw_text(window.x + window.width.saturating_sub(15), window.y + 2, "X", 0xFFFFFF);
+
+            // 1. Minimize Button [-]
+            let min_x = window.x + window.width.saturating_sub(60);
+            pg.fill_rect(min_x, window.y, 20, WindowState::TITLE_BAR_HEIGHT, if focused { 0x005555 } else { 0x333333 });
+            pg.draw_line(min_x, window.y, min_x, window.y + WindowState::TITLE_BAR_HEIGHT, 0x555555);
+            pg.draw_text(min_x + 6, window.y + 2, "-", 0xFFFFFF);
+
+            // 2. Maximize / Restore Button [^] or [=]
+            let max_x = window.x + window.width.saturating_sub(40);
+            pg.fill_rect(max_x, window.y, 20, WindowState::TITLE_BAR_HEIGHT, if focused { 0x006666 } else { 0x3a3a3a });
+            pg.draw_line(max_x, window.y, max_x, window.y + WindowState::TITLE_BAR_HEIGHT, 0x555555);
+            let max_sym = if app_ctx.window.is_maximized { "=" } else { "^" };
+            pg.draw_text(max_x + 6, window.y + 2, max_sym, 0xFFFFFF);
+
+            // 3. Close Button [X]
+            let close_x = window.x + window.width.saturating_sub(20);
+            pg.fill_rect(close_x, window.y, 20, WindowState::TITLE_BAR_HEIGHT, if focused { 0xAA0000 } else { 0x440000 });
+            pg.draw_line(close_x, window.y, close_x, window.y + WindowState::TITLE_BAR_HEIGHT, 0x555555);
+            pg.draw_text(close_x + 6, window.y + 2, "X", 0xFFFFFF);
+
+            let title_max_w = window.width.saturating_sub(68);
+            let max_chars = title_max_w / 8;
+            let display_title = if app_ctx.application.name.len() > max_chars && max_chars > 3 {
+                &app_ctx.application.name[..max_chars]
+            } else {
+                &app_ctx.application.name
+            };
+            pg.draw_text(window.x + 6, window.y + 2, display_title, 0xFFFFFF);
             app_ctx.draw(pg);
         }
 
@@ -3198,6 +3036,26 @@ impl DashboardUI {
             pg.fill_rect(6, taskbar_y + 4, 102, 20, if self.startup_menu_active { 0x008080 } else { 0x444444 });
             let stringx = unsafe { if DASH_BACK_ENABLED {"[F1] Start     [X] Shutdown     [Q] Dev Menu"} else {"[F1] Start     [X] Shutdown     |Q| Dev Menu"} };
             pg.draw_text(14, taskbar_y + 8, stringx, 0xFFFFFF);
+
+            // Draw active window taskbar tabs next to start menu buttons (starting at x = 330)
+            let mut tab_x = 330usize;
+            for (idx, app) in self.active_apps.iter().enumerate() {
+                if tab_x + 110 > width.saturating_sub(10) { break; }
+                let is_focused = self.focused_process_idx == Some(idx) && !app.window.is_minimized;
+                let is_min = app.window.is_minimized;
+                let bg_col = if is_focused { 0x007799 } else if is_min { 0x222222 } else { 0x444444 };
+                let border_col = if is_focused { 0x00FFFF } else if is_min { 0x555555 } else { 0x888888 };
+
+                pg.fill_rect(tab_x, taskbar_y + 4, 106, 20, bg_col);
+                pg.draw_rect_outline(tab_x, taskbar_y + 4, 106, 20, border_col);
+
+                let prefix = if is_min { "[-]" } else { "[^]" };
+                let short_name = app.application.name.strip_prefix("X_").unwrap_or(&app.application.name);
+                let title_snippet = if short_name.len() > 9 { &short_name[..9] } else { short_name };
+                let label = alloc::format!("{} {}", prefix, title_snippet);
+                pg.draw_text(tab_x + 4, taskbar_y + 8, &label, if is_focused { 0xFFFF00 } else { 0xFFFFFF });
+                tab_x += 112;
+            }
 
             if !self.startup_menu_active { return; }
 
@@ -3349,6 +3207,490 @@ impl DashboardUI {
                 Key::Special(ScanCode::FUNCTION_3) => self.alt_mode = !self.alt_mode,
                 Key::Special(ScanCode::FUNCTION_4) => self.fn_mode = !self.fn_mode,
                 _ => {}
+            }
+        }
+
+        pub fn total_process_count(&self) -> usize {
+            2 + self.active_apps.len() + self.vms.len()
+        }
+
+        pub fn kill_selected_process(&mut self) {
+            let sel = self.selected_process_idx;
+            if sel == 0 || sel == 1 {
+                self.notifications.push(("Cannot terminate critical system process!".to_string(), 120));
+            } else if sel < 2 + self.active_apps.len() {
+                let app_idx = sel - 2;
+                let name = self.active_apps[app_idx].application.name.clone();
+                let pid = self.active_apps[app_idx].pid;
+                self.active_apps[app_idx].exit_requested = true;
+                self.notifications.push((format!("Terminated '{}' (PID {})", name, pid), 120));
+            } else {
+                let vm_idx = sel - 2 - self.active_apps.len();
+                if vm_idx < self.vms.len() {
+                    let name = self.vms[vm_idx].name.clone();
+                    self.vms[vm_idx].state = "stopped".to_string();
+                    self.notifications.push((format!("Stopped VM '{}'", name), 120));
+                }
+            }
+        }
+
+        pub fn focus_selected_process(&mut self) {
+            let sel = self.selected_process_idx;
+            if sel >= 2 && sel < 2 + self.active_apps.len() {
+                let app_idx = sel - 2;
+                self.active_apps[app_idx].window.unminimize();
+                self.focused_process_idx = Some(app_idx);
+                let name = self.active_apps[app_idx].application.name.clone();
+                self.notifications.push((format!("Focused '{}'", name), 90));
+            }
+        }
+
+        pub fn toggle_min_selected_process(&mut self) {
+            let sel = self.selected_process_idx;
+            if sel >= 2 && sel < 2 + self.active_apps.len() {
+                let app_idx = sel - 2;
+                self.active_apps[app_idx].window.toggle_minimize();
+                if self.active_apps[app_idx].window.is_minimized {
+                    if self.focused_process_idx == Some(app_idx) {
+                        self.focused_process_idx = None;
+                    }
+                    self.notifications.push((format!("Minimized '{}'", self.active_apps[app_idx].application.name), 90));
+                } else {
+                    self.focused_process_idx = Some(app_idx);
+                    self.notifications.push((format!("Restored '{}'", self.active_apps[app_idx].application.name), 90));
+                }
+            }
+        }
+
+        pub fn draw_processes_tab(
+            &self,
+            pg: &mut PixelGraphics,
+            margin: usize,
+            content_top: usize,
+            width: usize,
+            height: usize,
+        ) {
+            // Top sub-tab selector buttons
+            pg.fill_rect(margin, content_top - 6, 110, 22, 0x333333);
+            pg.draw_rect_outline(margin, content_top - 6, 110, 22, 0x666666);
+            pg.draw_text(margin + 12, content_top - 2, "Resources", 0xAAAAAA);
+
+            pg.fill_rect(margin + 120, content_top - 6, 110, 22, 0x007799);
+            pg.draw_rect_outline(margin + 120, content_top - 6, 110, 22, 0x00FFFF);
+            pg.draw_text(margin + 132, content_top - 2, "Processes", 0xFFFFFF);
+
+            let panel_x = margin;
+            let panel_y = content_top + 22;
+            let panel_w = width.saturating_sub(margin * 2).min(780);
+            let panel_h = height.saturating_sub(panel_y + 36);
+
+            // Summary banner box
+            let banner_h = 42usize;
+            pg.fill_rect(panel_x, panel_y, panel_w, banner_h, 0x181F2A);
+            pg.draw_rect_outline(panel_x, panel_y, panel_w, banner_h, 0x0088AA);
+
+            let running_apps_count = self.active_apps.iter().filter(|a| !a.window.is_minimized).count();
+            let min_apps_count = self.active_apps.len().saturating_sub(running_apps_count);
+            let total_procs = self.total_process_count();
+
+            let summary_line1 = format!(
+                "Total Processes: {} | Active Windows: {} ({} Minimized) | VMs: {}",
+                total_procs,
+                self.active_apps.len(),
+                min_apps_count,
+                self.vms.len(),
+            );
+            let tsc_mhz = unsafe { crate::TSC_PER_US };
+            let summary_line2 = format!(
+                "CPU Load: {}% | Memory: {} / {} MB | Host Clock: {} MHz",
+                self.resources.cpu_usage,
+                self.resources.used_memory_mb,
+                self.resources.total_memory_mb,
+                tsc_mhz,
+            );
+            pg.draw_text(panel_x + 10, panel_y + 5, &summary_line1, 0x00FFFF);
+            pg.draw_text(panel_x + 10, panel_y + 22, &summary_line2, 0xCCCCCC);
+
+            // Table Header
+            let table_y = panel_y + banner_h + 10;
+            let header_h = 24usize;
+            pg.fill_rect(panel_x, table_y, panel_w, header_h, 0x243042);
+            pg.draw_rect_outline(panel_x, table_y, panel_w, header_h, 0x4A607A);
+
+            // Column offsets
+            let col_pid = panel_x + 8;
+            let col_name = panel_x + 60;
+            let col_state = panel_x + 240;
+            let col_cpu = panel_x + 340;
+            let col_cyc = panel_x + 410;
+            let col_mem = panel_x + 500;
+
+            pg.draw_text(col_pid, table_y + 5, "PID", 0x88CCFF);
+            pg.draw_text(col_name, table_y + 5, "Process Name", 0x88CCFF);
+            pg.draw_text(col_state, table_y + 5, "State", 0x88CCFF);
+            pg.draw_text(col_cpu, table_y + 5, "CPU %", 0x88CCFF);
+            pg.draw_text(col_cyc, table_y + 5, "Cycles", 0x88CCFF);
+            pg.draw_text(col_mem, table_y + 5, "Window / Memory", 0x88CCFF);
+
+            // Process Rows
+            let row_h = 24usize;
+            let max_visible_rows = (panel_h.saturating_sub(banner_h + 10 + header_h + 50)) / row_h;
+            let rows_start_y = table_y + header_h + 2;
+
+            for i in 0..total_procs.min(max_visible_rows) {
+                let cur_y = rows_start_y + i * row_h;
+                let is_selected = i == self.selected_process_idx;
+
+                // Background
+                if is_selected {
+                    pg.fill_rect(panel_x, cur_y, panel_w, row_h - 2, 0x004488);
+                    pg.draw_rect_outline(panel_x, cur_y, panel_w, row_h - 2, 0x00FFFF);
+                } else if i % 2 == 0 {
+                    pg.fill_rect(panel_x, cur_y, panel_w, row_h - 2, 0x16161E);
+                } else {
+                    pg.fill_rect(panel_x, cur_y, panel_w, row_h - 2, 0x1F1F2A);
+                }
+
+                let (pid_str, name_str, state_str, state_col, cpu_str, cyc_str, mem_str) = if i == 0 {
+                    (
+                        "0".to_string(),
+                        "HPVMx Hypervisor".to_string(),
+                        "Running".to_string(),
+                        0x55FF55,
+                        format!("{}%", self.resources.cpu_usage),
+                        format!("{:.1}M", self.cycles as f64 / 1_000_000.0),
+                        "Kernel Ring 0".to_string(),
+                    )
+                } else if i == 1 {
+                    (
+                        "1".to_string(),
+                        "Hardware & Timers".to_string(),
+                        "Active".to_string(),
+                        0x55FF55,
+                        "1%".to_string(),
+                        format!("{}K", tsc_mhz),
+                        "Hardware I/O".to_string(),
+                    )
+                } else if i < 2 + self.active_apps.len() {
+                    let app_idx = i - 2;
+                    let app = &self.active_apps[app_idx];
+                    let is_min = app.window.is_minimized;
+                    let is_foc = self.focused_process_idx == Some(app_idx);
+                    let (st, st_col) = if is_min {
+                        ("Minimized".to_string(), 0xFFAA00)
+                    } else if is_foc {
+                        ("Focused".to_string(), 0x00FFFF)
+                    } else {
+                        ("Running".to_string(), 0x55FF55)
+                    };
+
+                    let cpu_pct = ((app.cpu_time as u64 * self.resources.fps.max(1) as u64) / (tsc_mhz * 1_000_000).max(1)) * 100;
+                    let total_cyc = app.cpu_time + app.ui_time;
+                    let cyc_formatted = if total_cyc >= 1_000_000 {
+                        format!("{:.1}M", total_cyc as f64 / 1_000_000.0)
+                    } else if total_cyc >= 1_000 {
+                        format!("{:.1}K", total_cyc as f64 / 1000.0)
+                    } else {
+                        format!("{}", total_cyc)
+                    };
+
+                    let win_info = if app.window.is_maximized {
+                        "Maximized".to_string()
+                    } else if is_min {
+                        "Minimized (BG)".to_string()
+                    } else {
+                        format!("{}x{} @ {},{}", app.window.width, app.window.height, app.window.x, app.window.y)
+                    };
+
+                    (
+                        format!("{}", app.pid),
+                        app.application.name.clone(),
+                        st,
+                        st_col,
+                        format!("{}%", cpu_pct.min(100)),
+                        cyc_formatted,
+                        win_info,
+                    )
+                } else {
+                    let vm_idx = i - 2 - self.active_apps.len();
+                    let vm = &self.vms[vm_idx];
+                    let is_run = vm.state.contains("running");
+                    let st_col = if is_run { 0x55FF55 } else { 0x888888 };
+                    (
+                        format!("{}", 100 + vm.id),
+                        format!("VM: {}", vm.name),
+                        vm.state.clone(),
+                        st_col,
+                        format!("{}%", vm.cpu_usage),
+                        format!("{}s", vm.uptime_seconds),
+                        format!("{} MB RAM", vm.memory_usage_mb),
+                    )
+                };
+
+                let txt_col = if is_selected { 0xFFFFFF } else { 0xDDDDDD };
+                pg.draw_text(col_pid, cur_y + 4, &pid_str, 0x888888);
+                pg.draw_text(col_name, cur_y + 4, &name_str, txt_col);
+                pg.draw_text(col_state, cur_y + 4, &state_str, state_col);
+                pg.draw_text(col_cpu, cur_y + 4, &cpu_str, if cpu_str != "0%" { 0xFF6666 } else { 0x888888 });
+                pg.draw_text(col_cyc, cur_y + 4, &cyc_str, 0xAAAAAA);
+                pg.draw_text(col_mem, cur_y + 4, &mem_str, 0xAAAAAA);
+            }
+
+            // Action buttons bar at bottom
+            let btn_y = panel_y + panel_h.saturating_sub(38);
+            let btn_h = 24usize;
+
+            // [ End Task (K) ]
+            pg.fill_rect(panel_x, btn_y, 110, btn_h, 0x880000);
+            pg.draw_rect_outline(panel_x, btn_y, 110, btn_h, 0xFF4444);
+            pg.draw_text(panel_x + 10, btn_y + 4, "[K] End Task", 0xFFFFFF);
+
+            // [ Focus Window (F) ]
+            pg.fill_rect(panel_x + 120, btn_y, 125, btn_h, 0x006666);
+            pg.draw_rect_outline(panel_x + 120, btn_y, 125, btn_h, 0x00FFFF);
+            pg.draw_text(panel_x + 130, btn_y + 4, "[F] Focus Window", 0xFFFFFF);
+
+            // [ Min/Restore (M) ]
+            pg.fill_rect(panel_x + 255, btn_y, 130, btn_h, 0x334466);
+            pg.draw_rect_outline(panel_x + 255, btn_y, 130, btn_h, 0x6699FF);
+            pg.draw_text(panel_x + 265, btn_y + 4, "[M] Min/Restore", 0xFFFFFF);
+
+            // [ < Resources ]
+            pg.fill_rect(panel_x + 395, btn_y, 115, btn_h, 0x333333);
+            pg.draw_rect_outline(panel_x + 395, btn_y, 115, btn_h, 0x888888);
+            pg.draw_text(panel_x + 405, btn_y + 4, "[<] Resources", 0xFFFFFF);
+
+            // Key hints
+            pg.draw_text(panel_x + 520, btn_y + 4, "UP/DOWN: Select | K: Kill | F: Focus | M: Min", 0x888888);
+        }
+
+        pub fn handle_mouse(&mut self, width: usize, height: usize) {
+            let mouse_x = self.cursor.x;
+            let mouse_y = self.cursor.y;
+
+            // 1. Dragging window updates
+            if self.cursor.left_down() {
+                if let Some((drag_idx, off_x, off_y)) = self.dragging_window {
+                    if drag_idx < self.active_apps.len() {
+                        let win_w = self.active_apps[drag_idx].window.width;
+                        let win_h = self.active_apps[drag_idx].window.height;
+                        let new_x = (mouse_x as usize).saturating_sub(off_x).min(width.saturating_sub(win_w));
+                        let new_y = (mouse_y as usize).saturating_sub(off_y).min(height.saturating_sub(win_h));
+                        self.active_apps[drag_idx].window.x = new_x;
+                        self.active_apps[drag_idx].window.y = new_y;
+                    }
+                }
+            }
+
+            if self.cursor.left_released() {
+                self.dragging_window = None;
+            }
+
+            // 2. Click events
+            if self.cursor.left_clicked() {
+                // Check startup menu popup if active
+                if self.startup_menu_active {
+                    let taskbar_y = height.saturating_sub(28) as i32;
+                    let app_indices = Self::startup_app_indices();
+                    let visible = app_indices.len();
+                    let menu_h = (visible * 24 + 36) as i32;
+                    let menu_y = (taskbar_y - menu_h).max(0);
+
+                    if mouse_x >= 6 && mouse_x <= 296 && mouse_y >= menu_y && mouse_y <= taskbar_y {
+                        for (row, registry_idx) in app_indices.iter().take(visible).enumerate() {
+                            let item_y = menu_y + 30 + (row as i32) * 24;
+                            if mouse_y >= item_y - 2 && mouse_y <= item_y + 22 {
+                                let (name, _, _, _) = crate::apps::APP_REGISTRY[*registry_idx];
+                                if let Some(app_ctx) = SteppedApplicationContext::from_name(name) {
+                                    self.add_app_window(app_ctx);
+                                }
+                                self.startup_menu_active = false;
+                                return;
+                            }
+                        }
+                    } else if !(mouse_x >= 6 && mouse_x <= 108 && mouse_y >= taskbar_y) {
+                        self.startup_menu_active = false;
+                    }
+                }
+
+                // Check taskbar clicks
+                let taskbar_y = height.saturating_sub(28) as i32;
+                if mouse_y >= taskbar_y {
+                    if mouse_x >= 6 && mouse_x <= 108 {
+                        self.startup_menu_active = !self.startup_menu_active;
+                        return;
+                    }
+                    let mut tab_x = 330i32;
+                    for idx in 0..self.active_apps.len() {
+                        if tab_x + 110 > (width.saturating_sub(10) as i32) { break; }
+                        if mouse_x >= tab_x && mouse_x <= tab_x + 106 {
+                            let is_min = self.active_apps[idx].window.is_minimized;
+                            let is_focused = self.focused_process_idx == Some(idx);
+                            if is_min {
+                                self.active_apps[idx].window.unminimize();
+                                self.focused_process_idx = Some(idx);
+                            } else if is_focused {
+                                self.active_apps[idx].window.minimize();
+                                self.focused_process_idx = None;
+                            } else {
+                                self.focused_process_idx = Some(idx);
+                            }
+                            return;
+                        }
+                        tab_x += 112;
+                    }
+                }
+
+                // Check active window interactions (topmost window first)
+                let mut clicked_window = false;
+                for idx in (0..self.active_apps.len()).rev() {
+                    if self.active_apps[idx].window.is_minimized {
+                        continue;
+                    }
+                    let win_x = self.active_apps[idx].window.x as i32;
+                    let win_y = self.active_apps[idx].window.y as i32;
+                    let win_w = self.active_apps[idx].window.width as i32;
+                    let win_h = self.active_apps[idx].window.height as i32;
+                    let title_h = WindowState::TITLE_BAR_HEIGHT as i32;
+
+                    if mouse_x >= win_x && mouse_x <= win_x + win_w && mouse_y >= win_y && mouse_y <= win_y + win_h {
+                        clicked_window = true;
+                        self.focused_process_idx = Some(idx);
+
+                        if mouse_y <= win_y + title_h {
+                            if mouse_x >= win_x + win_w - 20 && mouse_x <= win_x + win_w {
+                                // Close button [X]
+                                self.active_apps[idx].exit_requested = true;
+                            } else if mouse_x >= win_x + win_w - 40 && mouse_x < win_x + win_w - 20 {
+                                // Maximize / Restore button [^]
+                                self.active_apps[idx].window.toggle_maximize(width, height);
+                            } else if mouse_x >= win_x + win_w - 60 && mouse_x < win_x + win_w - 40 {
+                                // Minimize button [-]
+                                self.active_apps[idx].window.minimize();
+                                self.focused_process_idx = None;
+                            } else {
+                                // Titlebar drag start
+                                self.dragging_window = Some((
+                                    idx,
+                                    (mouse_x - win_x).max(0) as usize,
+                                    (mouse_y - win_y).max(0) as usize,
+                                ));
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                if !clicked_window {
+                    // Check header & tab bar navigation
+                    if mouse_y >= 0 && mouse_y <= 32 {
+                        if mouse_x <= 130 {
+                            self.startup_menu_active = !self.startup_menu_active;
+                        }
+                    } else if mouse_y > 32 && mouse_y <= 55 {
+                        let x = mouse_x;
+                        if x < 100 { self.selected_tab = DashboardTab::Overview; }
+                        else if x < 180 { self.selected_tab = DashboardTab::VirtualMachines; }
+                        else if x < 280 { self.selected_tab = DashboardTab::Resources; }
+                        else if x < 380 { self.selected_tab = DashboardTab::Storage; }
+                        else if x < 480 { self.selected_tab = DashboardTab::Network; }
+                        else if x < 580 { self.selected_tab = DashboardTab::Devices; }
+                        else if x < 680 { self.selected_tab = DashboardTab::Console; }
+                        else if x < 780 { self.selected_tab = DashboardTab::Test; }
+                        else if x < 880 { self.selected_tab = DashboardTab::Settings; }
+                        else if x < 980 { self.selected_tab = DashboardTab::Packages; }
+                        else if x < 1080 { self.selected_tab = DashboardTab::Apps; }
+                    } else if matches!(self.selected_tab, DashboardTab::Resources) {
+                        let content_top = 48usize + 32usize;
+                        let margin = 16usize;
+                        // Check sub-tab switch
+                        if mouse_y >= (content_top as i32 - 6) && mouse_y <= (content_top as i32 + 18) {
+                            if mouse_x >= margin as i32 && mouse_x <= (margin + 110) as i32 {
+                                self.resmon_tab = ResourceMonitorTab::Resources;
+                            } else if mouse_x >= (margin + 120) as i32 && mouse_x <= (margin + 230) as i32 {
+                                self.resmon_tab = ResourceMonitorTab::Processes;
+                            }
+                        } else if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
+                            let panel_y = content_top + 22;
+                            let banner_h = 42usize;
+                            let table_y = panel_y + banner_h + 10;
+                            let header_h = 24usize;
+                            let rows_start_y = table_y + header_h + 2;
+                            let row_h = 24usize;
+                            let total_procs = self.total_process_count();
+
+                            // Row selection
+                            if mouse_y >= rows_start_y as i32 && mouse_y <= (rows_start_y + total_procs * row_h) as i32 {
+                                let row = ((mouse_y - rows_start_y as i32) / row_h as i32) as usize;
+                                if row < total_procs {
+                                    self.selected_process_idx = row;
+                                }
+                            }
+
+                            // Bottom action buttons
+                            let panel_h = height.saturating_sub(panel_y + 36);
+                            let btn_y = (panel_y + panel_h.saturating_sub(38)) as i32;
+                            if mouse_y >= btn_y && mouse_y <= btn_y + 24 {
+                                if mouse_x >= margin as i32 && mouse_x <= (margin + 110) as i32 {
+                                    self.kill_selected_process();
+                                } else if mouse_x >= (margin + 120) as i32 && mouse_x <= (margin + 245) as i32 {
+                                    self.focus_selected_process();
+                                } else if mouse_x >= (margin + 255) as i32 && mouse_x <= (margin + 385) as i32 {
+                                    self.toggle_min_selected_process();
+                                } else if mouse_x >= (margin + 395) as i32 && mouse_x <= (margin + 510) as i32 {
+                                    self.resmon_tab = ResourceMonitorTab::Resources;
+                                }
+                            }
+                        }
+                    } else if matches!(self.selected_tab, DashboardTab::Apps) {
+                        let content_top = 48usize + 32usize;
+                        let margin = 16usize;
+                        let gutter = 12usize;
+                        let start_y = (content_top + margin + 60) as i32;
+                        let card_w = 100i32;
+                        let card_h = 75i32;
+                        let cols = (((width - margin * 2) / (100 + gutter)) as i32).max(1);
+
+                        for (idx, (name, _, _, _)) in crate::apps::APP_REGISTRY.iter().enumerate() {
+                            let row = (idx as i32) / cols;
+                            let col = (idx as i32) % cols;
+                            let cx = margin as i32 + col * (card_w + gutter as i32);
+                            let cy = start_y + row * (card_h + gutter as i32);
+
+                            if mouse_x >= cx && mouse_x <= cx + card_w && mouse_y >= cy && mouse_y <= cy + card_h {
+                                self.selected_app_idx = idx;
+                                if let Some(app_ctx) = SteppedApplicationContext::from_name(name) {
+                                    self.add_app_window(app_ctx);
+                                }
+                                break;
+                            }
+                        }
+                    } else if matches!(self.selected_tab, DashboardTab::Storage) {
+                        if mouse_y >= 96 && mouse_y <= 130 {
+                            let mut tab_x = 16usize;
+                            for (d_idx, disk) in self.storage_disks.iter().enumerate() {
+                                let label_text = if !disk.volume_label.is_empty() {
+                                    format!("{}: [{}]", disk.alias, disk.volume_label)
+                                } else if disk.total_bytes > 0 {
+                                    let size_str = if disk.total_bytes >= 1024 * 1024 * 1024 {
+                                        format!("{}GB", disk.total_bytes / (1024 * 1024 * 1024))
+                                    } else {
+                                        format!("{}MB", disk.total_bytes / (1024 * 1024))
+                                    };
+                                    format!("{}: ({})", disk.alias, size_str)
+                                } else {
+                                    format!("{}: {}", disk.alias, disk.media_type)
+                                };
+                                let tab_w = (label_text.len() * 8 + 16).max(84);
+                                if mouse_x >= tab_x as i32 && mouse_x <= (tab_x + tab_w) as i32 {
+                                    self.select_disk_tab(d_idx);
+                                    break;
+                                }
+                                tab_x += tab_w + 6;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -4255,12 +4597,38 @@ impl DashboardUI {
                 }
                 DashboardTab::Resources => {
                     match key {
-                        Key::Printable(c) => {}
+                        Key::Printable(c) => {
+                            let ch = char::from(c).to_ascii_lowercase();
+                            if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
+                                match ch {
+                                    'k' => self.kill_selected_process(),
+                                    'f' => self.focus_selected_process(),
+                                    'm' => self.toggle_min_selected_process(),
+                                    _ => {}
+                                }
+                            }
+                        }
                         Key::Special(ScanCode::RIGHT) => {
                             self.resmon_tab = ResourceMonitorTab::Processes
                         }
                         Key::Special(ScanCode::LEFT) => {
                             self.resmon_tab = ResourceMonitorTab::Resources
+                        }
+                        Key::Special(ScanCode::UP) => {
+                            if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
+                                self.selected_process_idx = self.selected_process_idx.saturating_sub(1);
+                            }
+                        }
+                        Key::Special(ScanCode::DOWN) => {
+                            if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
+                                let total = self.total_process_count();
+                                self.selected_process_idx = (self.selected_process_idx + 1).min(total.saturating_sub(1));
+                            }
+                        }
+                        Key::Special(ScanCode::DELETE) => {
+                            if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
+                                self.kill_selected_process();
+                            }
                         }
                         _ => {}
                     }
@@ -4297,6 +4665,10 @@ impl DashboardUI {
                             '\r' | '\n' => {
                                 if matches!(self.selected_tab, DashboardTab::VirtualMachines) {
                                     // Action execution handled in main.rs
+                                } else if matches!(self.selected_tab, DashboardTab::Resources) {
+                                    if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
+                                        self.focus_selected_process();
+                                    }
                                 } else if matches!(self.selected_tab, DashboardTab::Storage) {
                                     if self.selected_file_idx < self.files.len() {
                                         let entry = &self.files[self.selected_file_idx];
@@ -4505,49 +4877,6 @@ impl DashboardUI {
                     self.fn_mode = !self.fn_mode;
                 }
                 _ => {}
-            }
-
-            // Handle mouse clicks for tab switching
-            if self.cursor.left_button {
-                if self.cursor.y >= 48 && self.cursor.y <= 80 {
-                    // Crude tab switching based on X position
-                    let x = self.cursor.x;
-                    if x < 100 { self.selected_tab = DashboardTab::Overview; }
-                    else if x < 180 { self.selected_tab = DashboardTab::VirtualMachines; }
-                    else if x < 280 { self.selected_tab = DashboardTab::Resources; }
-                    else if x < 380 { self.selected_tab = DashboardTab::Storage; }
-                    else if x < 480 { self.selected_tab = DashboardTab::Network; }
-                    else if x < 580 { self.selected_tab = DashboardTab::Devices; }
-                    else if x < 680 { self.selected_tab = DashboardTab::Console; }
-                    else if x < 780 { self.selected_tab = DashboardTab::Test; }
-                    else if x < 880 { self.selected_tab = DashboardTab::Settings; }
-                    else if x < 980 { self.selected_tab = DashboardTab::Packages; }
-                    else if x < 1080 { self.selected_tab = DashboardTab::Apps; }
-                } else if matches!(self.selected_tab, DashboardTab::Storage) {
-                    if self.cursor.y >= 96 && self.cursor.y <= 130 {
-                        let mut tab_x = 16usize;
-                        for (d_idx, disk) in self.storage_disks.iter().enumerate() {
-                            let label_text = if !disk.volume_label.is_empty() {
-                                format!("{}: [{}]", disk.alias, disk.volume_label)
-                            } else if disk.total_bytes > 0 {
-                                let size_str = if disk.total_bytes >= 1024 * 1024 * 1024 {
-                                    format!("{}GB", disk.total_bytes / (1024 * 1024 * 1024))
-                                } else {
-                                    format!("{}MB", disk.total_bytes / (1024 * 1024))
-                                };
-                                format!("{}: ({})", disk.alias, size_str)
-                            } else {
-                                format!("{}: {}", disk.alias, disk.media_type)
-                            };
-                            let tab_w = (label_text.len() * 8 + 16).max(84);
-                            if self.cursor.x >= tab_x as i32 && self.cursor.x <= (tab_x + tab_w) as i32 {
-                                self.select_disk_tab(d_idx);
-                                break;
-                            }
-                            tab_x += tab_w + 6;
-                        }
-                    }
-                }
             }
         }
 

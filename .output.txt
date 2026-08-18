@@ -1,0 +1,320 @@
+Command finished with exit code 101.
+Command output:
+    Checking HPVMx v1.15.1 (C:\programming\RS\HPVMx)
+error[E0432]: unresolved import `crate::DASH_BACK_ENABLED`
+  --> src\ui\tabui.rs:10:54
+   |
+10 | use crate::{runtime, vdebug, TSC_PER_US, HYPERVISOR, DASH_BACK_ENABLED};
+   |                                                      ^^^^^^^^^^^^^^^^^ no `DASH_BACK_ENABLED` in the root
+
+error[E0599]: no method named `len` found for reference `&(Color, alloc::string::String, alloc::string::String)` in the current scope
+   --> src\ui\tabui.rs:756:31
+    |
+756 |             let text = if log.len() > ui.console_h_scroll_offset {
+    |                               ^^^ method not found in `&(Color, alloc::string::String, alloc::string::String)`
+    |
+help: some of the expressions' fields have a method of the same name
+    |
+756 |             let text = if log.1.len() > ui.console_h_scroll_offset {
+    |                               ++
+756 |             let text = if log.2.len() > ui.console_h_scroll_offset {
+    |                               ++
+
+error[E0608]: cannot index into a value of type `&(Color, alloc::string::String, alloc::string::String)`
+   --> src\ui\tabui.rs:757:21
+    |
+757 |                 &log[ui.console_h_scroll_offset..]
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0609]: no field `dev_type` on type `&DeviceEntry`
+   --> src\ui\tabui.rs:921:100
+    |
+921 | ...   pg.draw_text_bg(list_x + 24, row_y, &format!("{:<40} {:<11} {}", dev.name, dev.dev_type, dev.status), dev_fg, dev_bg);
+    |                                                                                      ^^^^^^^^ unknown field
+    |
+    = note: available fields are: `name`, `path`
+
+error[E0609]: no field `status` on type `&DeviceEntry`
+   --> src\ui\tabui.rs:921:114
+    |
+921 | ...   pg.draw_text_bg(list_x + 24, row_y, &format!("{:<40} {:<11} {}", dev.name, dev.dev_type, dev.status), dev_fg, dev_bg);
+    |                                                                                                    ^^^^^^ unknown field
+    |
+    = note: available fields are: `name`, `path`
+
+error[E0061]: this method takes 6 arguments but 7 arguments were supplied
+    --> src\ui\tabui.rs:1459:12
+     |
+1459 |         pg.draw_button(x, y, 100, 24, "Button", false, false);
+     |            ^^^^^^^^^^^                                 ----- unexpected argument #7 of type `bool`
+     |
+note: method defined here
+    --> src\ui\pixel_graphics.rs:548:12
+     |
+ 548 |     pub fn draw_button(&mut self, x: usize, y: usize, width: usize, height: usize, text: &str, is_focused: bool) {
+     |            ^^^^^^^^^^^
+help: remove the extra argument
+     |
+1459 -         pg.draw_button(x, y, 100, 24, "Button", false, false);
+1459 +         pg.draw_button(x, y, 100, 24, "Button", false);
+     |
+
+error[E0061]: this method takes 6 arguments but 7 arguments were supplied
+    --> src\ui\tabui.rs:1460:12
+     |
+1460 |         pg.draw_button(x + 110, y, 100, 24, "Hovered", true, false);
+     |            ^^^^^^^^^^^                                       ----- unexpected argument #7 of type `bool`
+     |
+note: method defined here
+    --> src\ui\pixel_graphics.rs:548:12
+     |
+ 548 |     pub fn draw_button(&mut self, x: usize, y: usize, width: usize, height: usize, text: &str, is_focused: bool) {
+     |            ^^^^^^^^^^^
+help: remove the extra argument
+     |
+1460 -         pg.draw_button(x + 110, y, 100, 24, "Hovered", true, false);
+1460 +         pg.draw_button(x + 110, y, 100, 24, "Hovered", true);
+     |
+
+error[E0061]: this method takes 6 arguments but 7 arguments were supplied
+    --> src\ui\tabui.rs:1461:12
+     |
+1461 |         pg.draw_button(x + 220, y, 100, 24, "Pressed", false, true);
+     |            ^^^^^^^^^^^                                        ---- unexpected argument #7 of type `bool`
+     |
+note: method defined here
+    --> src\ui\pixel_graphics.rs:548:12
+     |
+ 548 |     pub fn draw_button(&mut self, x: usize, y: usize, width: usize, height: usize, text: &str, is_focused: bool) {
+     |            ^^^^^^^^^^^
+help: remove the extra argument
+     |
+1461 -         pg.draw_button(x + 220, y, 100, 24, "Pressed", false, true);
+1461 +         pg.draw_button(x + 220, y, 100, 24, "Pressed", false);
+     |
+
+error[E0061]: this method takes 6 arguments but 4 arguments were supplied
+    --> src\ui\tabui.rs:1464:12
+     |
+1464 |         pg.draw_checkbox(x, y, "Option Enabled", true);
+     |            ^^^^^^^^^^^^^------------------------------
+     |                         |      |
+     |                         |      argument #3 of type `bool` is missing
+     |                         argument #5 of type `bool` is missing
+     |
+note: method defined here
+    --> src\ui\pixel_graphics.rs:344:12
+     |
+ 344 |     pub fn draw_checkbox(&mut self, x: usize, y: usize, checked: bool, blocked: bool, disabled: bool, text: &str) {
+     |            ^^^^^^^^^^^^^                                -------------                 --------------
+help: provide the arguments
+     |
+1464 -         pg.draw_checkbox(x, y, "Option Enabled", true);
+1464 +         pg.draw_checkbox(x, y, /* bool */, true, /* bool */, "Option Enabled");
+     |
+
+error[E0061]: this method takes 6 arguments but 4 arguments were supplied
+    --> src\ui\tabui.rs:1465:12
+     |
+1465 |         pg.draw_checkbox(x + 150, y, "Option Disabled", false);
+     |            ^^^^^^^^^^^^^--------------------------------------
+     |                         |            |
+     |                         |            argument #3 of type `bool` is missing
+     |                         argument #5 of type `bool` is missing
+     |
+note: method defined here
+    --> src\ui\pixel_graphics.rs:344:12
+     |
+ 344 |     pub fn draw_checkbox(&mut self, x: usize, y: usize, checked: bool, blocked: bool, disabled: bool, text: &str) {
+     |            ^^^^^^^^^^^^^                                -------------                 --------------
+help: provide the arguments
+     |
+1465 -         pg.draw_checkbox(x + 150, y, "Option Disabled", false);
+1465 +         pg.draw_checkbox(x + 150, y, /* bool */, false, /* bool */, "Option Disabled");
+     |
+
+error[E0061]: this method takes 3 arguments but 4 arguments were supplied
+    --> src\ui\tabui.rs:1468:12
+     |
+1468 |         pg.draw_radio_button(x, y, "Radio Choice A", true);
+     |            ^^^^^^^^^^^^^^^^^       ---------------- unexpected argument #3 of type `&'static str`
+     |
+note: method defined here
+    --> src\ui\pixel_graphics.rs:380:12
+     |
+ 380 |     pub fn draw_radio_button(&mut self, x: usize, y: usize, checked: bool) {
+     |            ^^^^^^^^^^^^^^^^^
+help: remove the extra argument
+     |
+1468 -         pg.draw_radio_button(x, y, "Radio Choice A", true);
+1468 +         pg.draw_radio_button(x, y, true);
+     |
+
+error[E0061]: this method takes 3 arguments but 4 arguments were supplied
+    --> src\ui\tabui.rs:1469:12
+     |
+1469 |         pg.draw_radio_button(x + 150, y, "Radio Choice B", false);
+     |            ^^^^^^^^^^^^^^^^^             ---------------- unexpected argument #3 of type `&'static str`
+     |
+note: method defined here
+    --> src\ui\pixel_graphics.rs:380:12
+     |
+ 380 |     pub fn draw_radio_button(&mut self, x: usize, y: usize, checked: bool) {
+     |            ^^^^^^^^^^^^^^^^^
+help: remove the extra argument
+     |
+1469 -         pg.draw_radio_button(x + 150, y, "Radio Choice B", false);
+1469 +         pg.draw_radio_button(x + 150, y, false);
+     |
+
+error[E0061]: this method takes 6 arguments but 5 arguments were supplied
+    --> src\ui\tabui.rs:1472:12
+     |
+1472 |         pg.draw_slider(x, y, 200, 65, 100);
+     |            ^^^^^^^^^^^-------------------- argument #6 of type `bool` is missing
+     |
+note: method defined here
+    --> src\ui\pixel_graphics.rs:475:12
+     |
+ 475 |     pub fn draw_slider(&mut self, x: usize, y: usize, width: usize, value: usize, max: usize, vertical: bool) {
+     |            ^^^^^^^^^^^                                                                        --------------
+help: provide the argument
+     |
+1472 |         pg.draw_slider(x, y, 200, 65, 100, /* bool */);
+     |                                          ++++++++++++
+
+error[E0599]: no method named `draw_combo_box` found for mutable reference `&mut ui::pixel_graphics::PixelGraphics` in the current scope
+    --> src\ui\tabui.rs:1481:12
+     |
+1481 |         pg.draw_combo_box(x, y, 160, 22, "Item 1 (Selected)", false);
+     |            ^^^^^^^^^^^^^^ method not found in `&mut ui::pixel_graphics::PixelGraphics`
+
+error[E0599]: no method named `draw_text_input` found for mutable reference `&mut ui::pixel_graphics::PixelGraphics` in the current scope
+    --> src\ui\tabui.rs:1484:12
+     |
+1484 |         pg.draw_text_input(x, y, 200, 22, "Editable text...", true);
+     |            ^^^^^^^^^^^^^^^
+     |
+help: there is a method `draw_text` with a similar name, but with different arguments
+    --> src\ui\pixel_graphics.rs:320:5
+     |
+ 320 |     pub fn draw_text(&mut self, x: usize, y: usize, text: &str, color: u32) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+    --> src\ui\tabui.rs:1487:40
+     |
+1487 |         pg.draw_spinbox(x, y, 120, 22, 42);
+     |            ------------                ^^ expected `&str`, found integer
+     |            |
+     |            arguments to this method are incorrect
+     |
+note: method defined here
+    --> src\ui\pixel_graphics.rs:663:12
+     |
+ 663 |     pub fn draw_spinbox(&mut self, x: usize, y: usize, width: usize, value: i32, label: &str) {
+     |            ^^^^^^^^^^^^                                                          -----------
+
+error[E0599]: no method named `draw_tab_bar` found for mutable reference `&mut ui::pixel_graphics::PixelGraphics` in the current scope
+    --> src\ui\tabui.rs:1491:12
+     |
+1491 |         pg.draw_tab_bar(x, y, &tabs, 1);
+     |            ^^^^^^^^^^^^
+     |
+help: there is a method `draw_char` with a similar name
+     |
+1491 -         pg.draw_tab_bar(x, y, &tabs, 1);
+1491 +         pg.draw_char(x, y, &tabs, 1);
+     |
+
+error[E0308]: mismatched types
+    --> src\ui\tabui.rs:1500:53
+     |
+1500 |         pg.draw_table_view(x, y, 320, 80, &headers, rows);
+     |            ---------------                          ^^^^ expected `Vec<&[&str]>`, found `&[&[&str]]`
+     |            |
+     |            arguments to this method are incorrect
+     |
+     = note: expected struct `alloc::vec::Vec<&[&str]>`
+             found reference `&[&[&str]]`
+note: method defined here
+    --> src\ui\pixel_graphics.rs:584:12
+     |
+ 584 |     pub fn draw_table_view(&mut self, x: usize, y: usize, width: usize, height: usize, headers: &[&str], rows: Vec<&[&str]>) {
+     |            ^^^^^^^^^^^^^^^                                                                               ------------------
+help: try using a conversion method
+     |
+1500 |         pg.draw_table_view(x, y, 320, 80, &headers, rows.to_vec());
+     |                                                         +++++++++
+
+error[E0308]: mismatched types
+    --> src\ui\tabui.rs:1849:17
+     |
+1849 |         for (i, (label, val, desc)) in rows.iter().enumerate() {
+     |                 ^^^^^^^^^^^^^^^^^^     ----------------------- this is an iterator with items of type `(usize, &(alloc::string::String, alloc::string::String, bool, bool))`
+     |                 |
+     |                 expected a tuple with 4 elements, found one with 3 elements
+     |
+     = note: expected tuple `(alloc::string::String, alloc::string::String, bool, bool)`
+                found tuple `(_, _, _)`
+
+error[E0609]: no field `installed` on type `(&alloc::string::String, &Package)`
+    --> src\ui\tabui.rs:1931:37
+     |
+1931 |             let status_str = if pkg.installed { "Installed" } else { "Available" };
+     |                                     ^^^^^^^^^ unknown field
+     |
+     = note: available fields are: `0`, `1`
+
+error[E0609]: no field `installed` on type `(&alloc::string::String, &Package)`
+    --> src\ui\tabui.rs:1932:37
+     |
+1932 |             let status_col = if pkg.installed { 0x00FF00 } else { 0x888888 };
+     |                                     ^^^^^^^^^ unknown field
+     |
+     = note: available fields are: `0`, `1`
+
+error[E0609]: no field `name` on type `(&alloc::string::String, &Package)`
+    --> src\ui\tabui.rs:1935:68
+     |
+1935 |             pg.draw_text(list_x + 8, row_y, &format!("{:<16}", pkg.name), fg);
+     |                                                                    ^^^^ unknown field
+     |
+help: one of the expressions' fields has a field of the same name
+     |
+1935 |             pg.draw_text(list_x + 8, row_y, &format!("{:<16}", pkg.1.name), fg);
+     |                                                                    ++
+
+error[E0609]: no field `version` on type `(&alloc::string::String, &Package)`
+    --> src\ui\tabui.rs:1936:69
+     |
+1936 |             pg.draw_text(list_x + 140, row_y, &format!("{:<7}", pkg.version), 0xCCCCCC);
+     |                                                                     ^^^^^^^ unknown field
+     |
+help: one of the expressions' fields has a field of the same name
+     |
+1936 |             pg.draw_text(list_x + 140, row_y, &format!("{:<7}", pkg.1.version), 0xCCCCCC);
+     |                                                                     ++
+
+error[E0609]: no field `size_bytes` on type `(&alloc::string::String, &Package)`
+    --> src\ui\tabui.rs:1937:71
+     |
+1937 |             pg.draw_text(list_x + 200, row_y, &format!("{:>6}KB", pkg.size_bytes / 1024), 0xCCCCCC);
+     |                                                                       ^^^^^^^^^^ unknown field
+     |
+     = note: available fields are: `0`, `1`
+
+error[E0609]: no field `description` on type `(&alloc::string::String, &Package)`
+    --> src\ui\tabui.rs:1939:52
+     |
+1939 |             pg.draw_text(list_x + 380, row_y, &pkg.description, 0xAAAAAA);
+     |                                                    ^^^^^^^^^^^ unknown field
+     |
+help: one of the expressions' fields has a field of the same name
+     |
+1939 |             pg.draw_text(list_x + 380, row_y, &pkg.1.description, 0xAAAAAA);
+     |                                                    ++
+
+Some errors have detailed explanations: E0061, E0308, E0432, E0599, E0608, E0609.
+For more information about an error, try `rustc --explain E0061`.
+error: could not compile `HPVMx` (bin "HPVMx") due to 25 previous errors

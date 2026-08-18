@@ -3,14 +3,34 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use uefi::proto::console::text::{Key, ScanCode};
 use crate::env::{AppInfo, Environment, Runnable};
-use crate::ui::{pixel_graphics, ResourceMonitorTab, SystemResources};
+use crate::ui::{pixel_graphics, ResourceMonitorTab, SystemResources, VmDisplayInfo};
 use crate::ui::pixel_graphics::PixelGraphics;
 use crate::{vdebug, TSC_PER_US};
 
 #[derive(Clone)]
+pub struct ProcessItem {
+    pub pid: usize,
+    pub name: String,
+    pub state: String,
+    pub is_minimized: bool,
+    pub is_focused: bool,
+    pub cpu_time: usize,
+    pub ui_time: usize,
+    pub win_w: usize,
+    pub win_h: usize,
+    pub win_x: usize,
+    pub win_y: usize,
+    pub is_maximized: bool,
+}
+
+#[derive(Clone)]
 pub struct X_Resources {
     pub resources: SystemResources,
-    resmon_tab: ResourceMonitorTab
+    pub resmon_tab: ResourceMonitorTab,
+    pub procs: Vec<ProcessItem>,
+    pub vms: Vec<VmDisplayInfo>,
+    pub cycles: usize,
+    pub selected_process_idx: usize,
 }
 
 impl X_Resources {
@@ -40,18 +60,26 @@ impl X_Resources {
                 cpu_history: vec![],
             },
             resmon_tab: ResourceMonitorTab::Resources,
+            procs: Vec::new(),
+            vms: Vec::new(),
+            cycles: 0,
+            selected_process_idx: 0,
         }
+    }
+
+    pub fn total_process_count(&self) -> usize {
+        2 + self.procs.len() + self.vms.len()
     }
 }
 
 impl Runnable for X_Resources {
-    fn draw(&self, pg: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) {
+    fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
         let margin = 16usize;
         let gutter = 12usize;
         let line_h = 15usize;
         let content_top = y + 12;
-        let width = 600;
-        let height = 500;
+        let width = 760;
+        let height = 540;
         match self.resmon_tab {
             ResourceMonitorTab::Resources => {
                 pg.draw_text(margin, content_top - 6, "[ Resources ]  | Processes |", 0xFFFFFF);
@@ -121,168 +149,246 @@ impl Runnable for X_Resources {
                 }
                 pg.draw_heatmap(right_x + 10, hm_y + 20, right_w - 20, 80, 4, 4, &hm_data);
 
-                // draw u64 le text for all stats
-
                 pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.cpu_usage as u64, 0xFFFFFF);
                 pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.used_memory_mb as u64, 0xFFFFFF);
                 pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.frame_ms as u64, 0xFFFFFF);
                 pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.gpu_usage as u64, 0xFFFFFF);
             }
             ResourceMonitorTab::Processes => {
-                pg.draw_text(margin, content_top - 6, "| Resources |  [ Processes ]", 0xFFFFFF);
+                // Top sub-tab selector buttons
+                pg.fill_rect(margin, content_top - 6, 110, 22, 0x333333);
+                pg.draw_rect_outline(margin, content_top - 6, 110, 22, 0x666666);
+                pg.draw_text(margin + 12, content_top - 2, "Resources", 0xAAAAAA);
+
+                pg.fill_rect(margin + 120, content_top - 6, 110, 22, 0x007799);
+                pg.draw_rect_outline(margin + 120, content_top - 6, 110, 22, 0x00FFFF);
+                pg.draw_text(margin + 132, content_top - 2, "Processes", 0xFFFFFF);
 
                 let panel_x = margin;
-                let panel_y = content_top + margin;
-                let panel_w = 600usize;
-                let panel_h = 480usize;
+                let panel_y = content_top + 22;
+                let panel_w = 720usize;
+                let panel_h = 460usize;
 
-                pg.draw_text_bg(panel_x, panel_y - 4, "Process Monitor", 0x20FF20, 0x222222);
-                let headers: &[&str] = &["name", "pid", "cycles", "cpu time"];
-                // let cycles_string = format!("{:#?}", self.cycles);
-                // let cycles_str = cycles_string.as_str();
-                let mut rows: Vec<&[&str]> = vec![
-                    &["system", "0", "x", "x"],
-                    &["hardware", "9", "x", "x"],
-                ];
+                // Summary banner box
+                let banner_h = 42usize;
+                pg.fill_rect(panel_x, panel_y, panel_w, banner_h, 0x181F2A);
+                pg.draw_rect_outline(panel_x, panel_y, panel_w, banner_h, 0x0088AA);
 
-                // // 1. Store actual fixed-size String arrays in memory
-                // let mut row_storage: Vec<[String; 3]> = Vec::with_capacity(self.active_apps.len());
-                //
-                // for app in &self.active_apps {
-                //     let name = app.application.name.to_string();
-                //     let pid = format!("{:#?}", app.pid);
-                //     let cycles = "x".to_string();
-                //
-                //     row_storage.push([name, pid, cycles]);
-                // }
-                //
-                // // 2. Build slice references into the stored arrays
-                // // Constructing &[&str] views referencing the backing String data
-                // let row_refs: Vec<[&str; 3]> = row_storage
-                //     .iter()
-                //     .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str()])
-                //     .collect();
-                //
-                // // 3. Push slice views into rows
-                // for row in &row_refs {
-                //     rows.push(row);
-                // }
+                let running_apps_count = self.procs.iter().filter(|a| !a.is_minimized).count();
+                let min_apps_count = self.procs.len().saturating_sub(running_apps_count);
+                let total_procs = self.total_process_count();
 
-                // 2. Hoist the backing storage variables OUTSIDE the fallback scope
-                // These must stay alive as long as `rows` is being used
-                let mut row_storage: Vec<[String; 4]> = Vec::new();
-                let mut row_refs: Vec<[&str; 4]> = Vec::new();
+                let summary_line1 = format!(
+                    "Total Processes: {} | Active Windows: {} ({} Minimized) | VMs: {}",
+                    total_procs,
+                    self.procs.len(),
+                    min_apps_count,
+                    self.vms.len(),
+                );
+                let tsc_mhz = unsafe { TSC_PER_US };
+                let summary_line2 = format!(
+                    "CPU Load: {}% | Memory: {} / {} MB | Host Clock: {} MHz",
+                    self.resources.cpu_usage,
+                    self.resources.used_memory_mb,
+                    self.resources.total_memory_mb,
+                    tsc_mhz,
+                );
+                pg.draw_text(panel_x + 10, panel_y + 5, &summary_line1, 0x00FFFF);
+                pg.draw_text(panel_x + 10, panel_y + 22, &summary_line2, 0xCCCCCC);
 
-                // Wrap the logic in a closure or function that returns an Option/Result
-                // 3. Fallible logic scope (your "try" block)
-                // let mut allocate_rows = || -> Option<()> {
-                //     // Safely allocate room for the strings
-                //     row_storage.try_reserve(self.active_apps.len()).ok()?;
-                //
-                //     for app in &self.active_apps {
-                //         let name = app.application.name.to_string();
-                //         let pid = format!("{:#?}", app.pid);
-                //         let cycles = "x".to_string();
-                //
-                //         row_storage.push([name, pid, cycles]);
-                //     }
-                //
-                //     // Safely reserve room for the slice references
-                //     row_refs.try_reserve(self.active_apps.len()).ok()?;
-                //
-                //     // Build the string views into the outer row_refs
-                //     row_refs.extend(
-                //         row_storage
-                //             .iter()
-                //             .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str()])
-                //     );
-                //
-                //     // Push slice views into rows
-                //     for row in &row_refs {
-                //         rows.push(row);
-                //     }
-                //
-                //     Some(())
-                // };
-                //
-                // // "Try/Except" wrapper: If it returns None, execution safely skips the rest
-                // if allocate_rows().is_none() {
-                //     vdebug!("ui", "OOM alloc error DashboardTab::Resources.ResourceMonitorTab::Processes.var:rows")
-                // }
+                // Table Header
+                let table_y = panel_y + banner_h + 10;
+                let header_h = 24usize;
+                pg.fill_rect(panel_x, table_y, panel_w, header_h, 0x243042);
+                pg.draw_rect_outline(panel_x, table_y, panel_w, header_h, 0x4A607A);
 
-                // 2. Use a labeled loop as a "try" block that we can break out of early
-                vdebug!("ui", "[TRY] Entering 'try_block loop...");
+                // Column offsets
+                let col_pid = panel_x + 8;
+                let col_name = panel_x + 60;
+                let col_state = panel_x + 240;
+                let col_cpu = panel_x + 340;
+                let col_cyc = panel_x + 410;
+                let col_mem = panel_x + 500;
 
-                // 'try_block: loop {
-                //     vdebug!("ui", "[TRY] Checking capacity for row_storage...");
-                //     // Fallibly allocate capacity for strings
-                //     if row_storage.try_reserve(self.active_apps.len()).is_err() {
-                //         vdebug!("ui", "[FAIL] Allocation failed inside row_storage.try_reserve!");
-                //         break 'try_block;
-                //     }
-                //     vdebug!("ui", "[SUCCESS] row_storage memory reserved.");
-                //
-                //     vdebug!("ui", "[TRY] Beginning active_apps iteration loop...");
-                //
-                //     // row_storage.push([String::from("dashboard"), String::from("14"), format!("{:#?}", self.cycles), format!("{:#?}", ((self.resources.fps as u64 * self.cycles as u64) / (TSC_PER_US * 1000000)) * 100)]);
-                //
-                //     for (index, app) in self.active_apps.iter().enumerate() {
-                //         // NOTE: If your UEFI app freezes right here, one of these three allocations is failing.
-                //         // Rust's default allocator will panic on OOM here unless custom catch mechanics are present.
-                //         let name = app.application.name.to_string();
-                //         let pid = format!("{:#?}", app.pid);
-                //         let total_cyc = app.ui_time + app.cpu_time;
-                //         let cycles = format!("{:#?}", total_cyc);
-                //
-                //         row_storage.push([name, pid, cycles, format!("{:#?}", ((self.resources.fps as u64 * app.cpu_time as u64) / TSC_PER_US * 1000000) * 100)]);
-                //     }
-                //     vdebug!("ui", "[SUCCESS] Finished active_apps loop. row_storage populated.");
-                //
-                //     vdebug!("ui", "[TRY] Checking capacity for row_refs...");
-                //     // Fallibly allocate capacity for the slice references
-                //     if row_refs.try_reserve(self.active_apps.len()).is_err() {
-                //         vdebug!("ui", "[FAIL] Allocation failed inside row_refs.try_reserve!");
-                //         break 'try_block;
-                //     }
-                //     vdebug!("ui", "[SUCCESS] row_refs memory reserved.");
-                //
-                //     vdebug!("ui", "[TRY] Extending row_refs mapping...");
-                //     // Build views using references pointing directly to row_storage strings
-                //     row_refs.extend(
-                //         row_storage
-                //             .iter()
-                //             .map(|row| [row[0].as_str(), row[1].as_str(), row[2].as_str(), row[3].as_str()])
-                //     );
-                //     vdebug!("ui", "[SUCCESS] row_refs extended successfully.");
-                //
-                //     vdebug!("ui", "[TRY] Pushing slice views into rows vector...");
-                //     // Safely push slice views into rows
-                //     for row in &row_refs {
-                //         rows.push(&row[..]);
-                //     }
-                //     vdebug!("ui", "[SUCCESS] All elements safely integrated into rows.");
-                //
-                //     break 'try_block;
-                // }
+                pg.draw_text(col_pid, table_y + 5, "PID", 0x88CCFF);
+                pg.draw_text(col_name, table_y + 5, "Process Name", 0x88CCFF);
+                pg.draw_text(col_state, table_y + 5, "State", 0x88CCFF);
+                pg.draw_text(col_cpu, table_y + 5, "CPU %", 0x88CCFF);
+                pg.draw_text(col_cyc, table_y + 5, "Cycles", 0x88CCFF);
+                pg.draw_text(col_mem, table_y + 5, "Window / Memory", 0x88CCFF);
 
-                vdebug!("ui", "[EXIT] Left the 'try_block loop.");
+                // Process Rows
+                let row_h = 24usize;
+                let max_visible_rows = (panel_h.saturating_sub(banner_h + 10 + header_h + 50)) / row_h;
+                let rows_start_y = table_y + header_h + 2;
 
+                for i in 0..total_procs.min(max_visible_rows) {
+                    let cur_y = rows_start_y + i * row_h;
+                    let is_selected = i == self.selected_process_idx;
 
-                pg.draw_table_view(panel_x, panel_y + 4, panel_w, panel_h, headers, rows);
+                    // Background
+                    if is_selected {
+                        pg.fill_rect(panel_x, cur_y, panel_w, row_h - 2, 0x004488);
+                        pg.draw_rect_outline(panel_x, cur_y, panel_w, row_h - 2, 0x00FFFF);
+                    } else if i % 2 == 0 {
+                        pg.fill_rect(panel_x, cur_y, panel_w, row_h - 2, 0x16161E);
+                    } else {
+                        pg.fill_rect(panel_x, cur_y, panel_w, row_h - 2, 0x1F1F2A);
+                    }
+
+                    let (pid_str, name_str, state_str, state_col, cpu_str, cyc_str, mem_str) = if i == 0 {
+                        (
+                            "0".to_string(),
+                            "HPVMx Hypervisor".to_string(),
+                            "Running".to_string(),
+                            0x55FF55,
+                            format!("{}%", self.resources.cpu_usage),
+                            format!("{:.1}M", self.cycles as f64 / 1_000_000.0),
+                            "Kernel Ring 0".to_string(),
+                        )
+                    } else if i == 1 {
+                        (
+                            "1".to_string(),
+                            "Hardware & Timers".to_string(),
+                            "Active".to_string(),
+                            0x55FF55,
+                            "1%".to_string(),
+                            format!("{}K", tsc_mhz),
+                            "Hardware I/O".to_string(),
+                        )
+                    } else if i < 2 + self.procs.len() {
+                        let app_idx = i - 2;
+                        let app = &self.procs[app_idx];
+                        let is_min = app.is_minimized;
+                        let is_foc = app.is_focused;
+                        let (st, st_col) = if is_min {
+                            ("Minimized".to_string(), 0xFFAA00)
+                        } else if is_foc {
+                            ("Focused".to_string(), 0x00FFFF)
+                        } else {
+                            ("Running".to_string(), 0x55FF55)
+                        };
+
+                        let cpu_pct = ((app.cpu_time as u64 * self.resources.fps.max(1) as u64) / (tsc_mhz * 1_000_000).max(1)) * 100;
+                        let total_cyc = app.cpu_time + app.ui_time;
+                        let cyc_formatted = if total_cyc >= 1_000_000 {
+                            format!("{:.1}M", total_cyc as f64 / 1_000_000.0)
+                        } else if total_cyc >= 1_000 {
+                            format!("{:.1}K", total_cyc as f64 / 1000.0)
+                        } else {
+                            format!("{}", total_cyc)
+                        };
+
+                        let win_info = if app.is_maximized {
+                            "Maximized".to_string()
+                        } else if is_min {
+                            "Minimized (BG)".to_string()
+                        } else {
+                            format!("{}x{} @ {},{}", app.win_w, app.win_h, app.win_x, app.win_y)
+                        };
+
+                        (
+                            format!("{}", app.pid),
+                            app.name.clone(),
+                            st,
+                            st_col,
+                            format!("{}%", cpu_pct.min(100)),
+                            cyc_formatted,
+                            win_info,
+                        )
+                    } else {
+                        let vm_idx = i - 2 - self.procs.len();
+                        let vm = &self.vms[vm_idx];
+                        let is_run = vm.state.contains("running");
+                        let st_col = if is_run { 0x55FF55 } else { 0x888888 };
+                        (
+                            format!("{}", 100 + vm.id),
+                            format!("VM: {}", vm.name),
+                            vm.state.clone(),
+                            st_col,
+                            format!("{}%", vm.cpu_usage),
+                            format!("{}s", vm.uptime_seconds),
+                            format!("{} MB RAM", vm.memory_usage_mb),
+                        )
+                    };
+
+                    let txt_col = if is_selected { 0xFFFFFF } else { 0xDDDDDD };
+                    pg.draw_text(col_pid, cur_y + 4, &pid_str, 0x888888);
+                    pg.draw_text(col_name, cur_y + 4, &name_str, txt_col);
+                    pg.draw_text(col_state, cur_y + 4, &state_str, state_col);
+                    pg.draw_text(col_cpu, cur_y + 4, &cpu_str, if cpu_str != "0%" { 0xFF6666 } else { 0x888888 });
+                    pg.draw_text(col_cyc, cur_y + 4, &cyc_str, 0xAAAAAA);
+                    pg.draw_text(col_mem, cur_y + 4, &mem_str, 0xAAAAAA);
+                }
+
+                // Action buttons bar at bottom
+                let btn_y = panel_y + panel_h.saturating_sub(38);
+                let btn_h = 24usize;
+
+                // [ End Task (K) ]
+                pg.fill_rect(panel_x, btn_y, 110, btn_h, 0x880000);
+                pg.draw_rect_outline(panel_x, btn_y, 110, btn_h, 0xFF4444);
+                pg.draw_text(panel_x + 10, btn_y + 4, "[K] End Task", 0xFFFFFF);
+
+                // [ Focus Window (F) ]
+                pg.fill_rect(panel_x + 120, btn_y, 125, btn_h, 0x006666);
+                pg.draw_rect_outline(panel_x + 120, btn_y, 125, btn_h, 0x00FFFF);
+                pg.draw_text(panel_x + 130, btn_y + 4, "[F] Focus Window", 0xFFFFFF);
+
+                // [ Min/Restore (M) ]
+                pg.fill_rect(panel_x + 255, btn_y, 130, btn_h, 0x334466);
+                pg.draw_rect_outline(panel_x + 255, btn_y, 130, btn_h, 0x6699FF);
+                pg.draw_text(panel_x + 265, btn_y + 4, "[M] Min/Restore", 0xFFFFFF);
+
+                // [ < Resources ]
+                pg.fill_rect(panel_x + 395, btn_y, 115, btn_h, 0x333333);
+                pg.draw_rect_outline(panel_x + 395, btn_y, 115, btn_h, 0x888888);
+                pg.draw_text(panel_x + 405, btn_y + 4, "[<] Resources", 0xFFFFFF);
+
+                // Key hints
+                pg.draw_text(panel_x + 520, btn_y + 4, "UP/DOWN: Select | K: Kill | F: Focus", 0x888888);
             }
         }
     }
 
-    fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment) {
+    fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
         if let Some(data) = env.global_data.as_ref() {
             self.resources = data.resources.clone();
             self.resmon_tab = data.resmon_tab.clone();
+            self.vms = data.vms.clone();
+            self.cycles = data.cycles;
+            self.selected_process_idx = data.selected_process_idx;
+
+            self.procs.clear();
+            for (idx, app) in data.active_apps.iter().enumerate() {
+                self.procs.push(ProcessItem {
+                    pid: app.pid,
+                    name: app.application.name.clone(),
+                    state: if app.window.is_minimized { "Minimized".to_string() } else if data.focused_process_idx == Some(idx) { "Focused".to_string() } else { "Running".to_string() },
+                    is_minimized: app.window.is_minimized,
+                    is_focused: data.focused_process_idx == Some(idx),
+                    cpu_time: app.cpu_time,
+                    ui_time: app.ui_time,
+                    win_w: app.window.width,
+                    win_h: app.window.height,
+                    win_x: app.window.x,
+                    win_y: app.window.y,
+                    is_maximized: app.window.is_maximized,
+                });
+            }
         }
     }
     fn input(&mut self, key: Key) {
         match key {
             Key::Special(ScanCode::LEFT) => self.resmon_tab = ResourceMonitorTab::Resources,
             Key::Special(ScanCode::RIGHT) => self.resmon_tab = ResourceMonitorTab::Processes,
+            Key::Special(ScanCode::UP) => {
+                self.selected_process_idx = self.selected_process_idx.saturating_sub(1);
+            }
+            Key::Special(ScanCode::DOWN) => {
+                let total = self.total_process_count();
+                self.selected_process_idx = (self.selected_process_idx + 1).min(total.saturating_sub(1));
+            }
             _ => {}
         }
     }

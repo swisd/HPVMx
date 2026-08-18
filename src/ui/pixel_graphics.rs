@@ -499,36 +499,46 @@ impl PixelGraphics {
     }
 
     pub fn draw_cursor(&mut self, x: usize, y: usize) {
-        let color = 0xFFFFFF;
-        let outline = 0x000000;
-        
-        // // Simple arrow cursor
-        // for i in 0..12 {
-        //     for j in 0..i {
-        //         self.draw_pixel(x + j, y + i, color);
-        //     }
-        //     self.draw_pixel(x + i, y + i, outline);
-        //     self.draw_pixel(x, y + i, outline);
-        // }
-        // for j in 0..12 {
-        //     self.draw_pixel(x + j, y + 12, outline);
-        // }
-
-        // Define the 4 vertices defining the outer perimeter of the dart
-        let vertices = [
-            (x, y),          // Top point (tip)
-            (x, y + 12),     // Bottom-left corner
-            (x + 4, y + 8),  // Inner notch point
-            (x + 12, y + 12) // Bottom-right tip
+        #[rustfmt::skip]
+        const CURSOR_BITMAP: [[u8; 12]; 19] = [
+            [1,0,0,0,0,0,0,0,0,0,0,0],
+            [1,1,0,0,0,0,0,0,0,0,0,0],
+            [1,2,1,0,0,0,0,0,0,0,0,0],
+            [1,2,2,1,0,0,0,0,0,0,0,0],
+            [1,2,2,2,1,0,0,0,0,0,0,0],
+            [1,2,2,2,2,1,0,0,0,0,0,0],
+            [1,2,2,2,2,2,1,0,0,0,0,0],
+            [1,2,2,2,2,2,2,1,0,0,0,0],
+            [1,2,2,2,2,2,2,2,1,0,0,0],
+            [1,2,2,2,2,2,2,2,2,1,0,0],
+            [1,2,2,2,2,2,1,1,1,1,0,0],
+            [1,2,2,1,2,2,1,0,0,0,0,0],
+            [1,2,1,0,1,2,2,1,0,0,0,0],
+            [1,1,0,0,1,2,2,1,0,0,0,0],
+            [1,0,0,0,0,1,2,2,1,0,0,0],
+            [0,0,0,0,0,1,2,2,1,0,0,0],
+            [0,0,0,0,0,0,1,2,2,1,0,0],
+            [0,0,0,0,0,0,1,2,2,1,0,0],
+            [0,0,0,0,0,0,0,1,1,0,0,0],
         ];
 
-        // Fill the shape interior first
-        self.polygon_fill(&vertices, color);
-
-        // Overlay the 4-edged black outline around the vertices
-        self.polygon_outline(&vertices, outline);
-
-
+        for (row, line) in CURSOR_BITMAP.iter().enumerate() {
+            let py = y + row;
+            if py >= self.height {
+                break;
+            }
+            for (col, &pixel) in line.iter().enumerate() {
+                let px = x + col;
+                if px >= self.width {
+                    break;
+                }
+                match pixel {
+                    1 => self.draw_pixel(px, py, 0x000000), // Black outline
+                    2 => self.draw_pixel(px, py, 0xFFFFFF), // White body
+                    _ => {}
+                }
+            }
+        }
     }
 
     pub fn resolution(&self) -> (usize, usize) {

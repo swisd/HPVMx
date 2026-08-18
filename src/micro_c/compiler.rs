@@ -8,6 +8,7 @@ use crate::arch::Architecture;
 use crate::arch::win64::WIN64Backend;
 use crate::arch::arm64::ARM64Backend;
 use crate::arch::x86_64_raw::X86_64RawBackend;
+use crate::arch::bytecode64::Bytecode64Backend;
 use crate::codegen_ir::IRGenerator;
 use crate::error::error;
 use crate::lexer::Lexer;
@@ -15,7 +16,7 @@ use crate::parser::Parser;
 
 /// Compiles the given Micro-C source code for the specified architecture.
 ///
-/// Supported architectures: "win64", "arm64", "x86_64".
+/// Supported architectures: "win64", "arm64", "x86_64", "x86_64_hsis", "bytecode64".
 ///
 /// Returns the generated assembly code as a String.
 pub fn compile(source: &str, arch: &str) -> String {
@@ -41,7 +42,15 @@ pub fn compile(source: &str, arch: &str) -> String {
         "x86_64" => {
             let mut backend = X86_64RawBackend::new(irgen.function_params);
             backend.emit_program(&irgen.code)
-        }
+        },
+        "x86_64_hsis" => {
+            let mut backend = X86_64RawBackend::new(irgen.function_params);
+            backend.emit_program(&irgen.code)
+        },
+        "bytecode64" => {
+            let mut backend = Bytecode64Backend::new(irgen.function_params);
+            backend.emit_program(&irgen.code)
+        },
 
         _ => {
             error("Unsupported architecture");
@@ -148,5 +157,69 @@ export fn main() {
 
         assert!(asm.contains("jmp L"));
         assert!(asm.contains("L"));
+    }
+
+    #[test]
+    fn compiles_bytecode64_basic_function() {
+        let bc = compile(
+            r#"
+extern fn host_calc(x, y);
+
+export fn add(a, b) {
+    let sum = a + b;
+    return sum;
+}
+
+export fn main() {
+    let result = add(10, 20);
+    return host_calc(result, 42);
+}
+"#,
+            "bytecode64",
+        );
+
+        assert!(bc.contains("; ARCH bytecode64"));
+        assert!(bc.contains(".extern host_calc"));
+        assert!(bc.contains("add:"));
+        assert!(bc.contains("add64"));
+        assert!(bc.contains("ret64"));
+        assert!(bc.contains("main:"));
+        assert!(bc.contains("call64"));
+    }
+
+    #[test]
+    fn compiles_bytecode64_structs_memory_and_loops() {
+        let bc = compile(
+            r#"
+struct Vector {
+    x: i64;
+    y: i64;
+}
+
+export fn main() {
+    let v = alloc_struct(Vector);
+    v.x = 15;
+    v.y = 25;
+    let ptr = 0x2000;
+    poke(ptr, v.x + v.y);
+
+    loop {
+        if (peek(ptr) == 40) {
+            break;
+        }
+    }
+
+    return peek(ptr);
+}
+"#,
+            "bytecode64",
+        );
+
+        assert!(bc.contains("alloca64"));
+        assert!(bc.contains("store64"));
+        assert!(bc.contains("load64"));
+        assert!(bc.contains("eq64"));
+        assert!(bc.contains("jz"));
+        assert!(bc.contains("jmp"));
     }
 }

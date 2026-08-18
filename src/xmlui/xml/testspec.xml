@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<Window
+        width="200"
+        height="200"
+        var:z-index="0"
+        type="app"
+        title="test-window"
+>
+    <include source="path" />
+
+    <!-- either micro-c or a custom scripting language -->
+    <subscript name="testscript" type="module">
+        fn add(a, b) {
+        return a + b;
+        }
+    </subscript>
+    <DisplayGroup name="container">
+        <!-- Text & Fonts -->
+        <Text x="20" y="20" color="0xFFFFFF">
+            Test Text
+        </Text>
+        <Text x="20" y="50" color="0xFFFFFF">
+            Add: {testscript::add(1,2)}
+        </Text>
+        <TextAdv x="20" y="80" text="Scaled Text" color="0xFFFFFF" scale="2" />
+        <TextBg x="20" y="100" text="Text with BG" color="0xFFFFFF" bg="0x000000" />
+        <Char x="20" y="120" char="A" color="0xFFFFFF" />
+        <CharAdv x="30" y="120" char="B" color="0xFFFFFF" scale="2" />
+        <CharBg x="50" y="120" char="C" color="0xFFFFFF" bg="0x000000" />
+        <Symbol x="70" y="120" symbol="0x01" color="0xFFFFFF" />
+        <U64LeSym x="90" y="120" value="12345" color="0xFFFFFF" />
+        <LcdNumber x="20" y="140" value="1234" />
+
+        <!-- Primitive Shapes & Lines -->
+        <Pixel x="10" y="10" color="0xFFFFFF" />
+        <Line x1="0" y1="0" x2="100" y2="100" color="0xFFFFFF" />
+        <LineAdv x1="0" y1="10" x2="100" y2="110" color="0xFFFFFF" thickness="2" style="1" />
+        <LineStyled x1="0" y1="20" x2="100" y2="120" color="0xFFFFFF" style="1" />
+        <FillRect x="10" y="150" width="50" height="30" color="0xFF0000" />
+        <RectOutline x="70" y="150" width="50" height="30" color="0x00FF00" />
+        <RectOutlineAdv x="130" y="150" width="50" height="30" color="0x0000FF" thickness="2" style="1" />
+        <OctagonOutline x="20" y="200" radius="15" colorLight="0xFFFFFF" colorDark="0x888888" />
+        <PolygonOutline points="(0,0),(10,20),(20,0)" />
+        <PolygonFill points="(30,30),(40,50),(50,30)" />
+
+        <!-- Controls & UI Components -->
+        <Button x="20" y="240" width="80" height="25" text="Click Me" isFocused="true" />
+        <Checkbox x="20" y="275" checked="true" blocked="false" disabled="false" text="Enable Feature" />
+        <TristateCheckbox x="20" y="295" text="Option" color="0xFFFFFF" some="true" checked="false" />
+        <RadioButton x="20" y="315" checked="true" />
+        <ProgressBar x="20" y="335" width="100" height="15" value="50" max="100" color="0x00FF00" />
+        <Slider x="20" y="360" width="100" value="25" max="100" vertical="false" />
+        <Spinbox x="20" y="380" width="60" value="10" label="Speed" />
+        <DoubleSpinbox x="20" y="410" width="60" value="3.14" precision="2" />
+        <Dial x="100" y="380" radius="20" value="4" max="10" />
+
+        <!-- Data Views & Complex Controls -->
+        <LineGraph x="20" y="440" width="150" height="50" data="{[10, 20, 15, 30]}" maxVal="50" color="0x00FFFF" len="4" />
+        <ListView x="20" y="500" width="100" height="80" items="{['Item 1', 'Item 2']}" selectedIdx="0" />
+        <TableView x="130" y="500" width="150" height="80" headers="{['ID', 'Name']}" rows="{[['1', 'Alpha'], ['2', 'Beta']]}" />
+        <TreeView x="20" y="590" width="120" height="100" root="{tree_data}" />
+        <TreeViewIcon x="150" y="590" width="120" height="100" root="{tree_data}" icon="{icon_data}" />
+        <Heatmap x="20" y="700" width="100" height="100" rows="5" cols="5" data="{heatmap_data}" />
+        <LogViewer x="130" y="700" width="200" height="100" logs="{log_data}" />
+        <CommandPalette query="search..." results="{['Cmd 1', 'Cmd 2']}" selected="0" scrollOffset="0" />
+        <Header x="0" y="0" width="200" height="20" tscPerUs="1000" modes="[true, false, true]" resources="[10, 20, 30, 40]" />
+        <Toast text="Operation complete" durationFrames="60" yadj="0" />
+
+        <!-- Images & Icons -->
+        <Icon x="20" y="810" width="16" height="16" data="{icon_data}" />
+        <PackageIcon x="40" y="810" warning="false" />
+        <Cursor x="100" y="100" />
+        <Bmp x="20" y="830" path="assets/logo.bmp" />
+        <BmpBytes x="20" y="860" data="{bmp_bytes_data}" />
+        <BufferAt x="20" y="890" width="32" height="32" bufferPtr="{ptr_val}" />
+
+        <!-- Overlay Effects -->
+        <Scanlines />
+        <Dither />
+        <Glitch gy="10" />
+        <EdgeAberration maxStrength="0.5" />
+        <AppContextBorder appname="test-app" />
+    </DisplayGroup>
+</Window>

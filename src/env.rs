@@ -5,6 +5,11 @@
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use core::cell::UnsafeCell;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use uefi::fs::Path;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -228,6 +233,227 @@ impl Clone for Box<dyn BackgroundTask> {
     }
 }
 
+/// A lightweight spinlock implementation suitable for `#![no_std]` bare-metal environments.
+#[derive(Debug)]
+pub struct SpinLock<T> {
+    locked: AtomicBool,
+    data: UnsafeCell<T>,
+}
+
+unsafe impl<T: Send> Sync for SpinLock<T> {}
+unsafe impl<T: Send> Send for SpinLock<T> {}
+
+impl<T> SpinLock<T> {
+    /// Creates a new `SpinLock` protecting the given data.
+    pub const fn new(data: T) -> Self {
+        Self {
+            locked: AtomicBool::new(false),
+            data: UnsafeCell::new(data),
+        }
+    }
+
+    /// Acquires the spinlock, spinning until the lock is acquired.
+    pub fn lock(&self) -> SpinLockGuard<'_, T> {
+        while self.locked.swap(true, Ordering::Acquire) {
+            core::hint::spin_loop();
+        }
+        SpinLockGuard { lock: self }
+    }
+
+    /// Tries to acquire the spinlock without blocking.
+    pub fn try_lock(&self) -> Option<SpinLockGuard<'_, T>> {
+        if !self.locked.swap(true, Ordering::Acquire) {
+            Some(SpinLockGuard { lock: self })
+        } else {
+            None
+        }
+    }
+}
+
+pub struct SpinLockGuard<'a, T> {
+    lock: &'a SpinLock<T>,
+}
+
+impl<'a, T> core::ops::Deref for SpinLockGuard<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        unsafe { &*self.lock.data.get() }
+    }
+}
+
+impl<'a, T> core::ops::DerefMut for SpinLockGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.lock.data.get() }
+    }
+}
+
+impl<'a, T> Drop for SpinLockGuard<'a, T> {
+    fn drop(&mut self) {
+        self.lock.locked.store(false, Ordering::Release);
+    }
+}
+
+fn dummy_raw_waker() -> RawWaker {
+    fn no_op(_: *const ()) {}
+    fn clone(p: *const ()) -> RawWaker {
+        RawWaker::new(p, &VTABLE)
+    }
+    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, no_op, no_op, no_op);
+    RawWaker::new(core::ptr::null(), &VTABLE)
+}
+
+/// Creates a no-op dummy waker for polling futures in cooperative single-threaded runtimes.
+pub fn dummy_waker() -> Waker {
+    unsafe { Waker::from_raw(dummy_raw_waker()) }
+}
+
+/// A background task backed by an asynchronous Rust `Future`.
+///
+/// Wraps any `Future<Output = ()>` into a `BackgroundTask` compatible with HPVMx's
+/// cooperative stepping loop in `SteppedApplicationContext` and `XSteppedApplicationContext`.
+#[derive(Clone)]
+pub struct AsyncBackgroundTask {
+    future: Arc<SpinLock<Option<Pin<Box<dyn Future<Output = ()> + Send>>>>>,
+}
+
+impl AsyncBackgroundTask {
+    /// Creates a new `AsyncBackgroundTask` from any static `Future`.
+    pub fn new<F>(future: F) -> Self
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        Self {
+            future: Arc::new(SpinLock::new(Some(Box::pin(future)))),
+        }
+    }
+
+    /// Creates a new `AsyncBackgroundTask` from a pinned boxed future.
+    pub fn from_pin_box(future: Pin<Box<dyn Future<Output = ()> + Send>>) -> Self {
+        Self {
+            future: Arc::new(SpinLock::new(Some(future))),
+        }
+    }
+}
+
+impl BackgroundTask for AsyncBackgroundTask {
+    fn tick(&mut self, _vars: &mut Vec<String>, _env: &mut Environment) -> bool {
+        let waker = dummy_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        if let Some(mut guard) = self.future.try_lock() {
+            if let Some(fut) = guard.as_mut() {
+                match fut.as_mut().poll(&mut cx) {
+                    Poll::Ready(()) => {
+                        *guard = None;
+                        true
+                    }
+                    Poll::Pending => false,
+                }
+            } else {
+                true
+            }
+        } else {
+            false
+        }
+    }
+}
+
+/// A `Future` adapter that drives a `BackgroundTask` by invoking `.tick()` on each poll.
+pub struct BackgroundTaskFuture<T: BackgroundTask> {
+    pub task: T,
+    pub vars: Vec<String>,
+    pub env: Environment,
+}
+
+impl<T: BackgroundTask> BackgroundTaskFuture<T> {
+    pub fn new(task: T, vars: Vec<String>, env: Environment) -> Self {
+        Self { task, vars, env }
+    }
+}
+
+impl<T: BackgroundTask + Unpin> Future for BackgroundTaskFuture<T> {
+    type Output = (Vec<String>, Environment);
+
+    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        if this.task.tick(&mut this.vars, &mut this.env) {
+            Poll::Ready((core::mem::take(&mut this.vars), this.env.clone()))
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+/// A `Future` adapter that drives a boxed `BackgroundTask`.
+pub struct BoxedBackgroundTaskFuture {
+    pub task: Box<dyn BackgroundTask>,
+    pub vars: Vec<String>,
+    pub env: Environment,
+}
+
+impl BoxedBackgroundTaskFuture {
+    pub fn new(task: Box<dyn BackgroundTask>, vars: Vec<String>, env: Environment) -> Self {
+        Self { task, vars, env }
+    }
+}
+
+impl Future for BoxedBackgroundTaskFuture {
+    type Output = (Vec<String>, Environment);
+
+    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        if this.task.tick(&mut this.vars, &mut this.env) {
+            Poll::Ready((core::mem::take(&mut this.vars), this.env.clone()))
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+/// A future that yields execution back to the executor / stepping loop once.
+pub struct YieldFuture {
+    yielded: bool,
+}
+
+impl Future for YieldFuture {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {
+        if self.yielded {
+            Poll::Ready(())
+        } else {
+            self.yielded = true;
+            Poll::Pending
+        }
+    }
+}
+
+/// Yield execution back to the host/executor once.
+pub fn yield_now() -> YieldFuture {
+    YieldFuture { yielded: false }
+}
+
+/// A future that waits for a certain number of step ticks before completing.
+pub struct TickDelayFuture {
+    remaining_ticks: usize,
+}
+
+impl Future for TickDelayFuture {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {
+        if self.remaining_ticks == 0 {
+            Poll::Ready(())
+        } else {
+            self.remaining_ticks -= 1;
+            Poll::Pending
+        }
+    }
+}
+
+/// Creates a future that resolves after `ticks` polling iterations.
+pub fn sleep_ticks(ticks: usize) -> TickDelayFuture {
+    TickDelayFuture { remaining_ticks: ticks }
+}
+
 /// Metadata and capability information about an application.
 pub trait AppInfo {
     /// Returns the display name of the application.
@@ -331,6 +557,12 @@ pub struct WindowState {
     pub y: usize,
     pub width: usize,
     pub height: usize,
+    pub is_minimized: bool,
+    pub is_maximized: bool,
+    pub restore_x: usize,
+    pub restore_y: usize,
+    pub restore_width: usize,
+    pub restore_height: usize,
 }
 
 impl WindowState {
@@ -340,11 +572,19 @@ impl WindowState {
     pub const MIN_HEIGHT: usize = 80;
 
     pub fn new(x: usize, y: usize, content_width: usize, content_height: usize) -> Self {
+        let width = core::cmp::max(content_width + Self::BORDER, Self::MIN_WIDTH);
+        let height = core::cmp::max(content_height + Self::TITLE_BAR_HEIGHT, Self::MIN_HEIGHT);
         Self {
             x,
             y,
-            width: core::cmp::max(content_width + Self::BORDER, Self::MIN_WIDTH),
-            height: core::cmp::max(content_height + Self::TITLE_BAR_HEIGHT, Self::MIN_HEIGHT),
+            width,
+            height,
+            is_minimized: false,
+            is_maximized: false,
+            restore_x: x,
+            restore_y: y,
+            restore_width: width,
+            restore_height: height,
         }
     }
 
@@ -352,12 +592,63 @@ impl WindowState {
         (self.x + Self::BORDER, self.y + Self::TITLE_BAR_HEIGHT)
     }
 
+    pub fn minimize(&mut self) {
+        self.is_minimized = true;
+    }
+
+    pub fn unminimize(&mut self) {
+        self.is_minimized = false;
+    }
+
+    pub fn toggle_minimize(&mut self) {
+        self.is_minimized = !self.is_minimized;
+    }
+
+    pub fn maximize(&mut self, screen_width: usize, screen_height: usize) {
+        if !self.is_maximized {
+            self.restore_x = self.x;
+            self.restore_y = self.y;
+            self.restore_width = self.width;
+            self.restore_height = self.height;
+        }
+        self.x = 0;
+        self.y = 32;
+        self.width = screen_width;
+        self.height = screen_height.saturating_sub(60);
+        self.is_maximized = true;
+        self.is_minimized = false;
+    }
+
+    pub fn restore(&mut self) {
+        if self.is_maximized {
+            self.x = self.restore_x;
+            self.y = self.restore_y;
+            self.width = self.restore_width;
+            self.height = self.restore_height;
+            self.is_maximized = false;
+        }
+    }
+
+    pub fn toggle_maximize(&mut self, screen_width: usize, screen_height: usize) {
+        if self.is_maximized {
+            self.restore();
+        } else {
+            self.maximize(screen_width, screen_height);
+        }
+    }
+
     pub fn move_by(&mut self, dx: isize, dy: isize, bounds: (usize, usize)) {
+        if self.is_maximized {
+            self.restore();
+        }
         self.x = offset_clamped(self.x, dx, bounds.0.saturating_sub(self.width));
         self.y = offset_clamped(self.y, dy, bounds.1.saturating_sub(self.height));
     }
 
     pub fn resize_by(&mut self, dw: isize, dh: isize, bounds: (usize, usize)) {
+        if self.is_maximized {
+            self.restore();
+        }
         let max_width = bounds.0.saturating_sub(self.x).max(Self::MIN_WIDTH);
         let max_height = bounds.1.saturating_sub(self.y).max(Self::MIN_HEIGHT);
 
@@ -437,6 +728,7 @@ pub struct GlobalEnvironmentData {
     pub tab_apps: BTreeMap<DashboardTab, XSteppedApplicationContext>,
     pub resmon_tab: ResourceMonitorTab,
     pub cycles: usize,
+    pub selected_process_idx: usize,
 }
 
 impl GlobalEnvironmentData {
@@ -545,7 +837,8 @@ impl GlobalEnvironmentData {
         tab_apps: BTreeMap::new(),
         resmon_tab: ResourceMonitorTab::Resources,
         cycles: 0,
-    }
+        selected_process_idx: 0,
+        }
     }
 
     pub fn pull_from_ui(&mut self, ui: DashboardUI) {
@@ -600,6 +893,7 @@ impl GlobalEnvironmentData {
         self.tab_apps = ui.tab_apps;
         self.resmon_tab = ui.resmon_tab;
         self.cycles = ui.cycles;
+        self.selected_process_idx = ui.selected_process_idx;
 
     }
 
@@ -655,6 +949,7 @@ impl GlobalEnvironmentData {
         self.tab_apps = ui.tab_apps.clone();
         self.resmon_tab = ui.resmon_tab.clone();
         self.cycles = ui.cycles.clone();
+        self.selected_process_idx = ui.selected_process_idx.clone();
         ui
 
     }
@@ -789,6 +1084,8 @@ impl SteppedApplicationContext {
     pub fn with_window_position(mut self, x: usize, y: usize) -> Self {
         self.window.x = x;
         self.window.y = y;
+        self.window.restore_x = x;
+        self.window.restore_y = y;
         self
     }
 
@@ -878,6 +1175,44 @@ impl SteppedApplicationContext {
 
         Some(ctx)
     }
+
+    /// Spawns an asynchronous future as a background task.
+    pub fn spawn_async<F>(&mut self, future: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let task = AsyncBackgroundTask::new(future);
+        match self.background_tasks.as_mut() {
+            Some(tasks) => tasks.push(Box::new(task)),
+            None => self.background_tasks = Some(alloc::vec![Box::new(task)]),
+        }
+    }
+
+    /// Spawns a background task.
+    pub fn spawn_task<T: BackgroundTask + 'static>(&mut self, task: T) {
+        match self.background_tasks.as_mut() {
+            Some(tasks) => tasks.push(Box::new(task)),
+            None => self.background_tasks = Some(alloc::vec![Box::new(task)]),
+        }
+    }
+
+    /// Advances the application by one step in a polling context.
+    /// Returns `Poll::Pending` if running, or `Poll::Ready(())` if exit was requested.
+    pub fn poll_step(&mut self, key: Option<Key>) -> Poll<()> {
+        if self.step(key) {
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
+    }
+}
+
+impl Future for SteppedApplicationContext {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.poll_step(None)
+    }
 }
 
 impl BackgroundSteppedApplicationContext {
@@ -913,6 +1248,24 @@ impl BackgroundSteppedApplicationContext {
         }
 
         !self.exit_requested
+    }
+
+    /// Advances the background task by one step in a polling context.
+    /// Returns `Poll::Pending` if running, or `Poll::Ready(())` if exit was requested.
+    pub fn poll_step(&mut self) -> Poll<()> {
+        if self.step() {
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
+    }
+}
+
+impl Future for BackgroundSteppedApplicationContext {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.poll_step()
     }
 }
 /// Alias of Option\<T\>
@@ -985,6 +1338,8 @@ impl XSteppedApplicationContext {
     pub fn with_window_position(mut self, x: usize, y: usize) -> Self {
         self.window.x = x;
         self.window.y = y;
+        self.window.restore_x = x;
+        self.window.restore_y = y;
         self
     }
 
@@ -1296,4 +1651,171 @@ impl XSteppedApplicationContext {
 
         ctx
     }
+
+    /// Spawns an asynchronous future as a background task.
+    pub fn spawn_async<F>(&mut self, future: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let task = AsyncBackgroundTask::new(future);
+        match self.background_tasks.as_mut() {
+            Some(tasks) => tasks.push(Box::new(task)),
+            None => self.background_tasks = Some(alloc::vec![Box::new(task)]),
+        }
+    }
+
+    /// Spawns a background task.
+    pub fn spawn_task<T: BackgroundTask + 'static>(&mut self, task: T) {
+        match self.background_tasks.as_mut() {
+            Some(tasks) => tasks.push(Box::new(task)),
+            None => self.background_tasks = Some(alloc::vec![Box::new(task)]),
+        }
+    }
+
+    /// Advances the application by one step in a polling context.
+    /// Returns `Poll::Pending` if running, or `Poll::Ready(())` if exit was requested.
+    pub fn poll_step(&mut self, key: Option<Key>) -> Poll<()> {
+        if self.step(key) {
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
+    }
+}
+
+impl Future for XSteppedApplicationContext {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.poll_step(None)
+    }
+}
+
+/// Runs self-tests for the async/await multitasking subsystem.
+///
+/// Verifies:
+/// 1. `AsyncBackgroundTask` step progression and termination across multiple yields.
+/// 2. `SteppedApplicationContext::spawn_async` execution and lifecycle.
+/// 3. `XSteppedApplicationContext::spawn_async` execution and lifecycle.
+/// 4. Context `.await` / polling as a `Future`.
+/// 5. `BackgroundTaskFuture` adapter for synchronous background tasks.
+/// 6. `sleep_ticks` delay future.
+pub fn run_async_tests() -> bool {
+    use core::sync::atomic::AtomicUsize;
+
+    // 1. Test AsyncBackgroundTask with yield_now and state update
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    COUNTER.store(0, Ordering::SeqCst);
+
+    let task_fut = async {
+        COUNTER.fetch_add(1, Ordering::SeqCst);
+        yield_now().await;
+        COUNTER.fetch_add(10, Ordering::SeqCst);
+        yield_now().await;
+        COUNTER.fetch_add(100, Ordering::SeqCst);
+    };
+
+    let mut async_task = AsyncBackgroundTask::new(task_fut);
+    let mut vars = Vec::new();
+    let mut env = Environment::new();
+
+    // Tick 1: runs to first yield (counter = 1), returns false (pending)
+    let done1 = async_task.tick(&mut vars, &mut env);
+    if done1 || COUNTER.load(Ordering::SeqCst) != 1 {
+        return false;
+    }
+
+    // Tick 2: runs to second yield (counter = 11), returns false (pending)
+    let done2 = async_task.tick(&mut vars, &mut env);
+    if done2 || COUNTER.load(Ordering::SeqCst) != 11 {
+        return false;
+    }
+
+    // Tick 3: runs to end (counter = 111), returns true (ready)
+    let done3 = async_task.tick(&mut vars, &mut env);
+    if !done3 || COUNTER.load(Ordering::SeqCst) != 111 {
+        return false;
+    }
+
+    // 2. Test SteppedApplicationContext spawn_async and stepping
+    static APP_ASYNC_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    APP_ASYNC_COUNTER.store(0, Ordering::SeqCst);
+
+    #[derive(Clone)]
+    struct DummyAppCloneable;
+    impl Runnable for DummyAppCloneable {
+        fn draw(&self, _: &mut PixelGraphics, _: &Vec<String>, _: usize, _: usize) {}
+        fn logic(&mut self, _: &mut Vec<String>, _: &mut Environment) {}
+        fn input(&mut self, _: Key) {}
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    let dummy_app = Application::new(Box::new(DummyAppCloneable));
+    let mut ctx = SteppedApplicationContext::new(dummy_app, None);
+    ctx.spawn_async(async {
+        APP_ASYNC_COUNTER.fetch_add(5, Ordering::SeqCst);
+        yield_now().await;
+        APP_ASYNC_COUNTER.fetch_add(50, Ordering::SeqCst);
+    });
+
+    // Step 1: counter becomes 5, task pending
+    let _ = ctx.step(None);
+    if APP_ASYNC_COUNTER.load(Ordering::SeqCst) != 5 {
+        return false;
+    }
+    if ctx.background_tasks.as_ref().map(|t| t.len()).unwrap_or(0) != 1 {
+        return false;
+    }
+
+    // Step 2: counter becomes 55, task completes and is removed
+    let _ = ctx.step(None);
+    if APP_ASYNC_COUNTER.load(Ordering::SeqCst) != 55 {
+        return false;
+    }
+    if ctx.background_tasks.as_ref().map(|t| t.len()).unwrap_or(0) != 0 {
+        return false;
+    }
+
+    // 3. Test XSteppedApplicationContext spawn_async and Future polling
+    static X_ASYNC_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    X_ASYNC_COUNTER.store(0, Ordering::SeqCst);
+
+    let x_dummy_app = Application::new(Box::new(DummyAppCloneable));
+    let mut x_ctx = XSteppedApplicationContext::new(x_dummy_app, None);
+    x_ctx.spawn_async(async {
+        X_ASYNC_COUNTER.fetch_add(7, Ordering::SeqCst);
+        sleep_ticks(2).await;
+        X_ASYNC_COUNTER.fetch_add(70, Ordering::SeqCst);
+    });
+
+    let waker = dummy_waker();
+    let mut cx = Context::from_waker(&waker);
+
+    // Poll 1: runs to sleep_ticks(2), returns Pending
+    let poll1 = Pin::new(&mut x_ctx).poll(&mut cx);
+    if !poll1.is_pending() || X_ASYNC_COUNTER.load(Ordering::SeqCst) != 7 {
+        return false;
+    }
+
+    // Poll 2: tick 1 of sleep_ticks, returns Pending
+    let poll2 = Pin::new(&mut x_ctx).poll(&mut cx);
+    if !poll2.is_pending() || X_ASYNC_COUNTER.load(Ordering::SeqCst) != 7 {
+        return false;
+    }
+
+    // Poll 3: sleep_ticks completes, counter += 70, task finishes
+    let poll3 = Pin::new(&mut x_ctx).poll(&mut cx);
+    if !poll3.is_pending() || X_ASYNC_COUNTER.load(Ordering::SeqCst) != 77 {
+        return false;
+    }
+
+    // Request exit and poll: should return Ready(())
+    x_ctx.exit_requested = true;
+    let poll_exit = Pin::new(&mut x_ctx).poll(&mut cx);
+    if !poll_exit.is_ready() {
+        return false;
+    }
+
+    true
 }

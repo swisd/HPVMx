@@ -36,6 +36,16 @@ pub fn compile_from_file_to_asm(srcpath: String) -> String {
     }
 }
 
+pub fn compile_from_file_to_asm_spec(srcpath: String, arch: &str) -> String {
+    if let Ok(source) = crate::FileSystem::read_file_to_string(&*srcpath) {
+        let asm = compile(&*source, arch);
+        asm
+    } else {
+        hpvm_error!("micro-c", "could not open file");
+        " ".parse().unwrap()
+    }
+}
+
 // --- Rust Bridge for Micro-C ---
 
 #[repr(C)]

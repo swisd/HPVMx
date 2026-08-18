@@ -392,17 +392,18 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
         }
 
         "micro-c" => {
-            if parts.len() >= 3 {
-                if parts[1] == "compile" {
-                    let data = crate::micro_c::compile_from_file_to_asm(parts[2].parse().unwrap());
+            if parts.len() >= 4 {
+                if parts[2] == "compile" {
+                    let data = crate::micro_c::compile_from_file_to_asm_spec(parts[3].parse().unwrap(), parts[1]);
                     let newpath = parts[2].split(".").next().unwrap().to_owned() + ".asm";
                     FileSystem::touch(&*newpath);
                     FileSystem::write_to_file(&*newpath, &*data, 'w');
                 } else if parts[1] == "run" {
-                    crate::run_asm_application(parts[2]);
+                    // crate::run_asm_application(parts[2]);
+                    message!("\n", "unavailable");
                 }
             } else {
-                message!("\n", "Usage: micro-c [compile|run] [file]")
+                message!("\n", "Usage: micro-c [compile|run] [arch] [file]")
             }
         }
 
