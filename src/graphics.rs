@@ -101,15 +101,6 @@ impl Cursor {
         self.prev_right_button = self.right_button;
         self.poll_count = self.poll_count.wrapping_add(1);
 
-        // Periodically connect any newly attached HID/USB/PS2 controllers (e.g. in VirtualBox VM)
-        if self.poll_count % 120 == 0 {
-            if let Ok(all_handles) = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::AllHandles) {
-                for handle in all_handles.iter() {
-                    let _ = uefi::boot::connect_controller(*handle, None, None, true);
-                }
-            }
-        }
-
         let abs_res = self.try_update_absolute(screen_width, screen_height);
         let rel_res = self.try_update_relative(screen_width, screen_height);
 

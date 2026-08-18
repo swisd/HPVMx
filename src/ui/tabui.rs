@@ -1,12 +1,16 @@
 use alloc::{format, vec, vec::Vec};
 use alloc::string::{String, ToString};
+use alloc::collections::BTreeMap;
+use uefi::Identify;
 use uefi::proto::console::text::{Key, ScanCode};
 use crate::ui::{
     pixel_graphics::{self, PixelGraphics},
     DashboardTab, DashboardUI, DeviceCategory, DiskTabInfo, EditorMode, FileEntry, FilePendingAction,
     ResourceMonitorTab, SystemResources, TextEditor, UiSettings, VmDisplayInfo,
 };
-use crate::{runtime, vdebug, TSC_PER_US, HYPERVISOR};
+use crate::env::{AppInfo, Environment, Runnable};
+use crate::pm::{Package, PackageManager};
+use crate::{runtime, vdebug, TSC_PER_US, HYPERVISOR, GLOBALENV};
 use crate::terminal;
 
 /// Unified dispatcher to draw any dashboard tab content.
@@ -138,6 +142,126 @@ pub mod overview {
         }
         false
     }
+
+    #[derive(Clone)]
+    pub struct X_Overview {
+        pub cpu_count: u32,
+        pub cpu_usage: u32,
+        pub used_memory_mb: u32,
+        pub total_memory_mb: u32,
+        pub disk_read_kbps: u32,
+        pub disk_write_kbps: u32,
+        pub net_rx_kbps: u32,
+        pub net_tx_kbps: u32,
+        pub running_vms: usize,
+        pub total_vms: usize,
+        pub files_count: usize,
+        pub categories_count: usize,
+    }
+
+    impl X_Overview {
+        pub fn new() -> Self {
+            Self {
+                cpu_count: 0,
+                cpu_usage: 0,
+                used_memory_mb: 0,
+                total_memory_mb: 0,
+                disk_read_kbps: 0,
+                disk_write_kbps: 0,
+                net_rx_kbps: 0,
+                net_tx_kbps: 0,
+                running_vms: 0,
+                total_vms: 0,
+                files_count: 0,
+                categories_count: 0,
+            }
+        }
+    }
+
+    impl Runnable for X_Overview {
+        fn draw(&self, pg: &mut PixelGraphics, vars: &Vec<String>, x: usize, y: usize) {
+            let menu_w = 200;
+            let content_x = x + menu_w;
+            pg.fill_rect(x, y, menu_w, 600, 0x333333);
+            
+            let categories = ["Overview", "Hardware", "Virtualization", "Storage", "Network", "Security", "Logs", "Tools", "Help"];
+            let mut menu_y = y + 20;
+            for (idx, cat) in categories.iter().enumerate() {
+                let color = if idx == 0 { 0x00FF00 } else { 0xCCCCCC };
+                pg.draw_text(x + 20, menu_y, cat, color);
+                menu_y += 30;
+            }
+
+            pg.draw_text(content_x + 20, y + 20, "System Overview", 0x00FF00);
+            
+            let mut curr_y = y + 50;
+            pg.draw_text(content_x + 20, curr_y, "System Health: OK", 0x00FF00);
+            curr_y += 30;
+            pg.draw_text(content_x + 20, curr_y, &format!("CPU:   {} Cores, {}% Usage", self.cpu_count, self.cpu_usage), 0xFFFFFF);
+            curr_y += 20;
+            pg.draw_text(content_x + 20, curr_y, &format!("Memory: {} / {} MB", self.used_memory_mb, self.total_memory_mb), 0xFFFFFF);
+            curr_y += 30;
+            
+            pg.draw_text(content_x + 20, curr_y, "I/O Performance:", 0xAAAAAA);
+            curr_y += 20;
+            pg.draw_text(content_x + 40, curr_y, &format!("Disk:   Read {} KB/s, Write {} KB/s", self.disk_read_kbps, self.disk_write_kbps), 0xCCCCCC);
+            curr_y += 20;
+            pg.draw_text(content_x + 40, curr_y, &format!("Network: RX {} KB/s, TX {} KB/s", self.net_rx_kbps, self.net_tx_kbps), 0xCCCCCC);
+            curr_y += 30;
+            
+            pg.draw_text(content_x + 20, curr_y, &format!("Virtualization: {} VMs Running", self.running_vms), 0xFFFFFF);
+            curr_y += 20;
+            pg.draw_text(content_x + 20, curr_y, &format!("Total VMs: {}", self.total_vms), 0xCCCCCC);
+            curr_y += 30;
+
+            pg.draw_text(content_x + 20, curr_y, "Hardware Categories:", 0xAAAAAA);
+            curr_y += 20;
+            pg.draw_text(content_x + 40, curr_y, &format!("Storage: {} Files in current path", self.files_count), 0xCCCCCC);
+            curr_y += 20;
+            pg.draw_text(content_x + 40, curr_y, &format!("Devices: {} Categories detected", self.categories_count), 0xCCCCCC);
+            curr_y += 60;
+            pg.draw_text_bg(content_x + 40, curr_y, "STATE BACKUP", 0xFF7700, 0x444444);
+            curr_y += 20;
+            pg.fill_rect(content_x + 40, curr_y, 70, 30, 0x553333);
+            pg.draw_text(content_x + 42, curr_y + 2, "SAVE [/]", 0xBBBBAA);
+
+            let time_y = y + 20;
+            let time_x = content_x + 320;
+            if let Ok((time, caps)) = runtime::get_time_and_caps() {
+                pg.draw_text(time_x, time_y, &format!("{:?}", time), 0xFFFFFF);
+                pg.draw_text(time_x, time_y + 10, &format!("{:?}", caps), 0xFFFFFF);
+            }
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
+            if let Some(data) = env.global_data.as_ref() {
+                self.cpu_count = data.resources.cpu_count;
+                self.cpu_usage = data.resources.cpu_usage;
+                self.used_memory_mb = data.resources.used_memory_mb;
+                self.total_memory_mb = data.resources.total_memory_mb;
+                self.disk_read_kbps = data.resources.disk_read_kbps as u32;
+                self.disk_write_kbps = data.resources.disk_write_kbps as u32;
+                self.net_rx_kbps = data.resources.net_rx_kbps as u32;
+                self.net_tx_kbps = data.resources.net_tx_kbps as u32;
+                self.running_vms = data.vms.iter().filter(|v| v.state.contains("Running")).count();
+                self.total_vms = data.vms.len();
+                self.files_count = data.files.len();
+                self.categories_count = data.categories.len();
+            }
+        }
+
+        fn input(&mut self, _key: Key) {}
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_Overview {
+        fn name(&self) -> &str { "Overview" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::CUBE_WINDOW_RED_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
+    }
 }
 
 // =========================================================================
@@ -223,6 +347,85 @@ pub mod apps {
             }
             _ => false,
         }
+    }
+
+    #[derive(Clone)]
+    pub struct X_Apps {
+        pub selected_app_idx: usize,
+    }
+
+    impl X_Apps {
+        pub fn new() -> Self {
+            Self {
+                selected_app_idx: 0,
+            }
+        }
+    }
+
+    impl Runnable for X_Apps {
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            let margin = 16usize;
+            let gutter = 12usize;
+            let width = 800;
+
+            pg.draw_text(x + margin, y + margin, "Application Registry", 0x00FF00);
+            pg.draw_text(x + margin, y + margin + 20, "Select an app to launch it in a stepped context", 0xAAAAAA);
+
+            let start_y = y + margin + 60;
+            let card_w = 100usize;
+            let card_h = 75usize;
+            let cols = (width - margin * 2) / (card_w + gutter);
+            let cols = if cols == 0 { 1 } else { cols };
+
+            for (idx, (name, _, icon, version)) in crate::apps::APP_REGISTRY.iter().enumerate() {
+                let col = idx % cols;
+                let row = idx / cols;
+                let card_x = x + margin + col * (card_w + gutter);
+                let card_y = start_y + row * (card_h + gutter);
+
+                let is_selected = idx == self.selected_app_idx;
+                let border_color = if is_selected { 0x00FF00 } else { 0x444444 };
+                let bg_color = if is_selected { 0x224422 } else { 0x111111 };
+
+                pg.fill_rect(card_x, card_y, card_w, card_h, bg_color);
+                pg.draw_rect_outline(card_x, card_y, card_w, card_h, border_color);
+
+                pg.draw_icon(card_x + (card_w - 32) / 2, card_y + 10, 32, 32, icon);
+                pg.draw_text(card_x + 5, card_y + 50, name, 0xFFFFFF);
+                pg.draw_text(card_x + 5, card_y + 62, version, 0x888888);
+            }
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, _env: &mut Environment) {}
+
+        fn input(&mut self, key: Key) {
+            let cols = (800 - 32) / (100 + 12);
+            match key {
+                Key::Special(ScanCode::LEFT) => {
+                    if self.selected_app_idx > 0 { self.selected_app_idx -= 1; }
+                }
+                Key::Special(ScanCode::RIGHT) => {
+                    if self.selected_app_idx + 1 < crate::apps::APP_REGISTRY.len() { self.selected_app_idx += 1; }
+                }
+                Key::Special(ScanCode::UP) => {
+                    if self.selected_app_idx >= cols { self.selected_app_idx -= cols; }
+                }
+                Key::Special(ScanCode::DOWN) => {
+                    if self.selected_app_idx + cols < crate::apps::APP_REGISTRY.len() { self.selected_app_idx += cols; }
+                }
+                _ => {}
+            }
+        }
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_Apps {
+        fn name(&self) -> &str { "Apps" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::ADD_PLUS_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
     }
 }
 
@@ -368,6 +571,168 @@ pub mod vms {
             _ => false,
         }
     }
+
+    #[derive(Clone)]
+    pub struct X_VMs {
+        pub selected_vm_idx: usize,
+        pub vm_action_idx: usize,
+        pub vms: Vec<VmDisplayInfo>,
+    }
+
+    impl X_VMs {
+        pub fn new() -> Self {
+            Self {
+                selected_vm_idx: 0,
+                vm_action_idx: 0,
+                vms: Vec::new(),
+            }
+        }
+    }
+
+    impl Runnable for X_VMs {
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            let margin = 16usize;
+            let gutter = 12usize;
+            let line_h = 15usize;
+            let width = 800;
+            let height = 600usize;
+
+            pg.draw_text(x + margin, y + margin, "Virtual Machines", 0x00FF00);
+            
+            // VM Table
+            let table_x = x + margin;
+            let table_y = y + margin + 30;
+            let table_w = core::cmp::min(width - margin * 2, 600);
+            let table_h = height.saturating_sub(margin + 30 + 120);
+            pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0xCCCCCC);
+            
+            // Header
+            pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
+            pg.draw_text(table_x + 8, table_y + 4, "ID  NAME             STATE       CPU%  MEM(MB)  UPTIME", 0xAAAAAA);
+            
+            let mut curr_y = table_y + line_h + 4;
+            for (i, vm) in self.vms.iter().enumerate() {
+                if curr_y + line_h > table_y + table_h { break; }
+                let is_selected = i == self.selected_vm_idx;
+                let text_color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
+                if is_selected {
+                    pg.fill_rect(table_x + 1, curr_y, table_w - 2, line_h, 0x444444);
+                }
+
+                let uptime = if vm.uptime_seconds < 60 {
+                    format!("{}s", vm.uptime_seconds)
+                } else if vm.uptime_seconds < 3600 {
+                    format!("{}m {}s", vm.uptime_seconds / 60, vm.uptime_seconds % 60)
+                } else {
+                    format!("{}h {}m", vm.uptime_seconds / 3600, (vm.uptime_seconds % 3600) / 60)
+                };
+                let info = format!("{:<3} {:<16} {:<11} {:>3}% {:>5}MB  {:>10}",
+                    vm.id, vm.name, vm.state, vm.cpu_usage, vm.memory_usage_mb, uptime);
+                pg.draw_text(table_x + 8, curr_y, &info, text_color);
+                curr_y += line_h;
+            }
+
+            // Properties Panel
+            let props_x = table_x + table_w + gutter;
+            let props_w = width.saturating_sub(props_x + margin);
+            if props_w > 150 {
+                pg.draw_rect_outline(props_x, table_y, props_w, table_h, 0x888888);
+                pg.draw_text_bg(props_x + 10, table_y - 4, "VM Properties", 0x00FF00, 0x222222);
+                
+                if let Some(vm) = self.vms.get(self.selected_vm_idx) {
+                    let mut py = table_y + 10;
+                    pg.draw_text(props_x + 10, py, &format!("Name: {}", vm.name), 0xFFFFFF);
+                    py += 20;
+                    pg.draw_text(props_x + 10, py, &format!("ID:   {}", vm.id), 0xCCCCCC);
+                    py += 20;
+                    pg.draw_text(props_x + 10, py, &format!("State: {}", vm.state), if vm.state.contains("Running") { 0x00FF00 } else { 0xFFFFFF });
+                    py += 20;
+                    pg.draw_text(props_x + 10, py, &format!("vCPUs: {}", vm.cpu_usage), 0xCCCCCC);
+                    py += 20;
+                    pg.draw_text(props_x + 10, py, &format!("RAM:   {} MB", vm.memory_usage_mb), 0xCCCCCC);
+                    py += 20;
+                    pg.draw_text(props_x + 10, py, &format!("Disk:  {} MB", vm.disk_usage_mb), 0xCCCCCC);
+                    py += 20;
+                    pg.draw_text(props_x + 10, py, &format!("Uptime: {}s", vm.uptime_seconds), 0x888888);
+                } else {
+                    pg.draw_text(props_x + 10, table_y + 10, "No VM selected", 0x888888);
+                }
+            }
+
+            // Actions Bar
+            if !self.vms.is_empty() {
+                let actions_y = table_y + table_h + gutter;
+                pg.draw_text(x + margin, actions_y, "Actions for Selected VM:", 0xCCCCCC);
+                let actions = ["Start", "Stop", "Reset", "Zero", "Delete", "Save", "Restore", "Console"];
+                let mut action_x = x + margin;
+                let action_y = actions_y + 20;
+                for (idx, action) in actions.iter().enumerate() {
+                    let is_focused = idx == self.vm_action_idx;
+                    let color = if is_focused { 0x00AA00 } else { 0x444444 };
+                    pg.fill_rect(action_x, action_y, 78, 24, color);
+                    pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
+                    action_x += 88;
+                }
+                pg.draw_text(x + margin, action_y + 32, "Press ENTER to execute action | SPACE to Create VM", 0x888888);
+            } else {
+                pg.draw_text(x + margin, table_y + table_h + gutter, "No VMs. Press SPACE to Create VM", 0x888888);
+            }
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
+            if let Some(data) = env.global_data.as_ref() {
+                self.vms = data.vms.clone();
+                self.selected_vm_idx = self.selected_vm_idx.min(self.vms.len().saturating_sub(1));
+            }
+        }
+
+        fn input(&mut self, key: Key) {
+            match key {
+                Key::Special(ScanCode::UP) => {
+                    if self.selected_vm_idx > 0 { self.selected_vm_idx -= 1; }
+                }
+                Key::Special(ScanCode::DOWN) => {
+                    if self.selected_vm_idx + 1 < self.vms.len() { self.selected_vm_idx += 1; }
+                }
+                Key::Special(ScanCode::LEFT) => {
+                    if self.vm_action_idx > 0 { self.vm_action_idx -= 1; }
+                }
+                Key::Special(ScanCode::RIGHT) => {
+                    if self.vm_action_idx < 7 { self.vm_action_idx += 1; }
+                }
+                Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
+                    if let Some(vm) = self.vms.get(self.selected_vm_idx) {
+                        let vm_id = vm.id;
+                        unsafe {
+                            if let Some(hv) = crate::HYPERVISOR.as_mut() {
+                                match self.vm_action_idx {
+                                    0 => { let _ = hv.start_vm(vm_id); }
+                                    1 => { let _ = hv.stop_vm(vm_id); }
+                                    2 => { let _ = hv.reset_vm(vm_id); }
+                                    3 => { let _ = hv.zero_vm(vm_id); }
+                                    4 => { let _ = hv.delete_vm(vm_id); }
+                                    5 => { let _ = hv.save_vm_metadata("/VMSTATE"); }
+                                    6 => { let _ = hv.restore_vm_metadata("/VMSTATE"); }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_VMs {
+        fn name(&self) -> &str { "Virtual Machines" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::CUBE_WINDOW_RED_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
+    }
 }
 
 // =========================================================================
@@ -481,6 +846,120 @@ pub mod createvm {
             }
             _ => false,
         }
+    }
+
+    #[derive(Clone)]
+    pub struct X_CreateVM {
+        pub new_vm_name: String,
+        pub new_vm_memory_mb: u32,
+        pub new_vm_vcpus: u32,
+        pub create_vm_focus_idx: usize,
+    }
+
+    impl X_CreateVM {
+        pub fn new() -> Self {
+            Self {
+                new_vm_name: "new-vm".to_string(),
+                new_vm_memory_mb: 512,
+                new_vm_vcpus: 1,
+                create_vm_focus_idx: 0,
+            }
+        }
+    }
+
+    impl Runnable for X_CreateVM {
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            pg.draw_text(x + 20, y + 20, "Create New Virtual Machine", 0x00FF00);
+            
+            let mut curr_y = y + 60;
+            pg.draw_text(x + 20, curr_y, &format!("Name: {}", self.new_vm_name), if self.create_vm_focus_idx == 0 { 0xFFFF00 } else { 0xFFFFFF });
+            curr_y += 30;
+            pg.draw_text(x + 20, curr_y, &format!("vCPUs: {}", self.new_vm_vcpus), if self.create_vm_focus_idx == 1 { 0xFFFF00 } else { 0xFFFFFF });
+            curr_y += 30;
+            pg.draw_text(x + 20, curr_y, &format!("Memory: {} MB", self.new_vm_memory_mb), if self.create_vm_focus_idx == 2 { 0xFFFF00 } else { 0xFFFFFF });
+            curr_y += 50;
+
+            let create_color = if self.create_vm_focus_idx == 3 { 0x00FF00 } else { 0x008000 };
+            pg.fill_rect(x + 20, curr_y, 120, 30, create_color);
+            pg.draw_text(x + 30, curr_y + 8, "CREATE", 0xFFFFFF);
+
+            let cancel_color = if self.create_vm_focus_idx == 4 { 0xFF5555 } else { 0x880000 };
+            pg.fill_rect(x + 160, curr_y, 120, 30, cancel_color);
+            pg.draw_text(x + 170, curr_y + 8, "CANCEL", 0xFFFFFF);
+
+            pg.draw_text(x + 20, curr_y + 50, "TAB to switch fields, ENTER to create, ESC to cancel", 0x888888);
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, _env: &mut Environment) {}
+
+        fn input(&mut self, key: Key) {
+            match key {
+                Key::Printable(c) => {
+                    let ch = char::from(c).to_ascii_lowercase();
+                    match ch {
+                        ' ' => {
+                            if self.create_vm_focus_idx == 0 {
+                                self.new_vm_name.push(' ');
+                            }
+                        }
+                        '+' | '=' => {
+                            if self.create_vm_focus_idx == 1 {
+                                self.new_vm_vcpus += 1;
+                            } else if self.create_vm_focus_idx == 2 {
+                                self.new_vm_memory_mb += 128;
+                            }
+                        }
+                        '-' | '_' => {
+                            if self.create_vm_focus_idx == 1 {
+                                self.new_vm_vcpus = self.new_vm_vcpus.saturating_sub(1).max(1);
+                            } else if self.create_vm_focus_idx == 2 {
+                                self.new_vm_memory_mb = self.new_vm_memory_mb.saturating_sub(128).max(128);
+                            }
+                        }
+                        '\u{08}' => { // Backspace
+                            if self.create_vm_focus_idx == 0 {
+                                self.new_vm_name.pop();
+                            }
+                        }
+                        '\t' => {
+                            self.create_vm_focus_idx = (self.create_vm_focus_idx + 1) % 5;
+                        }
+                        '\r' | '\n' => {
+                            if self.create_vm_focus_idx == 3 {
+                                unsafe {
+                                    if let Some(hv) = crate::HYPERVISOR.as_mut() {
+                                        let _ = hv.create_vm(&self.new_vm_name, self.new_vm_memory_mb, self.new_vm_vcpus);
+                                    }
+                                }
+                            } else if self.create_vm_focus_idx == 4 {
+                                self.create_vm_focus_idx = 0;
+                            } else {
+                                self.create_vm_focus_idx = (self.create_vm_focus_idx + 1) % 5;
+                            }
+                        }
+                        _ => {
+                            if self.create_vm_focus_idx == 0 && (ch.is_alphanumeric() || ch == '_') {
+                                self.new_vm_name.push(ch);
+                            }
+                        }
+                    }
+                }
+                Key::Special(ScanCode::ESCAPE) => {
+                    // Cancel
+                }
+                _ => {}
+            }
+        }
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_CreateVM {
+        fn name(&self) -> &str { "Create VM" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::ADD_PLUS_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
     }
 }
 
@@ -624,6 +1103,407 @@ pub mod resources {
             _ => false,
         }
     }
+
+    #[derive(Clone)]
+    pub struct ProcessItem {
+        pub pid: usize,
+        pub name: String,
+        pub state: String,
+        pub is_minimized: bool,
+        pub is_focused: bool,
+        pub cpu_time: usize,
+        pub ui_time: usize,
+        pub win_w: usize,
+        pub win_h: usize,
+        pub win_x: usize,
+        pub win_y: usize,
+        pub is_maximized: bool,
+    }
+
+    #[derive(Clone)]
+    pub struct X_Resources {
+        pub resources: SystemResources,
+        pub resmon_tab: ResourceMonitorTab,
+        pub procs: Vec<ProcessItem>,
+        pub vms: Vec<VmDisplayInfo>,
+        pub cycles: usize,
+        pub selected_process_idx: usize,
+    }
+
+    impl X_Resources {
+        pub fn new() -> Self {
+            Self {
+                resources: SystemResources {
+                    cpu_count: 0,
+                    cpu_usage: 0,
+                    total_memory_mb: 0,
+                    used_memory_mb: 0,
+                    disk_read_kbps: 0,
+                    disk_write_kbps: 0,
+                    net_rx_kbps: 0,
+                    net_tx_kbps: 0,
+                    gpu_usage: 0,
+                    fps: 0,
+                    frame_ms: 0,
+                    mem_history: vec![],
+                    disk_read_history: vec![],
+                    disk_write_history: vec![],
+                    net_rx_history: vec![],
+                    net_tx_history: vec![],
+                    gpu_history: vec![],
+                    fps_history: vec![],
+                    ft_ms_history: vec![],
+                    cpu_core_usage: vec![],
+                    cpu_history: vec![],
+                },
+                resmon_tab: ResourceMonitorTab::Resources,
+                procs: Vec::new(),
+                vms: Vec::new(),
+                cycles: 0,
+                selected_process_idx: 0,
+            }
+        }
+
+        pub fn total_process_count(&self) -> usize {
+            2 + self.procs.len() + self.vms.len()
+        }
+    }
+
+    impl Runnable for X_Resources {
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            let margin = 16usize;
+            let gutter = 12usize;
+            let line_h = 15usize;
+            let content_top = y + 12;
+            let width = 760;
+            let height = 540;
+            match self.resmon_tab {
+                ResourceMonitorTab::Resources => {
+                    pg.draw_text(margin, content_top - 6, "[ Resources ]  | Processes |", 0xFFFFFF);
+
+                    // Left info panel
+                    let panel_x = margin;
+                    let panel_y = content_top + margin;
+                    let panel_w = 360usize;
+                    let panel_h = 480usize;
+                    pg.draw_rect_outline(panel_x, panel_y, panel_w, panel_h, 0x888888);
+                    pg.draw_text_bg(panel_x, panel_y - 4, "Resource Monitor", 0x20FF20, 0x222222);
+
+                    pg.draw_text(panel_x + 10, panel_y + 16, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
+                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
+                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h * 2, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
+
+                    // Memory usage bar and graph
+                    let bar_y = panel_y + 16 + line_h * 3 + gutter;
+                    pg.draw_text(panel_x + 10, bar_y, "Memory History (10s):", 0xCCCCCC);
+                    pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00, 60);
+
+                    // I/O Stats and Graphs
+                    let io_y = bar_y + 80 + gutter * 2;
+                    pg.draw_text(panel_x + 10, io_y, "Net Traffic (RX:Cyan TX:Yellow)", 0xCCCCCC);
+                    pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF, 60);
+                    pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00, 60);
+
+                    let disk_y = io_y + 80;
+                    pg.draw_text(panel_x + 10, disk_y, "Disk I/O (Read:White Write:Red)", 0xCCCCCC);
+                    pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF, 60);
+                    pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000, 60);
+
+                    let gpu_y = disk_y + 80;
+                    pg.draw_text(panel_x + 10, gpu_y, "GPU Usage:", 0xCCCCCC);
+                    pg.draw_line_graph(panel_x + 10, gpu_y + 20, 165, 50, &self.resources.gpu_history, 100, 0xFF7700, 60);
+
+                    // Right CPU core list panel or Total CPU Graph
+                    let right_x = panel_x + panel_w + gutter * 2;
+                    let right_y = panel_y;
+                    let right_w = core::cmp::min(width - right_x - margin, 360);
+                    let right_h = core::cmp::min(height - right_y - 100, 260);
+                    pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
+                    pg.draw_text_bg(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF, 0x222222);
+                    pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00, 60);
+
+                    pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
+                    for i in 0..self.resources.cpu_count {
+                        let row_y = right_y + 120 + (i as usize * (line_h + 4));
+                        if row_y + line_h > right_y + right_h - 8 { break; }
+                        let usage = if i < self.resources.cpu_core_usage.len() as u32 { self.resources.cpu_core_usage[i as usize] } else { 0 };
+                        pg.draw_text(right_x + 10, row_y, &alloc::format!("C{}:{:>2}%", i, usage), 0xCCCCCC);
+                        pg.draw_progress_bar(right_x + 70, row_y, right_w - 80, 12, usage as usize, 100, 0x00FF00);
+                    }
+
+                    pg.draw_text_bg(right_x + 10, right_y + 300, "FPS History:", 0xFFFFFF, 0x222222);
+                    pg.draw_line_graph(right_x + 10, right_y + 300, right_w - 20, 80, &self.resources.fps_history, 75, 0xFF44FF, 60);
+                    pg.draw_text_bg(right_x + 10, right_y + 400, "Frame MS History:", 0xFFFFFF, 0x222222);
+                    pg.draw_line_graph(right_x + 10, right_y + 400, right_w - 20, 80, &self.resources.ft_ms_history, 750, 0xFFAAFF, 60);
+
+                    // Heatmap for CPU Core usage
+                    let hm_y = right_y + 500;
+                    pg.draw_text(right_x + 10, hm_y, "CPU Heatmap (Real-time Core Stress):", 0xFFFFFF);
+                    let mut hm_data = [0.0f32; 16];
+                    for i in 0..core::cmp::min(self.resources.cpu_core_usage.len(), 1) {
+                        hm_data[i] = self.resources.cpu_core_usage[i] as f32 / 100.0;
+                    }
+                    pg.draw_heatmap(right_x + 10, hm_y + 20, right_w - 20, 80, 4, 4, &hm_data);
+
+                    pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.cpu_usage as u64, 0xFFFFFF);
+                    pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.used_memory_mb as u64, 0xFFFFFF);
+                    pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.frame_ms as u64, 0xFFFFFF);
+                    pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.gpu_usage as u64, 0xFFFFFF);
+                }
+                ResourceMonitorTab::Processes => {
+                    // Top sub-tab selector buttons
+                    pg.fill_rect(margin, content_top - 6, 110, 22, 0x333333);
+                    pg.draw_rect_outline(margin, content_top - 6, 110, 22, 0x666666);
+                    pg.draw_text(margin + 12, content_top - 2, "Resources", 0xAAAAAA);
+
+                    pg.fill_rect(margin + 120, content_top - 6, 110, 22, 0x007799);
+                    pg.draw_rect_outline(margin + 120, content_top - 6, 110, 22, 0x00FFFF);
+                    pg.draw_text(margin + 132, content_top - 2, "Processes", 0xFFFFFF);
+
+                    let panel_x = margin;
+                    let panel_y = content_top + 22;
+                    let panel_w = 720usize;
+                    let panel_h = 460usize;
+
+                    // Summary banner box
+                    let banner_h = 42usize;
+                    pg.fill_rect(panel_x, panel_y, panel_w, banner_h, 0x181F2A);
+                    pg.draw_rect_outline(panel_x, panel_y, panel_w, banner_h, 0x0088AA);
+
+                    let running_apps_count = self.procs.iter().filter(|a| !a.is_minimized).count();
+                    let min_apps_count = self.procs.len().saturating_sub(running_apps_count);
+                    let total_procs = self.total_process_count();
+
+                    let summary_line1 = format!(
+                        "Total Processes: {} | Active Windows: {} ({} Minimized) | VMs: {}",
+                        total_procs,
+                        self.procs.len(),
+                        min_apps_count,
+                        self.vms.len(),
+                    );
+                    let tsc_mhz = unsafe { TSC_PER_US };
+                    let summary_line2 = format!(
+                        "CPU Load: {}% | Memory: {} / {} MB | Host Clock: {} MHz",
+                        self.resources.cpu_usage,
+                        self.resources.used_memory_mb,
+                        self.resources.total_memory_mb,
+                        tsc_mhz,
+                    );
+                    pg.draw_text(panel_x + 10, panel_y + 5, &summary_line1, 0x00FFFF);
+                    pg.draw_text(panel_x + 10, panel_y + 22, &summary_line2, 0xCCCCCC);
+
+                    // Table Header
+                    let table_y = panel_y + banner_h + 10;
+                    let header_h = 24usize;
+                    pg.fill_rect(panel_x, table_y, panel_w, header_h, 0x243042);
+                    pg.draw_rect_outline(panel_x, table_y, panel_w, header_h, 0x4A607A);
+
+                    // Column offsets
+                    let col_pid = panel_x + 8;
+                    let col_name = panel_x + 60;
+                    let col_state = panel_x + 240;
+                    let col_cpu = panel_x + 340;
+                    let col_cyc = panel_x + 410;
+                    let col_mem = panel_x + 500;
+
+                    pg.draw_text(col_pid, table_y + 5, "PID", 0x88CCFF);
+                    pg.draw_text(col_name, table_y + 5, "Process Name", 0x88CCFF);
+                    pg.draw_text(col_state, table_y + 5, "State", 0x88CCFF);
+                    pg.draw_text(col_cpu, table_y + 5, "CPU %", 0x88CCFF);
+                    pg.draw_text(col_cyc, table_y + 5, "Cycles", 0x88CCFF);
+                    pg.draw_text(col_mem, table_y + 5, "Window / Memory", 0x88CCFF);
+
+                    // Process Rows
+                    let row_h = 24usize;
+                    let max_visible_rows = (panel_h.saturating_sub(banner_h + 10 + header_h + 50)) / row_h;
+                    let rows_start_y = table_y + header_h + 2;
+
+                    for i in 0..total_procs.min(max_visible_rows) {
+                        let cur_y = rows_start_y + i * row_h;
+                        let is_selected = i == self.selected_process_idx;
+
+                        // Background
+                        if is_selected {
+                            pg.fill_rect(panel_x, cur_y, panel_w, row_h - 2, 0x004488);
+                            pg.draw_rect_outline(panel_x, cur_y, panel_w, row_h - 2, 0x00FFFF);
+                        } else if i % 2 == 0 {
+                            pg.fill_rect(panel_x, cur_y, panel_w, row_h - 2, 0x16161E);
+                        } else {
+                            pg.fill_rect(panel_x, cur_y, panel_w, row_h - 2, 0x1F1F2A);
+                        }
+
+                        let (pid_str, name_str, state_str, state_col, cpu_str, cyc_str, mem_str) = if i == 0 {
+                            (
+                                "0".to_string(),
+                                "HPVMx Hypervisor".to_string(),
+                                "Running".to_string(),
+                                0x55FF55,
+                                format!("{}%", self.resources.cpu_usage),
+                                format!("{:.1}M", self.cycles as f64 / 1_000_000.0),
+                                "Kernel Ring 0".to_string(),
+                            )
+                        } else if i == 1 {
+                            (
+                                "1".to_string(),
+                                "Hardware & Timers".to_string(),
+                                "Active".to_string(),
+                                0x55FF55,
+                                "1%".to_string(),
+                                format!("{}K", tsc_mhz),
+                                "Hardware I/O".to_string(),
+                            )
+                        } else if i < 2 + self.procs.len() {
+                            let app_idx = i - 2;
+                            let app = &self.procs[app_idx];
+                            let is_min = app.is_minimized;
+                            let is_foc = app.is_focused;
+                            let (st, st_col) = if is_min {
+                                ("Minimized".to_string(), 0xFFAA00)
+                            } else if is_foc {
+                                ("Focused".to_string(), 0x00FFFF)
+                            } else {
+                                ("Running".to_string(), 0x55FF55)
+                            };
+
+                            let cpu_pct = ((app.cpu_time as u64 * self.resources.fps.max(1) as u64) / (tsc_mhz * 1_000_000).max(1)) * 100;
+                            let total_cyc = app.cpu_time + app.ui_time;
+                            let cyc_formatted = if total_cyc >= 1_000_000 {
+                                format!("{:.1}M", total_cyc as f64 / 1_000_000.0)
+                            } else if total_cyc >= 1_000 {
+                                format!("{:.1}K", total_cyc as f64 / 1000.0)
+                            } else {
+                                format!("{}", total_cyc)
+                            };
+
+                            let win_info = if app.is_maximized {
+                                "Maximized".to_string()
+                            } else if is_min {
+                                "Minimized (BG)".to_string()
+                            } else {
+                                format!("{}x{} @ {},{}", app.win_w, app.win_h, app.win_x, app.win_y)
+                            };
+
+                            (
+                                format!("{}", app.pid),
+                                app.name.clone(),
+                                st,
+                                st_col,
+                                format!("{}%", cpu_pct.min(100)),
+                                cyc_formatted,
+                                win_info,
+                            )
+                        } else {
+                            let vm_idx = i - 2 - self.procs.len();
+                            let vm = &self.vms[vm_idx];
+                            let is_run = vm.state.contains("running");
+                            let st_col = if is_run { 0x55FF55 } else { 0x888888 };
+                            (
+                                format!("{}", 100 + vm.id),
+                                format!("VM: {}", vm.name),
+                                vm.state.clone(),
+                                st_col,
+                                format!("{}%", vm.cpu_usage),
+                                format!("{}s", vm.uptime_seconds),
+                                format!("{} MB RAM", vm.memory_usage_mb),
+                            )
+                        };
+
+                        let txt_col = if is_selected { 0xFFFFFF } else { 0xDDDDDD };
+                        pg.draw_text(col_pid, cur_y + 4, &pid_str, 0x888888);
+                        pg.draw_text(col_name, cur_y + 4, &name_str, txt_col);
+                        pg.draw_text(col_state, cur_y + 4, &state_str, state_col);
+                        pg.draw_text(col_cpu, cur_y + 4, &cpu_str, if cpu_str != "0%" { 0xFF6666 } else { 0x888888 });
+                        pg.draw_text(col_cyc, cur_y + 4, &cyc_str, 0xAAAAAA);
+                        pg.draw_text(col_mem, cur_y + 4, &mem_str, 0xAAAAAA);
+                    }
+
+                    // Action buttons bar at bottom
+                    let btn_y = panel_y + panel_h.saturating_sub(38);
+                    let btn_h = 24usize;
+
+                    // [ End Task (K) ]
+                    pg.fill_rect(panel_x, btn_y, 110, btn_h, 0x880000);
+                    pg.draw_rect_outline(panel_x, btn_y, 110, btn_h, 0xFF4444);
+                    pg.draw_text(panel_x + 10, btn_y + 5, "End Task (K)", 0xFFFFFF);
+
+                    // [ Focus Window (F / ENTER) ]
+                    let btn_focus_x = panel_x + 120;
+                    pg.fill_rect(btn_focus_x, btn_y, 150, btn_h, 0x006688);
+                    pg.draw_rect_outline(btn_focus_x, btn_y, 150, btn_h, 0x00CCFF);
+                    pg.draw_text(btn_focus_x + 10, btn_y + 5, "Focus Win (F/RET)", 0xFFFFFF);
+
+                    // [ Toggle Min (M) ]
+                    let btn_min_x = btn_focus_x + 160;
+                    pg.fill_rect(btn_min_x, btn_y, 130, btn_h, 0x555500);
+                    pg.draw_rect_outline(btn_min_x, btn_y, 130, btn_h, 0xFFFF00);
+                    pg.draw_text(btn_min_x + 10, btn_y + 5, "Toggle Min (M)", 0xFFFFFF);
+
+                    // Keybind hints footer
+                    let hint_y = btn_y + btn_h + 4;
+                    pg.draw_text(panel_x, hint_y, "UP/DOWN: Select | LEFT/RIGHT: Tab | DEL/K: Kill | F/ENTER: Focus | M: Minimize", 0x6688AA);
+                }
+            }
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
+            if let Some(data) = env.global_data.as_ref() {
+                self.resources = data.resources.clone();
+                self.vms = data.vms.clone();
+                self.cycles = data.iter as usize;
+                let mut new_procs = Vec::new();
+                for (idx, app) in data.active_apps.iter().enumerate() {
+                    new_procs.push(ProcessItem {
+                        pid: app.pid,
+                        name: app.application.name.clone(),
+                        state: if app.window.is_minimized { "Minimized".to_string() } else { "Running".to_string() },
+                        is_minimized: app.window.is_minimized,
+                        is_focused: data.focused_process_idx == Some(idx),
+                        cpu_time: app.cpu_time,
+                        ui_time: app.ui_time,
+                        win_w: app.window.width,
+                        win_h: app.window.height,
+                        win_x: app.window.x,
+                        win_y: app.window.y,
+                        is_maximized: app.window.is_maximized,
+                    });
+                }
+                self.procs = new_procs;
+            }
+        }
+
+        fn input(&mut self, key: Key) {
+            match key {
+                Key::Special(ScanCode::RIGHT) => {
+                    self.resmon_tab = ResourceMonitorTab::Processes;
+                }
+                Key::Special(ScanCode::LEFT) => {
+                    self.resmon_tab = ResourceMonitorTab::Resources;
+                }
+                Key::Special(ScanCode::UP) => {
+                    if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
+                        self.selected_process_idx = self.selected_process_idx.saturating_sub(1);
+                    }
+                }
+                Key::Special(ScanCode::DOWN) => {
+                    if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
+                        let total = self.total_process_count();
+                        self.selected_process_idx = (self.selected_process_idx + 1).min(total.saturating_sub(1));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_Resources {
+        fn name(&self) -> &str { "Resources" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::INTEGRATED_CIRCUIT_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
+    }
 }
 
 // =========================================================================
@@ -714,6 +1594,121 @@ pub mod network {
             }
             _ => false,
         }
+    }
+
+    #[derive(Clone)]
+    pub struct X_Network {
+        pub selected_network_action_idx: usize,
+        pub network_target: String,
+    }
+
+    impl X_Network {
+        pub fn new() -> Self {
+            Self {
+                selected_network_action_idx: 0,
+                network_target: String::new(),
+            }
+        }
+    }
+
+    impl Runnable for X_Network {
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            let x_off = x + 20;
+            let mut y_off = y + 20;
+            pg.draw_text(x_off, y_off, "Network Status", 0x00FF00);
+            let net_stats = crate::devices::net_stack::stats();
+            y_off += 30;
+            pg.draw_text(x_off, y_off, &alloc::format!("Backend: {}", crate::devices::net_stack::backend_name()), 0xFFFFFF);
+            y_off += 30;
+            pg.draw_text(x_off, y_off, "Statistics:", 0xAAAAAA);
+
+            let sub_x = x + 40;
+            let mut sub_y = y + 100;
+            pg.draw_text(sub_x, sub_y, &alloc::format!("RX Packets: {}", net_stats.rx_pkts), 0xCCCCCC);
+            sub_y += 20;
+            pg.draw_text(sub_x, sub_y, &alloc::format!("TX Packets: {}", net_stats.tx_pkts), 0xCCCCCC);
+            sub_y += 20;
+            pg.draw_text(sub_x, sub_y, &alloc::format!("RX Bytes:   {}", net_stats.rx_bytes), 0xCCCCCC);
+            sub_y += 20;
+            pg.draw_text(sub_x, sub_y, &alloc::format!("TX Bytes:   {}", net_stats.tx_bytes), 0xCCCCCC);
+
+            sub_y += 40;
+            let state = crate::devices::net_stack::get_state();
+            pg.draw_text(sub_x, sub_y, &alloc::format!("IP: {}.{}.{}.{}", state.ip_addr[0], state.ip_addr[1], state.ip_addr[2], state.ip_addr[3]), 0xCCCCCC);
+            sub_y += 20;
+            pg.draw_text(sub_x, sub_y, &alloc::format!("GW: {}.{}.{}.{}", state.gateway[0], state.gateway[1], state.gateway[2], state.gateway[3]), 0xCCCCCC);
+            sub_y += 20;
+            pg.draw_text(sub_x, sub_y, &alloc::format!("MASK: {}.{}.{}.{}", state.subnet_mask[0], state.subnet_mask[1], state.subnet_mask[2], state.subnet_mask[3]), 0xCCCCCC);
+            sub_y += 20;
+            pg.draw_text(sub_x, sub_y, &alloc::format!("MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", state.mac_addr[0], state.mac_addr[1], state.mac_addr[2], state.mac_addr[3], state.mac_addr[4], state.mac_addr[5]), 0xCCCCCC);
+            sub_y += 40;
+            let is_init = crate::devices::net_stack::is_initialized();
+            pg.draw_text(sub_x, sub_y, &alloc::format!("Initialized: {is_init}"), 0xFFFFFF);
+            sub_y += 35;
+
+            pg.draw_text(sub_x, sub_y, &alloc::format!("Target: {}", self.network_target), 0xCCCCCC);
+            sub_y += 28;
+
+            let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off"];
+            let mut action_x = sub_x;
+            for (idx, action) in actions.iter().enumerate() {
+                let is_focused = idx == self.selected_network_action_idx;
+                pg.fill_rect(action_x, sub_y, 88, 24, if is_focused { 0x00AA00 } else { 0x444444 });
+                pg.draw_text(action_x + 8, sub_y + 4, action, 0xFFFFFF);
+                action_x += 96;
+            }
+            sub_y += 36;
+            pg.draw_text(sub_x, sub_y, "LEFT/RIGHT chooses action, ENTER runs it, +/- cycles ping target", 0x888888);
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
+            if let Some(data) = env.global_data.as_ref() {
+                if self.network_target.is_empty() {
+                    self.network_target = data.network_target.clone();
+                }
+            }
+        }
+
+        fn input(&mut self, key: Key) {
+            match key {
+                Key::Special(ScanCode::LEFT) => {
+                    if self.selected_network_action_idx > 0 { self.selected_network_action_idx -= 1; }
+                }
+                Key::Special(ScanCode::RIGHT) => {
+                    if self.selected_network_action_idx < 5 { self.selected_network_action_idx += 1; }
+                }
+                Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
+                    match self.selected_network_action_idx {
+                        0 => { let _ = crate::devices::net_hw::init(); }
+                        1 => crate::devices::net::status(),
+                        2 => { let _ = crate::devices::net::ping(&self.network_target, 4, 250); }
+                        3 => crate::devices::net::lanscan("192.168.1."),
+                        4 => crate::devices::net::httpd_start(8080),
+                        5 => crate::devices::net::httpd_stop(),
+                        _ => {}
+                    }
+                }
+                Key::Printable(c) => {
+                    let ch = char::from(c);
+                    if ch == '+' || ch == '=' {
+                        self.network_target = String::from("192.168.1.1");
+                    } else if ch == '-' || ch == '_' {
+                        self.network_target = String::from("127.0.0.1");
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_Network {
+        fn name(&self) -> &str { "Network" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::COMPUTE_UNIT_V_GLOBE_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
     }
 }
 
@@ -850,6 +1845,98 @@ pub mod console {
             }
             _ => false,
         }
+    }
+
+    #[derive(Clone)]
+    pub struct X_Console {
+        pub term_buf: String,
+        term_selected: bool,
+        command_history: Vec<String>,
+        history_idx: Option<usize>,
+    }
+
+    impl X_Console {
+        pub fn new() -> Self {
+            Self { term_buf: String::new(), term_selected: false, command_history: Vec::new(), history_idx: None }
+        }
+    }
+
+    impl Runnable for X_Console {
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            const WIDTH: usize = 800;
+            const HEIGHT: usize = 600;
+            const MARGIN: usize = 16;
+
+            pg.draw_text(x + 20, y + 20, "Hypervisor Real-time Log", 0x00FF00);
+            let logs = crate::hpvmlog::get_logs();
+            pg.draw_log_viewer(x + MARGIN, y + 50, WIDTH - MARGIN * 2, HEIGHT - 135 - MARGIN * 8, &logs, 0, 0);
+
+            let input_y = y + HEIGHT - 95;
+            pg.draw_text(x + MARGIN, y + HEIGHT - MARGIN * 6, "Use PgUp/PgDn to scroll, C to clear", 0x888888);
+            pg.draw_rect_outline(x + MARGIN, input_y, WIDTH - MARGIN * 8, 35, 0x999999);
+            if self.term_selected {
+                pg.draw_rect_outline_adv(x + MARGIN - 1, input_y - 1, WIDTH - MARGIN * 8 + 2, 37, 0x888844, 3, 0x0F0F0F0F);
+            }
+            pg.draw_text(x + MARGIN + 5, y + HEIGHT - 60, "TAB edits, ENTER sends, ESC leaves edit mode", 0x888888);
+            pg.draw_text(x + MARGIN + 5, y + HEIGHT - 85, &alloc::format!("HPVMx> {}", self.term_buf), 0xDDDDDD);
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, _env: &mut Environment) {}
+
+        fn input(&mut self, key: Key) {
+            match key {
+                Key::Printable(c) if char::from(c) == '\t' => self.term_selected = !self.term_selected,
+                Key::Special(ScanCode::ESCAPE) => self.term_selected = false,
+                Key::Special(ScanCode::UP) if self.term_selected && !self.command_history.is_empty() => {
+                    let idx = self.history_idx.unwrap_or(self.command_history.len()).saturating_sub(1);
+                    self.history_idx = Some(idx);
+                    self.term_buf = self.command_history[idx].clone();
+                }
+                Key::Special(ScanCode::DOWN) if self.term_selected => {
+                    if let Some(idx) = self.history_idx {
+                        if idx + 1 < self.command_history.len() {
+                            self.history_idx = Some(idx + 1);
+                            self.term_buf = self.command_history[idx + 1].clone();
+                        } else {
+                            self.history_idx = None;
+                            self.term_buf.clear();
+                        }
+                    }
+                }
+                Key::Printable(c) if self.term_selected => {
+                    let ch = char::from(c);
+                    match ch {
+                        '\u{8}' => { self.term_buf.pop(); }
+                        '\r' | '\n' => {
+                            let command = self.term_buf.trim().to_string();
+                            if !command.is_empty() {
+                                let command_parts = command.split_whitespace().collect::<Vec<_>>();
+                                let parts = command_parts.clone();
+                                let body = command_parts.clone();
+                                let mut package_manager = PackageManager::new();
+                                crate::terminal::cmd(command_parts, &parts, body, &mut package_manager);
+                                self.command_history.push(command);
+                            }
+                            self.history_idx = None;
+                            self.term_buf.clear();
+                        }
+                        _ if !ch.is_control() => self.term_buf.push(ch),
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_Console {
+        fn name(&self) -> &str { "Console" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::COM_PORT_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
     }
 }
 
@@ -1079,6 +2166,101 @@ pub mod devices {
             }
             _ => false,
         }
+    }
+
+    #[derive(Clone)]
+    pub struct X_Devices {
+        pub categories: Vec<DeviceCategory>,
+        pub selected_device_idx: usize,
+    }
+
+    impl X_Devices {
+        pub fn new() -> Self {
+            Self {
+                categories: Vec::new(),
+                selected_device_idx: 0,
+            }
+        }
+    }
+
+    impl Runnable for X_Devices {
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            let x_off = x + 20;
+            let mut y_off = y + 20;
+            pg.draw_text(x_off, y_off, "Device Manager", 0x00FF00);
+
+            let mut curr_y = y + 50;
+            let mut current_idx = 0;
+
+            for cat in &self.categories {
+                let expanded_icon = if cat.expanded { "[-] " } else { "[+] " };
+                let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xAAAAAA };
+                pg.draw_text(x_off, curr_y, &alloc::format!("{}{}{} ({})", expanded_icon, cat.icon, cat.name, cat.devices.len()), color);
+                curr_y += 20;
+                current_idx += 1;
+
+                if cat.expanded {
+                    for dev in &cat.devices {
+                        let color = if current_idx == self.selected_device_idx { 0xFFFF00 } else { 0xFFFFFF };
+                        pg.draw_icon(x_off + 15, curr_y - 2, 16, 16, if cat.name == "Network Adapters" { &pixel_graphics::icons::PCI_GREEN_ICON_DATA } else { &pixel_graphics::icons::PCI_BLUE_ICON_DATA });
+
+                        let path = &dev.path;
+                        let mut slash_count = 0;
+                        let mut split_idx = None;
+                        for (i, c) in path.char_indices() {
+                            if c == '/' {
+                                slash_count += 1;
+                                if slash_count == 3 {
+                                    split_idx = Some(i + 1);
+                                    break;
+                                }
+                            }
+                        }
+
+                        let display_path = if let Some(idx) = split_idx { &path[idx..] } else { path };
+                        pg.draw_text(x_off + 35, curr_y, &alloc::format!("{:<12} {}", dev.name, display_path), color);
+                        curr_y += 18;
+                        current_idx += 1;
+                    }
+                }
+            }
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
+            if let Some(data) = env.global_data.as_ref() {
+                self.categories = data.categories.clone();
+            }
+        }
+
+        fn input(&mut self, key: Key) {
+            match key {
+                Key::Special(ScanCode::UP) => {
+                    if self.selected_device_idx > 0 { self.selected_device_idx -= 1; }
+                }
+                Key::Special(ScanCode::DOWN) => {
+                    let mut total = 0;
+                    for cat in &self.categories {
+                        total += 1;
+                        if cat.expanded { total += cat.devices.len(); }
+                    }
+                    if self.selected_device_idx + 1 < total { self.selected_device_idx += 1; }
+                }
+                Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
+                    // Dashboard handles expansion toggling after sync
+                }
+                _ => {}
+            }
+        }
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_Devices {
+        fn name(&self) -> &str { "Devices" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::INTEGRATED_CIRCUIT_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
     }
 }
 
@@ -1475,7 +2657,10 @@ pub mod storage {
                                     });
                                     ui.selected_tab = DashboardTab::Editor;
                                 }
-                                Err(_) => ui.ui_error(29),
+                                Err(e) => {
+                                    let errortext = format!("path {} -> {}", full_path, e);
+                                    ui.ui_error_with_detail(29, Some(errortext.as_str()))
+                                },
                             }
                         }
                     }
@@ -1527,6 +2712,584 @@ pub mod storage {
             }
             _ => false,
         }
+    }
+
+    #[derive(Clone)]
+    pub struct X_Storage {
+        pub current_path: String,
+        pub files: Vec<FileEntry>,
+        pub selected_file_idx: usize,
+        pub storage_disks: Vec<DiskTabInfo>,
+        pub selected_disk_idx: usize,
+        pub filesys_action_idx: usize,
+        pub filesys_pending_action: Option<FilePendingAction>,
+        pub status_line: String,
+        pub filesys_new_counter: usize,
+    }
+
+    impl X_Storage {
+        pub fn new() -> Self {
+            X_Storage {
+                current_path: "/".to_string(),
+                files: vec![],
+                selected_file_idx: 0,
+                storage_disks: vec![],
+                selected_disk_idx: 0,
+                filesys_action_idx: 0,
+                filesys_pending_action: None,
+                status_line: "".to_string(),
+                filesys_new_counter: 0,
+            }
+        }
+
+        pub fn select_disk_tab(&mut self, idx: usize) {
+            if idx < self.storage_disks.len() {
+                self.selected_disk_idx = idx;
+                let alias = self.storage_disks[idx].alias.clone();
+                self.current_path = format!("{}:\\", alias);
+                self.selected_file_idx = 0;
+                self.refresh_storage();
+            }
+        }
+
+        pub fn refresh_storage(&mut self) {
+            use uefi::proto::media::file::{File, FileMode, FileAttribute};
+            use uefi::proto::media::fs::SimpleFileSystem;
+
+            self.files.clear();
+
+            // Refresh and query all detected disk filesystems
+            let fs_handles = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::ByProtocol(&SimpleFileSystem::GUID))
+                .map(|hb| hb.to_vec())
+                .unwrap_or_default();
+
+            struct TempDisk {
+                handle: uefi::Handle,
+                volume_label: String,
+                total_bytes: u64,
+                free_bytes: u64,
+                block_size: u32,
+                media_type: String,
+            }
+
+            let mut valid_disks = Vec::new();
+
+            for handle in &fs_handles {
+                let mut volume_label = String::new();
+                let mut total_bytes = 0u64;
+                let mut free_bytes = 0u64;
+                let mut block_size = 512u32;
+                let mut media_type = String::from("Storage Volume");
+
+                if let Ok(mut sfs) = uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(*handle) {
+                    if let Ok(mut root_dir) = sfs.open_volume() {
+                        let mut info_buf = [0u8; 1024];
+                        if let Ok(fs_info) = root_dir.get_info::<uefi::proto::media::file::FileSystemInfo>(&mut info_buf) {
+                            volume_label = fs_info.volume_label().to_string();
+                            total_bytes = fs_info.volume_size();
+                            free_bytes = fs_info.free_space();
+                            block_size = fs_info.block_size();
+                        }
+                    }
+                }
+
+                if volume_label.trim().is_empty() {
+                    continue;
+                }
+
+                let dp_res = unsafe {
+                    uefi::boot::open_protocol::<uefi::proto::device_path::DevicePath>(
+                        uefi::boot::OpenProtocolParams {
+                            handle: *handle,
+                            agent: uefi::boot::image_handle(),
+                            controller: None,
+                        },
+                        uefi::boot::OpenProtocolAttributes::GetProtocol,
+                    )
+                };
+
+                if let Ok(dp) = dp_res {
+                    for node in dp.node_iter() {
+                        use uefi_raw::protocol::device_path::{DeviceType, DeviceSubType};
+                        match (node.device_type(), node.sub_type()) {
+                            (DeviceType::MESSAGING, DeviceSubType::MESSAGING_NVME_NAMESPACE) => {
+                                media_type = String::from("NVMe SSD");
+                            }
+                            (DeviceType::MESSAGING, DeviceSubType::MESSAGING_SATA) => {
+                                media_type = String::from("SATA AHCI");
+                            }
+                            (DeviceType::MESSAGING, DeviceSubType::MESSAGING_USB)
+                            | (DeviceType::MESSAGING, DeviceSubType::MESSAGING_USB_CLASS) => {
+                                media_type = String::from("USB Drive");
+                            }
+                            (DeviceType::MEDIA, DeviceSubType::MEDIA_CD_ROM) => {
+                                media_type = String::from("CD/DVD-ROM");
+                            }
+                            (DeviceType::MEDIA, DeviceSubType::MEDIA_RAM_DISK) => {
+                                media_type = String::from("RAM Disk");
+                            }
+                            (DeviceType::MEDIA, DeviceSubType::MEDIA_HARD_DRIVE) => {
+                                if media_type == "Storage Volume" {
+                                    media_type = String::from("Hard Disk");
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                valid_disks.push(TempDisk {
+                    handle: *handle,
+                    volume_label,
+                    total_bytes,
+                    free_bytes,
+                    block_size,
+                    media_type,
+                });
+            }
+
+            valid_disks.sort_by(|a, b| {
+                let a_is_boot = a.volume_label.eq_ignore_ascii_case("boot");
+                let b_is_boot = b.volume_label.eq_ignore_ascii_case("boot");
+                b_is_boot.cmp(&a_is_boot)
+            });
+
+            let mut detected_disks = Vec::new();
+            for (idx, disk) in valid_disks.into_iter().enumerate() {
+                detected_disks.push(DiskTabInfo {
+                    alias: format!("dsk{}", idx),
+                    volume_label: disk.volume_label,
+                    total_bytes: disk.total_bytes,
+                    free_bytes: disk.free_bytes,
+                    block_size: disk.block_size,
+                    media_type: disk.media_type,
+                    handle: Some(disk.handle),
+                });
+            }
+
+            if detected_disks.is_empty() {
+                detected_disks.push(DiskTabInfo {
+                    alias: String::from("dsk0"),
+                    volume_label: String::from("System"),
+                    total_bytes: 0,
+                    free_bytes: 0,
+                    block_size: 512,
+                    media_type: String::from("Default Volume"),
+                    handle: None,
+                });
+            }
+
+            self.storage_disks = detected_disks;
+
+            if self.selected_disk_idx >= self.storage_disks.len() {
+                self.selected_disk_idx = self.storage_disks.len().saturating_sub(1);
+            }
+
+            let active_disk = self.storage_disks.get(self.selected_disk_idx);
+            let disk_handle = active_disk.and_then(|d| d.handle);
+            let sfs_handle = disk_handle.or_else(|| uefi::boot::get_handle_for_protocol::<SimpleFileSystem>().ok());
+
+            let handle = match sfs_handle {
+                Some(h) => h,
+                None => return,
+            };
+
+            let mut sfs = match uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+
+            let mut root_dir = match sfs.open_volume() {
+                Ok(d) => d,
+                Err(_) => return,
+            };
+
+            let sub_path = if let Some(colon_idx) = self.current_path.find(':') {
+                &self.current_path[colon_idx + 1..]
+            } else {
+                &self.current_path
+            };
+
+            let mut target_dir = if sub_path == "\\" || sub_path == "/" || sub_path.is_empty() {
+                root_dir
+            } else {
+                let clean_path = sub_path.trim_start_matches('\\').trim_start_matches('/');
+                if clean_path.is_empty() {
+                    root_dir
+                } else {
+                    let mut u16_path: Vec<u16> = clean_path.encode_utf16().collect();
+                    u16_path.push(0);
+                    let path_cstr = match uefi::data_types::CStr16::from_u16_with_nul(&u16_path) {
+                        Ok(c) => c,
+                        Err(_) => return,
+                    };
+
+                    let handle = match root_dir.open(path_cstr, FileMode::Read, FileAttribute::DIRECTORY) {
+                        Ok(h) => h,
+                        Err(_) => return,
+                    };
+
+                    match handle.into_directory() {
+                        Some(d) => d,
+                        None => return,
+                    }
+                }
+            };
+
+            let mut buffer = [0u8; 4096];
+            loop {
+                match target_dir.read_entry(&mut buffer) {
+                    Ok(Some(entry)) => {
+                        let name = entry.file_name().to_string();
+                        let size = entry.file_size();
+                        let is_dir = entry.attribute().contains(FileAttribute::DIRECTORY);
+
+                        self.files.push(FileEntry {
+                            name,
+                            size,
+                            is_dir,
+                        });
+                    }
+                    Ok(None) | Err(_) => break,
+                }
+            }
+
+            if !self.files.is_empty() {
+                if self.selected_file_idx >= self.files.len() {
+                    self.selected_file_idx = self.files.len() - 1;
+                }
+            } else {
+                self.selected_file_idx = 0;
+            }
+        }
+    }
+
+    impl Runnable for X_Storage {
+        fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
+            if let Some(data) = env.global_data.as_ref() {
+                if self.current_path.is_empty() {
+                    self.current_path = data.current_path.clone();
+                }
+                self.files = data.files.clone();
+                self.selected_file_idx = self.selected_file_idx.min(self.files.len().saturating_sub(1));
+            }
+
+            if self.current_path.is_empty() {
+                self.current_path = String::from("/");
+            }
+            self.filesys_new_counter += 1;
+        }
+
+        fn input(&mut self, key: Key) {
+            match key {
+                Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
+                    if self.files.get(self.selected_file_idx).map(|entry| entry.is_dir).unwrap_or(false) {
+                        let selected_action = self.filesys_action_idx;
+                        self.filesys_action_idx = 0;
+                        self.input(Key::Special(ScanCode::END));
+                        self.filesys_action_idx = selected_action;
+                    }
+                }
+                Key::Printable(c) => {
+                    let ch = char::from(c);
+                    if ch == '[' || ch == '{' {
+                        if self.selected_disk_idx > 0 {
+                            self.select_disk_tab(self.selected_disk_idx - 1);
+                        }
+                    } else if ch == ']' || ch == '}' {
+                        if self.selected_disk_idx + 1 < self.storage_disks.len() {
+                            self.select_disk_tab(self.selected_disk_idx + 1);
+                        }
+                    } else if ch >= '1' && ch <= '9' {
+                        let idx = (ch as u8 - b'1') as usize;
+                        if idx < self.storage_disks.len() {
+                            self.select_disk_tab(idx);
+                        }
+                    } else if ch == '\t' {
+                        if !self.storage_disks.is_empty() {
+                            let next = (self.selected_disk_idx + 1) % self.storage_disks.len();
+                            self.select_disk_tab(next);
+                        }
+                    }
+                }
+                Key::Special(ScanCode::PAGE_UP) => {
+                    if self.selected_disk_idx > 0 {
+                        self.select_disk_tab(self.selected_disk_idx - 1);
+                    }
+                }
+                Key::Special(ScanCode::PAGE_DOWN) => {
+                    if self.selected_disk_idx + 1 < self.storage_disks.len() {
+                        self.select_disk_tab(self.selected_disk_idx + 1);
+                    }
+                }
+                Key::Special(ScanCode::UP) => {
+                    self.selected_file_idx = self.selected_file_idx.saturating_sub(1);
+                }
+                Key::Special(ScanCode::DOWN) => {
+                    if !self.files.is_empty() {
+                        self.selected_file_idx = (self.selected_file_idx + 1).min(self.files.len() - 1);
+                    }
+                }
+                Key::Special(ScanCode::LEFT) => {
+                    if self.filesys_action_idx >= 1 { self.filesys_action_idx -= 1 } else { self.filesys_action_idx = 0 }
+                }
+                Key::Special(ScanCode::RIGHT) => {
+                    if self.filesys_action_idx < 7 { self.filesys_action_idx += 1 } else { self.filesys_action_idx = 7 }
+                }
+                Key::Special(ScanCode::END) => {
+                    if self.files.is_empty() {
+                        if self.filesys_action_idx == 2 {
+                            let new_file = format!("{}{}new_file_{}.txt", self.current_path, if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" }, self.filesys_new_counter);
+                            match crate::FileSystem::touch(&new_file) {
+                                Ok(_) => {
+                                    self.filesys_new_counter += 1;
+                                    self.status_line = format!("Created {}", new_file);
+                                    self.refresh_storage();
+                                }
+                                Err(e) => self.status_line = format!("Create failed: {}", e),
+                            }
+                        } else if self.filesys_action_idx == 3 {
+                            let new_dir = format!("{}{}new_folder_{}", self.current_path, if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" }, self.filesys_new_counter);
+                            match crate::FileSystem::mkdir(&new_dir) {
+                                Ok(_) => {
+                                    self.filesys_new_counter += 1;
+                                    self.status_line = format!("Created {}", new_dir);
+                                    self.refresh_storage();
+                                }
+                                Err(e) => self.status_line = format!("Create folder failed: {}", e),
+                            }
+                        }
+                        return;
+                    }
+                    let entry = self.files[self.selected_file_idx].clone();
+                    let sep = if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" };
+                    let full_path = format!("{}{}{}", self.current_path, sep, entry.name);
+
+                    if let Some(action) = self.filesys_pending_action {
+                        let result = match action {
+                            FilePendingAction::Rename => {
+                                let dst = format!("{}{}renamed_{}", self.current_path, sep, entry.name);
+                                crate::FileSystem::move_file(&full_path, &dst)
+                            }
+                            FilePendingAction::Copy => {
+                                let dst = format!("{}{}{}_copy", self.current_path, sep, entry.name);
+                                if entry.is_dir {
+                                    crate::FileSystem::clone_dir(&full_path, &dst)
+                                } else {
+                                    crate::FileSystem::copy(&full_path, &dst)
+                                }
+                            }
+                            FilePendingAction::Move => {
+                                let dst = format!("{}{}{}_moved", self.current_path, sep, entry.name);
+                                crate::FileSystem::move_file(&full_path, &dst)
+                            }
+                            FilePendingAction::Delete => crate::FileSystem::remove(&full_path),
+                        };
+
+                        match result {
+                            Ok(_) => {
+                                self.status_line = format!("{:?} complete for {}", action, entry.name);
+                                self.filesys_pending_action = None;
+                                self.refresh_storage();
+                            }
+                            Err(e) => {
+                                self.status_line = format!("{:?} failed: {}", action, e);
+                                self.filesys_pending_action = None;
+                            }
+                        }
+                        return;
+                    }
+
+                    match self.filesys_action_idx {
+                        0 => {
+                            if entry.is_dir {
+                                if entry.name == "." {
+                                    return;
+                                } else if entry.name == ".." {
+                                    if let Some(pos) = self.current_path.rfind('\\') {
+                                        if pos == 0 {
+                                            self.current_path = String::from("\\");
+                                        } else {
+                                            self.current_path.truncate(pos);
+                                        }
+                                    }
+                                    self.refresh_storage();
+                                    return;
+                                } else {
+                                    if !self.current_path.ends_with('\\') {
+                                        self.current_path.push('\\');
+                                    }
+                                    self.current_path.push_str(&entry.name);
+                                    self.selected_file_idx = 0;
+                                    self.refresh_storage();
+                                    return;
+                                }
+                            }
+                            self.status_line = format!("Opening {}...", entry.name);
+                        }
+                        1 => {
+                            self.status_line = format!("{}: {} bytes, {}", entry.name, entry.size, if entry.is_dir { "directory" } else { "file" });
+                        }
+                        2 => {
+                            let new_file = format!("{}{}new_file_{}.txt", self.current_path, sep, self.filesys_new_counter);
+                            match crate::FileSystem::touch(&new_file) {
+                                Ok(_) => {
+                                    self.filesys_new_counter += 1;
+                                    self.status_line = format!("Created {}", new_file);
+                                    self.refresh_storage();
+                                }
+                                Err(e) => self.status_line = format!("Create failed: {}", e),
+                            }
+                        }
+                        3 => {
+                            let new_dir = format!("{}{}new_folder_{}", self.current_path, sep, self.filesys_new_counter);
+                            match crate::FileSystem::mkdir(&new_dir) {
+                                Ok(_) => {
+                                    self.filesys_new_counter += 1;
+                                    self.status_line = format!("Created {}", new_dir);
+                                    self.refresh_storage();
+                                }
+                                Err(e) => self.status_line = format!("Create folder failed: {}", e),
+                            }
+                        }
+                        4 => {
+                            self.filesys_pending_action = Some(FilePendingAction::Rename);
+                            self.status_line = format!("Confirm rename of {}", entry.name);
+                        }
+                        5 => {
+                            self.filesys_pending_action = Some(FilePendingAction::Copy);
+                            self.status_line = format!("Confirm copy of {}", entry.name);
+                        }
+                        6 => {
+                            self.filesys_pending_action = Some(FilePendingAction::Move);
+                            self.status_line = format!("Confirm move of {}", entry.name);
+                        }
+                        7 => {
+                            self.filesys_pending_action = Some(FilePendingAction::Delete);
+                            self.status_line = format!("Confirm delete of {}", entry.name);
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            let content_top = y;
+            let margin = 16usize;
+            let gutter = 12usize;
+            let line_h = 15usize;
+            let width = 600usize;
+            let height = 500usize;
+            let base_y = content_top + margin;
+            let strx = format!("File Explorer ({:#?})", self.filesys_new_counter);
+            pg.draw_text(margin + x, base_y - 4, strx.as_str(), 0x00FF00);
+            pg.draw_text(margin + x, base_y + 8, &alloc::format!("Path: {}", self.current_path), 0xAAAAAA);
+
+            let list_x = margin + x;
+            let list_y = base_y + 28;
+            let list_w = core::cmp::min(width - margin * 2, 720);
+            let list_h = core::cmp::min(height.saturating_sub(margin + 28 + 90), 460);
+            pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
+
+            pg.fill_rect(list_x + 1, list_y + 1, list_w - 2, line_h, 0x333333);
+            pg.draw_text(list_x + 8, list_y + 4, "TYPE  NAME                                 SIZE (BYTES)  ATTR", 0xCCCCCC);
+            pg.draw_line(list_x + 48, list_y + 1, list_x + 48, list_y + list_h - 1, 0x444444);
+            pg.draw_line(list_x + 340, list_y + 1, list_x + 340, list_y + list_h - 1, 0x444444);
+
+            let mut cur_y = list_y + line_h + gutter;
+            for (i, entry) in self.files.iter().enumerate() {
+                if cur_y + line_h > list_y + list_h - 2 { break; }
+                let color = if i == self.selected_file_idx { 0xFFFF00 } else { 0xFFFFFF };
+                let icon = if entry.is_dir { pixel_graphics::icons::FOLDER_ICON_DATA } else {
+                    let dec_syn = ["json", "xml", "toml", "yaml", "yml"];
+                    let sys_syn = ["sys", "efi", "asm"];
+                    let prog_syn = ["micro", "module", "dmx", "bin", "rs"];
+                    let exec_syn = ["cxf", "cxp"];
+
+                    let ext = entry.name.split('.').last().unwrap_or("");
+                    if dec_syn.contains(&ext) {
+                        pixel_graphics::icons::JSON_ICON_DATA
+                    } else if sys_syn.contains(&ext) {
+                        pixel_graphics::icons::EXECUTABLE_ICON_DATA
+                    } else if prog_syn.contains(&ext) {
+                        pixel_graphics::icons::CODE_ICON_DATA
+                    } else if exec_syn.contains(&ext) {
+                        pixel_graphics::icons::EXECUTABLE_ICON_DATA
+                    } else {
+                        pixel_graphics::icons::FILE_ICON_DATA
+                    }
+                };
+
+                let size: String = if entry.size < 10000 {
+                    format!("{}", entry.size)
+                } else if entry.size / 1024 < 10000 {
+                    format!("{}K", (entry.size / 1024))
+                } else {
+                    format!("{}M", (entry.size / 1024) / 1024)
+                };
+
+                let background = if i == self.selected_file_idx { 0x333333 } else { 0x222222 };
+                pg.draw_icon(list_x + 16, cur_y, 16, 16, &icon);
+                pg.draw_text_bg(list_x + 56, cur_y, &alloc::format!("{:<32}", entry.name), color, background);
+                pg.draw_text_bg(list_x + 348, cur_y, &alloc::format!("{:>12}", size), 0xCCCCCC, background);
+                pg.draw_text_bg(list_x + 470, cur_y, if entry.is_dir { "DIR" } else { "FILE" }, 0x6666FF, background);
+                cur_y += line_h;
+            }
+
+            let props_x = list_x + list_w + gutter;
+            let props_w = core::cmp::min(width.saturating_sub(props_x + margin), 360);
+            if props_w > 120 {
+                pg.draw_rect_outline(props_x, list_y, props_w, list_h, 0x777777);
+                pg.draw_text(props_x + 10, list_y + 10, "Properties", 0x00FF00);
+                if let Some(entry) = self.files.get(self.selected_file_idx) {
+                    let sep = if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" };
+                    let full_path = format!("{}{}{}", self.current_path, sep, entry.name);
+                    pg.draw_text(props_x + 10, list_y + 40, &format!("Name: {}", entry.name), 0xFFFFFF);
+                    pg.draw_text(props_x + 10, list_y + 60, &format!("Type: {}", if entry.is_dir { "Directory" } else { "File" }), 0xCCCCCC);
+                    pg.draw_text(props_x + 10, list_y + 80, &format!("Size: {} bytes", entry.size), 0xCCCCCC);
+                    pg.draw_text(props_x + 10, list_y + 100, &format!("Path: {}", full_path), 0x888888);
+                    pg.draw_text(props_x + 10, list_y + 130, &format!("Index: {} / {}", self.selected_file_idx + 1, self.files.len()), 0x888888);
+                } else {
+                    pg.draw_text(props_x + 10, list_y + 40, "No item selected", 0x888888);
+                }
+
+                if let Some(action) = self.filesys_pending_action {
+                    let confirm_y = list_y + list_h - 90;
+                    pg.fill_rect(props_x + 8, confirm_y, props_w - 16, 72, 0x332222);
+                    pg.draw_rect_outline(props_x + 8, confirm_y, props_w - 16, 72, 0xFFAA00);
+                    pg.draw_text(props_x + 16, confirm_y + 10, "Confirm Operation", 0xFFAA00);
+                    pg.draw_text(props_x + 16, confirm_y + 30, &format!("{:?}", action), 0xFFFFFF);
+                    pg.draw_text(props_x + 16, confirm_y + 50, "END confirms, ESC cancels", 0xCCCCCC);
+                }
+            }
+
+            let actions_y = list_h + margin * 8;
+            pg.draw_text(margin, actions_y, "Actions for Selected Item", 0xCCCCCC);
+            let actions = ["Open", "Props", "New File", "New Dir", "Rename", "Copy", "Move", "Delete"];
+            let mut action_x = margin + x;
+            let action_y = actions_y + 20;
+            for (idx, action) in actions.iter().enumerate() {
+                let is_focused = idx == self.filesys_action_idx;
+                let color = if is_focused { 0x00AA00 } else { 0x444444 };
+                pg.fill_rect(action_x, action_y, 92, 24, color);
+                pg.draw_text(action_x + 6, action_y + 4, action, 0xFFFFFF);
+                action_x += 100;
+            }
+            pg.draw_text(margin + x, action_y + 34, "[ / ] Switch Disk Tab | LEFT/RIGHT Select Action | END Run Action | ESC Cancel", 0x888888);
+            pg.draw_text(margin + x, action_y + 52, &self.status_line, 0xFFFF00);
+        }
+    }
+
+    impl AppInfo for X_Storage {
+        fn name(&self) -> &str { "Storage" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::CUBE_WINDOW_RED_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
     }
 }
 
@@ -1670,6 +3433,43 @@ pub mod test {
 
     pub fn input(_ui: &mut DashboardUI, _key: Key) -> bool {
         false
+    }
+
+    #[derive(Clone)]
+    pub struct X_Test {
+        pub iter: usize,
+    }
+
+    impl X_Test {
+        pub fn new() -> Self {
+            Self {
+                iter: 0,
+            }
+        }
+    }
+
+    impl Runnable for X_Test {
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            pg.draw_text(x + 20, y + 20, "System Diagnostics", 0x00FF00);
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
+            if let Some(data) = env.global_data.as_ref() {
+                self.iter = data.iter as usize;
+            }
+        }
+
+        fn input(&mut self, _key: Key) {}
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_Test {
+        fn name(&self) -> &str { "Test" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::INTEGRATED_CIRCUIT_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
     }
 }
 
@@ -1946,6 +3746,35 @@ pub mod editor {
             },
         }
     }
+
+    #[derive(Clone)]
+    pub struct X_Editor {}
+
+    impl X_Editor {
+        pub fn new() -> Self {
+            Self {}
+        }
+    }
+
+    impl Runnable for X_Editor {
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            pg.draw_text(x + 20, y + 20, "Text Editor", 0x00FF00);
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, _env: &mut Environment) {}
+
+        fn input(&mut self, _key: Key) {}
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_Editor {
+        fn name(&self) -> &str { "Editor" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::SCRIPT_YELLOW_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
+    }
 }
 
 // =========================================================================
@@ -2034,6 +3863,263 @@ pub mod settings {
             }
             _ => false,
         }
+    }
+
+    #[derive(Clone)]
+    pub struct X_Settings {
+        pub settings: UiSettings,
+        pub selected_settings_idx: usize,
+        pub selected_settings_category_idx: usize,
+    }
+
+    impl X_Settings {
+        pub fn new() -> Self {
+            Self {
+                settings: UiSettings {
+                    extra_debug_info: false,
+                    folder_absolute_sizes: false,
+                    state_save_restore: false,
+                    extended_symbol_library: false,
+                    ring0_udmi_udxi: false,
+                    controllang_support: false,
+                    pg_vshaders: false,
+                    experimental_mem_comp: false,
+                    auto_refresh_storage: false,
+                    show_hidden_files: false,
+                    general_profile: 0,
+                    boot_target: 0,
+                    interface_density: 0,
+                    vm_safety_policy: 0,
+                    network_profile: 0,
+                    storage_policy: 0,
+                    package_policy: 0,
+                    developer_level: 0,
+                    security_policy: 0,
+                    ui_scaling: 0,
+                    terminal_font: 0,
+                    pg_scanlines: false,
+                    pg_dither: false,
+                    pg_glitch: false,
+                    pg_aberration: 0,
+                },
+                selected_settings_idx: 0,
+                selected_settings_category_idx: 0,
+            }
+        }
+
+        fn option_value(&self, options: &[&'static str], idx: usize) -> String {
+            options.get(idx).copied().unwrap_or(options[0]).to_string()
+        }
+
+        pub fn settings_rows(&self) -> Vec<(String, String, bool, bool)> {
+            match self.selected_settings_category_idx {
+                0 => vec![
+                    (String::from("HPVMX_PROFILE"), self.option_value(&["balanced", "diagnostic", "performance"], self.settings.general_profile), false, false),
+                    (String::from("Extra Debug Info"), if self.settings.extra_debug_info { "on" } else { "off" }.to_string(), false, false),
+                    (String::from("HPVMX_USER"), String::from("operator"), false, false),
+                    (String::from("Experimental Mem Comp"), if self.settings.experimental_mem_comp { "on" } else { "off" }.to_string(), false, false),
+                ],
+                1 => vec![
+                    (String::from("HPVMX_BOOT_TARGET"), self.option_value(&["dashboard", "shell", "last-vm"], self.settings.boot_target), false, false),
+                    (String::from("State Save/Restore"), if self.settings.state_save_restore { "on" } else { "off" }.to_string(), false, false),
+                    (String::from("HPVMX_WATCHDOG"), String::from("disabled"), false, false),
+                ],
+                2 => vec![
+                    (String::from("HPVMX_UI_DENSITY"), self.option_value(&["normal", "compact", "wide"], self.settings.interface_density), false, false),
+                    (String::from("HPVMX_UI_SCALING"), self.option_value(&["50%", "100%", "150%", "200%"], self.settings.ui_scaling), false, false),
+                    (String::from("Extended Symbol Library"), if self.settings.extended_symbol_library { "on" } else { "off" }.to_string(), false, false),
+                    (String::from("PG VShaders"), if self.settings.pg_vshaders { "on" } else { "off" }.to_string(), false, false),
+                    (String::from("PG Scanlines"), if self.settings.pg_scanlines { "on" } else { "off" }.to_string(), false, false),
+                    (String::from("PG Dither"), if self.settings.pg_dither { "on" } else { "off" }.to_string(), false, false),
+                    (String::from("PG Glitch"), if self.settings.pg_glitch { "on" } else { "off" }.to_string(), false, false),
+                    (String::from("PG Aberration"), self.option_value(&["off", "low", "mid", "high", "super", "extreme"], self.settings.pg_aberration), false, false),
+                ],
+                3 => vec![
+                    (String::from("HPVMX_VM_SAFETY"), self.option_value(&["prompt", "auto-save", "strict"], self.settings.vm_safety_policy), false, false),
+                    (String::from("HPVMX_VM_DEFAULT_MEM"), format!("1024MB"), false, false),
+                    (String::from("HPVMX_VM_DEFAULT_CPUS"), format!("1"), false, false),
+                ],
+                4 => vec![
+                    (String::from("HPVMX_NET_PROFILE"), self.option_value(&["dhcp", "static", "loopback"], self.settings.network_profile), false, false),
+                    (String::from("HPVMX_NET_TARGET"), String::from("none"), false, false),
+                    (String::from("HPVMX_HTTPD_PORT"), String::from("8080"), false, false),
+                ],
+                5 => vec![
+                    (String::from("HPVMX_STORAGE_POLICY"), self.option_value(&["preserve", "confirm-delete", "developer"], self.settings.storage_policy), false, false),
+                    (String::from("Folder Absolute Sizes"), if self.settings.folder_absolute_sizes { "on" } else { "off" }.to_string(), false, false),
+                    (String::from("Auto-refresh Storage"), if self.settings.auto_refresh_storage { "on" } else { "off" }.to_string(), false, false),
+                    (String::from("Show Hidden Files"), if self.settings.show_hidden_files { "on" } else { "off" }.to_string(), false, false),
+                ],
+                6 => vec![
+                    (String::from("HPVMX_PM_VERIFY"), self.option_value(&["standard", "quick", "full"], self.settings.package_policy), false, false),
+                    (String::from("HPVMX_PM_AUTOHEAL"), String::from("off"), false, false),
+                    (String::from("HPVMX_PM_INDEX"), String::from("/PACKAGES"), false, false),
+                ],
+                7 => vec![
+                    (String::from("HPVMX_DEV_LEVEL"), self.option_value(&["normal", "verbose", "toolchain"], self.settings.developer_level), false, false),
+                    (String::from("Terminal Font"), self.option_value(&["8x16", "dualscale (experimental)"], self.settings.terminal_font), false, false),
+                    (String::from("ControlLang Support"), if self.settings.controllang_support { "on" } else { "off" }.to_string(), false, true),
+                    (String::from("HPVMX_MICRO_C_TARGET"), String::from("x86_64"), false, false),
+                ],
+                8 => vec![
+                    (String::from("HPVMX_SECURITY_POLICY"), self.option_value(&["standard", "paranoid", "lab"], self.settings.security_policy), false, false),
+                    (String::from("Ring0 UDMI/UDXI"), if self.settings.ring0_udmi_udxi { "on" } else { "off" }.to_string(), true, false),
+                    (String::from("HPVMX_AUTOLYTIC"), String::from("enabled"), false, false),
+                ],
+                _ => vec![
+                    (String::from("HPVMX_VERSION"), String::from("1.0.0"), false, true),
+                    (String::from("Hypervisor Build"), String::from("Debug-Rust-0.9.4"), false, true),
+                    (String::from("Target Arch"), String::from("x86_64-unknown-uefi"), false, true),
+                    (String::from("Firmware Vendor"), String::from("HPVMx Virtual Firmware"), false, true),
+                    (String::from("License"), String::from("Custom / Proprietary"), false, true),
+                ]
+            }
+        }
+    }
+
+    impl Runnable for X_Settings {
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            let left_x = x + 20;
+            let left_y = y + 20;
+            let left_w = 200;
+            let right_x = left_x + left_w + 20;
+            let right_w = 500;
+            let content_h = 500;
+
+            pg.fill_rect(left_x, left_y, left_w, content_h, 0x1A1A1A);
+            pg.draw_rect_outline(left_x, left_y, left_w, content_h, 0x333333);
+            pg.fill_rect(right_x, left_y, right_w, content_h, 0x151515);
+            pg.draw_rect_outline(right_x, left_y, right_w, content_h, 0x333333);
+
+            let categories = [
+                "General", "Boot & Init", "Interface", "VM & Safety",
+                "Network", "Storage", "Packages", "Developer", "Security", "Display (PG)",
+            ];
+
+            let mut cy = left_y + 8;
+            for (i, cat) in categories.iter().enumerate() {
+                let selected = i == self.selected_settings_category_idx;
+                if selected {
+                    pg.fill_rect(left_x + 4, cy - 2, left_w - 8, 20, 0x005577);
+                }
+                pg.draw_text(left_x + 12, cy, cat, if selected { 0x00FFFF } else { 0xCCCCCC });
+                cy += 24;
+            }
+
+            let rows = self.settings_rows();
+            let mut ry = left_y + 12;
+            for (i, (label, val, _readonly, _is_display)) in rows.iter().enumerate() {
+                let selected = i == self.selected_settings_idx;
+                if selected {
+                    pg.fill_rect(right_x + 6, ry - 3, right_w - 12, 34, 0x223322);
+                    pg.draw_rect_outline(right_x + 6, ry - 3, right_w - 12, 34, 0x00AA00);
+                }
+                pg.draw_text(right_x + 12, ry, label, if selected { 0x00FF00 } else { 0xFFFFFF });
+                pg.draw_text(right_x + right_w - 160, ry, val, 0xFFFF00);
+                ry += 38;
+            }
+
+            pg.draw_text(x + 20, y + 540, "[ / ] Category | UP/DOWN Option | ENTER/SPACE Toggle | +/- Cycle", 0x777777);
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
+            if let Some(data) = env.global_data.as_ref() {
+                self.settings = data.settings.clone();
+            }
+        }
+
+        fn input(&mut self, key: Key) {
+            match key {
+                Key::Printable(c) => {
+                    let ch = char::from(c);
+                    if ch == '[' || ch == '{' {
+                        if self.selected_settings_category_idx > 0 {
+                            self.selected_settings_category_idx -= 1;
+                            self.selected_settings_idx = 0;
+                        }
+                    } else if ch == ']' || ch == '}' {
+                        if self.selected_settings_category_idx < 9 {
+                            self.selected_settings_category_idx += 1;
+                            self.selected_settings_idx = 0;
+                        }
+                    } else if ch == ' ' || ch == '\r' || ch == '\n' {
+                        match self.selected_settings_category_idx {
+                            0 => match self.selected_settings_idx {
+                                0 => self.settings.general_profile = (self.settings.general_profile + 1) % 3,
+                                1 => self.settings.extra_debug_info = !self.settings.extra_debug_info,
+                                3 => self.settings.experimental_mem_comp = !self.settings.experimental_mem_comp,
+                                _ => {}
+                            },
+                            1 => match self.selected_settings_idx {
+                                0 => self.settings.boot_target = (self.settings.boot_target + 1) % 3,
+                                1 => self.settings.state_save_restore = !self.settings.state_save_restore,
+                                _ => {}
+                            },
+                            2 => match self.selected_settings_idx {
+                                0 => self.settings.interface_density = (self.settings.interface_density + 1) % 3,
+                                1 => self.settings.ui_scaling = (self.settings.ui_scaling + 1) % 4,
+                                2 => self.settings.extended_symbol_library = !self.settings.extended_symbol_library,
+                                3 => self.settings.pg_vshaders = !self.settings.pg_vshaders,
+                                4 => self.settings.pg_scanlines = !self.settings.pg_scanlines,
+                                5 => self.settings.pg_dither = !self.settings.pg_dither,
+                                6 => self.settings.pg_glitch = !self.settings.pg_glitch,
+                                7 => self.settings.pg_aberration = (self.settings.pg_aberration + 1) % 6,
+                                _ => {}
+                            },
+                            3 => match self.selected_settings_idx {
+                                0 => self.settings.vm_safety_policy = (self.settings.vm_safety_policy + 1) % 3,
+                                _ => {}
+                            },
+                            4 => match self.selected_settings_idx {
+                                0 => self.settings.network_profile = (self.settings.network_profile + 1) % 3,
+                                _ => {}
+                            },
+                            5 => match self.selected_settings_idx {
+                                0 => self.settings.storage_policy = (self.settings.storage_policy + 1) % 3,
+                                1 => self.settings.folder_absolute_sizes = !self.settings.folder_absolute_sizes,
+                                2 => self.settings.auto_refresh_storage = !self.settings.auto_refresh_storage,
+                                3 => self.settings.show_hidden_files = !self.settings.show_hidden_files,
+                                _ => {}
+                            },
+                            6 => match self.selected_settings_idx {
+                                0 => self.settings.package_policy = (self.settings.package_policy + 1) % 3,
+                                _ => {}
+                            },
+                            7 => match self.selected_settings_idx {
+                                0 => self.settings.developer_level = (self.settings.developer_level + 1) % 3,
+                                1 => self.settings.terminal_font = (self.settings.terminal_font + 1) % 2,
+                                2 => self.settings.controllang_support = !self.settings.controllang_support,
+                                _ => {}
+                            },
+                            8 => match self.selected_settings_idx {
+                                0 => self.settings.security_policy = (self.settings.security_policy + 1) % 3,
+                                1 => self.settings.ring0_udmi_udxi = !self.settings.ring0_udmi_udxi,
+                                _ => {}
+                            },
+                            _ => {}
+                        }
+                    }
+                }
+                Key::Special(ScanCode::UP) => {
+                    if self.selected_settings_idx > 0 { self.selected_settings_idx -= 1; }
+                }
+                Key::Special(ScanCode::DOWN) => {
+                    let rows = self.settings_rows();
+                    if self.selected_settings_idx + 1 < rows.len() { self.selected_settings_idx += 1; }
+                }
+                _ => {}
+            }
+        }
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_Settings {
+        fn name(&self) -> &str { "Settings" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::GEAR_WINDOW_SETTINGS_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
     }
 }
 
@@ -2178,5 +4264,182 @@ pub mod packages {
             }
             _ => false,
         }
+    }
+
+    #[derive(Clone)]
+    pub struct X_Packages {
+        pub selected_package_idx: usize,
+        pub package_action_idx: usize,
+        pub registry: BTreeMap<String, Package>,
+        pub status_line: String,
+    }
+
+    impl X_Packages {
+        pub fn new() -> Self {
+            Self {
+                selected_package_idx: 0,
+                package_action_idx: 0,
+                registry: BTreeMap::new(),
+                status_line: String::from("Ready"),
+            }
+        }
+
+        pub fn package_names(&self) -> Vec<String> {
+            self.registry.keys().cloned().collect()
+        }
+
+        pub fn selected_package_name(&self) -> Option<String> {
+            let names = self.package_names();
+            names.get(self.selected_package_idx).cloned()
+        }
+    }
+
+    impl Runnable for X_Packages {
+        fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
+            pg.draw_text(x + 20, y + 20, "Package Manager", 0x00FF00);
+
+            let list_x = x + 20;
+            let list_y = y + 50;
+            let list_w = 280;
+            let list_h = 420;
+
+            pg.draw_rect_outline(list_x, list_y, list_w, list_h, 0x888888);
+            pg.fill_rect(list_x + 1, list_y + 1, list_w - 2, 18, 0x333333);
+            pg.draw_text(list_x + 8, list_y + 4, "NAME                         TYPE", 0xCCCCCC);
+
+            let package_names = self.package_names();
+            let mut curr_y = list_y + 28;
+            for (idx, name) in package_names.iter().enumerate() {
+                if curr_y > list_y + list_h - 20 { break; }
+                let Some(pkg) = self.registry.get(name) else { continue; };
+                if idx == self.selected_package_idx {
+                    pg.fill_rect(list_x + 2, curr_y - 2, list_w - 4, 16, 0x444400);
+                }
+                pg.draw_text(list_x + 8, curr_y, &format!("{:<28} {:?}", pkg.name, pkg.package_type), if idx == self.selected_package_idx { 0xFFFF00 } else { 0xFFFFFF });
+                pg.draw_package_icon(list_x + list_w - 24, curr_y - 1, true);
+                curr_y += 18;
+            }
+
+            let detail_x = list_x + list_w + 30;
+            let detail_w = 400;
+            pg.draw_rect_outline(detail_x, list_y, detail_w, 420, 0x888888);
+            pg.fill_rect(detail_x + 1, list_y + 1, detail_w - 2, 18, 0x333333);
+            pg.draw_text(detail_x + 8, list_y + 4, "PACKAGE DETAILS", 0x00FF00);
+
+            if let Some(name) = self.selected_package_name() {
+                if let Some(pkg) = self.registry.get(&name) {
+                    let mut dy = list_y + 30;
+                    pg.draw_text(detail_x + 10, dy, &format!("Name:      {}", pkg.name), 0xFFFFFF);
+                    dy += 20;
+                    pg.draw_text(detail_x + 10, dy, &format!("Version:   {}", pkg.version), 0x00FFFF);
+                    dy += 20;
+                    pg.draw_text(detail_x + 10, dy, &format!("Type:      {:?}", pkg.package_type), 0xAAAAAA);
+                    dy += 20;
+                    pg.draw_text(detail_x + 10, dy, &format!("Author:    {}", pkg.author), 0xFFFFFF);
+                    dy += 20;
+
+                    if let Some(ref url) = pkg.repo_url {
+                        pg.draw_text(detail_x + 10, dy, &format!("Repo:      {}", url), 0x5555FF);
+                        dy += 20;
+                    }
+
+                    let status_color = if pkg.has_compilation_issues { 0xFF5555 } else { 0x55FF55 };
+                    let status_text = if pkg.has_compilation_issues { "FAILED / ISSUES" } else { "READY / OK" };
+                    pg.draw_text(detail_x + 10, dy, &format!("Status:    {}", status_text), status_color);
+                    dy += 30;
+
+                    pg.draw_text(detail_x + 10, dy, "Dependencies:", 0x00FF00);
+                    dy += 20;
+                    if pkg.deps.is_empty() {
+                        pg.draw_text(detail_x + 20, dy, "none", 0x888888);
+                        dy += 20;
+                    } else {
+                        for dep in &pkg.deps {
+                            pg.draw_text(detail_x + 20, dy, &format!("- {}", dep), 0xCCCCCC);
+                            dy += 16;
+                        }
+                    }
+                    dy += 10;
+
+                    pg.draw_text(detail_x + 10, dy, "Description:", 0x00FF00);
+                    dy += 20;
+                    let desc = &pkg.description;
+                    let words: Vec<&str> = desc.split_whitespace().collect();
+                    let mut line = String::new();
+                    for word in words {
+                        if line.len() + word.len() > 45 {
+                            pg.draw_text(detail_x + 20, dy, &line, 0xAAAAAA);
+                            dy += 16;
+                            line.clear();
+                        }
+                        if !line.is_empty() { line.push(' '); }
+                        line.push_str(word);
+                    }
+                    if !line.is_empty() {
+                        pg.draw_text(detail_x + 20, dy, &line, 0xAAAAAA);
+                    }
+                }
+            } else {
+                pg.draw_text(detail_x + 10, list_y + 40, "No packages loaded", 0xAAAAAA);
+            }
+
+            let actions = ["Refresh", "Verify", "Uninstall", "Update", "Download", "Autocompile"];
+            let mut action_x = x + 20;
+            let action_y = list_y + list_h + 24;
+            for (idx, action) in actions.iter().enumerate() {
+                let is_focused = idx == self.package_action_idx;
+                pg.fill_rect(action_x, action_y, 110, 26, if is_focused { 0x00AA00 } else { 0x444444 });
+                pg.draw_text(action_x + 8, action_y + 5, action, 0xFFFFFF);
+                action_x += 120;
+            }
+            pg.draw_text(x + 20, action_y + 40, "UP/DOWN selects package, LEFT/RIGHT chooses action, ENTER runs it", 0x888888);
+            pg.draw_text(x + 20, action_y + 60, &self.status_line, 0xFFFF00);
+        }
+
+        fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
+            if let Some(data) = env.global_data.as_ref() {
+                self.registry = data.package_manager.registry.clone();
+                self.selected_package_idx = self.selected_package_idx.min(self.registry.len().saturating_sub(1));
+            }
+        }
+
+        fn input(&mut self, key: Key) {
+            match key {
+                Key::Special(ScanCode::UP) => {
+                    if self.selected_package_idx > 0 {
+                        self.selected_package_idx -= 1;
+                    }
+                }
+                Key::Special(ScanCode::DOWN) => {
+                    if self.selected_package_idx + 1 < self.registry.len() {
+                        self.selected_package_idx += 1;
+                    }
+                }
+                Key::Special(ScanCode::LEFT) => {
+                    if self.package_action_idx > 0 {
+                        self.package_action_idx -= 1;
+                    }
+                }
+                Key::Special(ScanCode::RIGHT) => {
+                    if self.package_action_idx < 5 {
+                        self.package_action_idx += 1;
+                    }
+                }
+                Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
+                    // Dashboard will execute action after sync
+                }
+                _ => {}
+            }
+        }
+
+        fn as_any(&self) -> &dyn core::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
+    }
+
+    impl AppInfo for X_Packages {
+        fn name(&self) -> &str { "Packages" }
+        fn version(&self) -> &str { "1.0.0" }
+        fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::ADD_PLUS_32_ICON_DATA }
+        fn dimensions(&self) -> (usize, usize) { (800, 600) }
     }
 }
