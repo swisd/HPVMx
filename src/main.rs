@@ -253,6 +253,7 @@ fn main() -> Status {
     vdebug!("CPU", "calibrating tsc");
     calibrate_tsc();
     vdebug!("CPU", "tsc cyc/us {}", TSC_PER_US);
+    let _cpu_info = hardware::cpu::CpuInfo::detect();
     let _ = boot::set_watchdog_timer(0, 0, None);
 
     vdebug!("env", "creating globalenv");
@@ -264,6 +265,25 @@ fn main() -> Status {
         crate::vdebug!("async", "async/await multitasking verified");
     } else {
         crate::hpvm_error!("async", "async multitasking self-test failed");
+    }
+
+    if crate::multipar::run_multipar_tests() {
+        crate::vdebug!("multipar", "multi-core async executor & ArcWaker verified");
+    } else {
+        crate::hpvm_error!("multipar", "multi-core async executor self-test failed");
+    }
+
+    if crate::hardware::cpu::mp::run_mp_tests() {
+        crate::vdebug!("cpu:mp", "MP topology verification passed");
+    } else {
+        crate::hpvm_error!("cpu:mp", "MP topology verification failed");
+    }
+
+    crate::multipar::init_global_executor();
+    if let Ok(ap_count) = crate::hardware::cpu::mp::start_global_ap_workers() {
+        if ap_count > 0 {
+            crate::vdebug!("cpu:mp", "started {} AP background worker loops via UEFI MP Services", ap_count);
+        }
     }
 
 

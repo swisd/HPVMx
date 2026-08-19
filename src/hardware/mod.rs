@@ -2,6 +2,7 @@
 
 pub mod cpu;
 pub mod pci;
+pub use cpu::mp;
 //mod vmx;
 
 #[cfg(target_arch = "x86_64")]

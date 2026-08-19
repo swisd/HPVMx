@@ -8,6 +8,9 @@ use raw_cpuid::CpuId;
 #[cfg(target_arch = "x86_64")]
 pub mod vmx;
 
+pub mod mp;
+pub use mp::{MpManager, MpTopology, ProcessorCoreInfo};
+
 /// Information about the host CPU's capabilities.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -22,6 +25,12 @@ pub struct CpuInfo {
     pub supports_64bit: bool,
     /// Whether the CPU supports Intel VMX (Virtual Machine Extensions).
     pub supports_vmx: bool,
+    /// Whether UEFI MP Services / multi-core APs are supported.
+    pub supports_mp: bool,
+    /// The number of enabled Application Processors (APs).
+    pub ap_count: u32,
+    /// Discovered MP processor topology (if available).
+    pub topology: Option<MpTopology>,
 }
 
 #[allow(dead_code)]
@@ -103,14 +112,28 @@ impl CpuInfo {
             .map(|info| info.has_vmx())
             .unwrap_or(false);
 
-        crate::vdebug!("cpu", "supports 64-bit VMX: {:?}", supports_64bit);
+        crate::vdebug!("cpu", "supports 64-bit VMX: {:?}", supports_vmx);
+
+        let topology = MpManager::detect_topology();
+        let (cores, threads, supports_mp, ap_count) = if let Some(ref topo) = topology {
+            MpManager::log_topology(topo);
+            let total = topo.total_processors as u32;
+            let enabled_aps = topo.enabled_ap_count() as u32;
+            (total.max(cores), total.max(cores), topo.has_usable_aps(), enabled_aps)
+        } else {
+            crate::vdebug!("cpu:mp", "UEFI MP Services protocol not available; running single-core BSP");
+            (cores, cores, false, 0)
+        };
 
         Self {
             brand,
             cores,
-            threads: cores,
+            threads,
             supports_64bit,
             supports_vmx,
+            supports_mp,
+            ap_count,
+            topology,
         }
     }
 }

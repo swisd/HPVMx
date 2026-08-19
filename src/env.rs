@@ -307,6 +307,72 @@ pub fn dummy_waker() -> Waker {
     unsafe { Waker::from_raw(dummy_raw_waker()) }
 }
 
+pub use crate::multipar::task::{TaskHandle, TaskId, ExecutorStats};
+
+/// A background task adapter tracking an asynchronous future offloaded to the multi-core executor.
+///
+/// When added to an application's `background_tasks`, `.tick()` returns `true` once the
+/// offloaded task finishes running (either on an AP worker core or the BSP).
+#[derive(Clone)]
+pub struct MultiCoreBackgroundTask {
+    pub handle: TaskHandle,
+}
+
+impl MultiCoreBackgroundTask {
+    /// Creates a new `MultiCoreBackgroundTask` wrapping an existing `TaskHandle`.
+    pub fn new(handle: TaskHandle) -> Self {
+        Self { handle }
+    }
+
+    /// Spawns a future on the global multi-core executor and returns a tracking `MultiCoreBackgroundTask`.
+    pub fn spawn<F>(future: F) -> Option<Self>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let handle = crate::multipar::task::spawn_global_handle(future)?;
+        Some(Self { handle })
+    }
+
+    /// Returns `true` if the background task has completed execution.
+    pub fn is_done(&self) -> bool {
+        self.handle.is_done()
+    }
+
+    /// Returns the task's unique `TaskId`.
+    pub fn id(&self) -> TaskId {
+        self.handle.id()
+    }
+}
+
+impl BackgroundTask for MultiCoreBackgroundTask {
+    fn tick(&mut self, _vars: &mut Vec<String>, _env: &mut Environment) -> bool {
+        if self.handle.is_done() {
+            return true;
+        }
+        // Advance the global executor in case AP workers are busy or in single-core mode
+        crate::multipar::task::poll_global_one();
+        self.handle.is_done()
+    }
+}
+
+/// Spawns an asynchronous future onto the global multi-core executor.
+pub fn spawn_multicore<F>(future: F) -> Option<TaskHandle>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    crate::multipar::task::spawn_global_handle(future)
+}
+
+/// Polls ready tasks from the global multi-core executor.
+pub fn poll_multicore_tasks() -> usize {
+    crate::multipar::task::poll_global_ready()
+}
+
+/// Returns runtime statistics for the global multi-core executor.
+pub fn multicore_executor_stats() -> Option<ExecutorStats> {
+    crate::multipar::task::global_executor_stats()
+}
+
 /// A background task backed by an asynchronous Rust `Future`.
 ///
 /// Wraps any `Future<Output = ()>` into a `BackgroundTask` compatible with HPVMx's
@@ -1188,6 +1254,30 @@ impl SteppedApplicationContext {
         }
     }
 
+    /// Spawns an asynchronous future directly onto the global multi-core executor for AP cores to execute.
+    ///
+    /// Returns the `TaskHandle` of the spawned task, or `None` if the global executor is uninitialized.
+    pub fn spawn_async_multicore<F>(&self, future: F) -> Option<TaskHandle>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        crate::multipar::task::spawn_global_handle(future)
+    }
+
+    /// Spawns an asynchronous future onto the global multi-core executor and tracks its completion
+    /// in this application's `background_tasks` list.
+    ///
+    /// Returns the `TaskHandle` of the spawned task, or `None` if the global executor is uninitialized.
+    pub fn spawn_async_tracked<F>(&mut self, future: F) -> Option<TaskHandle>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let handle = crate::multipar::task::spawn_global_handle(future)?;
+        let task = MultiCoreBackgroundTask::new(handle.clone());
+        self.spawn_task(task);
+        Some(handle)
+    }
+
     /// Spawns a background task.
     pub fn spawn_task<T: BackgroundTask + 'static>(&mut self, task: T) {
         match self.background_tasks.as_mut() {
@@ -1229,6 +1319,16 @@ impl BackgroundSteppedApplicationContext {
             pid: id0,
             cpu_time: 0,
         }
+    }
+
+    /// Spawns an asynchronous future directly onto the global multi-core executor for AP cores to execute.
+    ///
+    /// Returns the `TaskHandle` of the spawned task, or `None` if the global executor is uninitialized.
+    pub fn spawn_async_multicore<F>(&self, future: F) -> Option<TaskHandle>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        crate::multipar::task::spawn_global_handle(future)
     }
 
     pub fn step(&mut self) -> bool {
@@ -1664,6 +1764,30 @@ impl XSteppedApplicationContext {
         }
     }
 
+    /// Spawns an asynchronous future directly onto the global multi-core executor for AP cores to execute.
+    ///
+    /// Returns the `TaskHandle` of the spawned task, or `None` if the global executor is uninitialized.
+    pub fn spawn_async_multicore<F>(&self, future: F) -> Option<TaskHandle>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        crate::multipar::task::spawn_global_handle(future)
+    }
+
+    /// Spawns an asynchronous future onto the global multi-core executor and tracks its completion
+    /// in this application's `background_tasks` list.
+    ///
+    /// Returns the `TaskHandle` of the spawned task, or `None` if the global executor is uninitialized.
+    pub fn spawn_async_tracked<F>(&mut self, future: F) -> Option<TaskHandle>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let handle = crate::multipar::task::spawn_global_handle(future)?;
+        let task = MultiCoreBackgroundTask::new(handle.clone());
+        self.spawn_task(task);
+        Some(handle)
+    }
+
     /// Spawns a background task.
     pub fn spawn_task<T: BackgroundTask + 'static>(&mut self, task: T) {
         match self.background_tasks.as_mut() {
@@ -1814,6 +1938,77 @@ pub fn run_async_tests() -> bool {
     x_ctx.exit_requested = true;
     let poll_exit = Pin::new(&mut x_ctx).poll(&mut cx);
     if !poll_exit.is_ready() {
+        return false;
+    }
+
+    // 4. Test spawn_multicore and MultiCoreBackgroundTask lifecycle
+    crate::multipar::init_global_executor();
+    static MC_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    MC_COUNTER.store(0, Ordering::SeqCst);
+
+    let handle = spawn_multicore(async {
+        MC_COUNTER.fetch_add(100, Ordering::SeqCst);
+    });
+    let handle = match handle {
+        Some(h) => h,
+        None => return false,
+    };
+
+    let mut mc_task = MultiCoreBackgroundTask::new(handle.clone());
+    let mut mc_vars = Vec::new();
+    let mut mc_env = Environment::new();
+
+    // Ticking the task drives progress if pending and returns true on completion
+    let done_mc = mc_task.tick(&mut mc_vars, &mut mc_env);
+    if !done_mc || MC_COUNTER.load(Ordering::SeqCst) != 100 || !handle.is_done() {
+        return false;
+    }
+
+    // 5. Test SteppedApplicationContext spawn_async_tracked
+    static STEPPED_TRACKED_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    STEPPED_TRACKED_COUNTER.store(0, Ordering::SeqCst);
+
+    let dummy_app_tracked = Application::new(Box::new(DummyAppCloneable));
+    let mut ctx_tracked = SteppedApplicationContext::new(dummy_app_tracked, None);
+    let tracked_handle = ctx_tracked.spawn_async_tracked(async {
+        STEPPED_TRACKED_COUNTER.fetch_add(25, Ordering::SeqCst);
+    });
+    if tracked_handle.is_none() {
+        return false;
+    }
+    if ctx_tracked.background_tasks.as_ref().map(|t| t.len()).unwrap_or(0) != 1 {
+        return false;
+    }
+
+    let _ = ctx_tracked.step(None);
+    if STEPPED_TRACKED_COUNTER.load(Ordering::SeqCst) != 25 {
+        return false;
+    }
+    if ctx_tracked.background_tasks.as_ref().map(|t| t.len()).unwrap_or(0) != 0 {
+        return false;
+    }
+
+    // 6. Test XSteppedApplicationContext spawn_async_tracked
+    static X_TRACKED_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    X_TRACKED_COUNTER.store(0, Ordering::SeqCst);
+
+    let x_dummy_app_tracked = Application::new(Box::new(DummyAppCloneable));
+    let mut x_ctx_tracked = XSteppedApplicationContext::new(x_dummy_app_tracked, None);
+    let x_tracked_handle = x_ctx_tracked.spawn_async_tracked(async {
+        X_TRACKED_COUNTER.fetch_add(45, Ordering::SeqCst);
+    });
+    if x_tracked_handle.is_none() {
+        return false;
+    }
+    if x_ctx_tracked.background_tasks.as_ref().map(|t| t.len()).unwrap_or(0) != 1 {
+        return false;
+    }
+
+    let _ = x_ctx_tracked.step(None);
+    if X_TRACKED_COUNTER.load(Ordering::SeqCst) != 45 {
+        return false;
+    }
+    if x_ctx_tracked.background_tasks.as_ref().map(|t| t.len()).unwrap_or(0) != 0 {
         return false;
     }
 
