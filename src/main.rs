@@ -280,11 +280,7 @@ fn main() -> Status {
     }
 
     crate::multipar::init_global_executor();
-    if let Ok(ap_count) = crate::hardware::cpu::mp::start_global_ap_workers() {
-        if ap_count > 0 {
-            crate::vdebug!("cpu:mp", "started {} AP background worker loops via UEFI MP Services", ap_count);
-        }
-    }
+    crate::vdebug!("multipar", "global async executor initialized");
 
 
 
@@ -325,6 +321,9 @@ fn main() -> Status {
     //     .run_forever();
 
     loop {
+        // Poll ready asynchronous tasks on global executor
+        crate::multipar::task::poll_global_ready();
+
         // drive network timers (loopback stack)
         devices::net_stack::poll_tick();
 
