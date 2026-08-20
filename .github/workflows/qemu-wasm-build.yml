@@ -58,10 +58,9 @@ jobs:
             --disable-guest-agent \
             --disable-pie \
             --disable-modules \
-            --disable-blobs \
             --disable-docs \
             --enable-download \
-            --enable-wrap-mode=force
+            --wrap-mode=force
   
 
           # Compile using Emscripten make
