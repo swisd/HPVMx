@@ -40,8 +40,8 @@ jobs:
         run: |
           cd qemu-src
                
-               export EMCC_CFLAGS="-s USE_ZLIB=1"
-               export EMXX_CFLAGS="-s USE_ZLIB=1"
+          export EMCC_CFLAGS="-s USE_ZLIB=1"
+          export EMXX_CFLAGS="-s USE_ZLIB=1"
           
           # Pass --cpu=wasm32 and --cross-prefix= to force Meson into cross-compile mode
           emconfigure ./configure \
