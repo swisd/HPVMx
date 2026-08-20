@@ -35,19 +35,19 @@ jobs:
         run: |
           # Clone stable QEMU source with WASM patches
           git clone --depth 1 https://github.com/ktock/qemu-wasm.git qemu-src
-      - name: Configure and Build QEMU to WebAssembly
+
+      - name: Get GLIB
         run: |
-          cd qemu-src
-          
+          # 1. Clean environment properties to prevent cross-contamination
           unset EMCC_CFLAGS
           unset EMXX_CFLAGS
           
-          # 1. Clone a verified WebAssembly-compatible GLib port (or standard GLib configured for cross)
-          git clone https://gnome.org ../glib-wasm
+          # 2. Clone from the validated GLib repository mirror
+          git clone https://github.com ../glib-wasm
           cd ../glib-wasm
-          git checkout 2.78.0 # Use a stable version matching your setup
+          git checkout 2.84.0 # Use a stable version highly proven for browser QEMU ports
           
-          # 2. Create an Emscripten cross-file for Meson
+          # 3. Create an explicit Emscripten cross-compilation manifest file for Meson
           cat <<EOF > emscripten-cross.txt
           [binaries]
           c = 'emcc'
@@ -63,13 +63,27 @@ jobs:
           endian = 'little'
           EOF
           
-          # 3. Compile GLib into a temporary prefix directory
-          meson setup builddir --cross-file emscripten-cross.txt --prefix=/home/runner/work/glib-sysroot -Dtests=false -Diconv=external
+          # 4. Generate the build using minimal system feature switches
+          # Disabling testing, iconv dependency, and libffi saves significant WASM configuration effort
+          meson setup builddir \
+          --cross-file emscripten-cross.txt \
+          --prefix=/home/runner/work/glib-sysroot \
+          -Dtests=false \
+          -Diconv=external \
+          -Dlibffi=disabled \
+          -Ddefault_library=static
+          
           meson compile -C builddir
           meson install -C builddir
           
-          # 4. Return to your QEMU source directory
+          # 5. Jump back to your QEMU path
           cd ../qemu-src
+
+      - name: Configure and Build QEMU to WebAssembly
+        run: |
+          cd qemu-src
+          
+          
           
           
           export EMCC_CFLAGS="-s USE_ZLIB=1 -s ALLOW_MEMORY_GROWTH=1"
