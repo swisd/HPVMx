@@ -93,16 +93,16 @@ jobs:
             --cross-file emscripten-cross.txt \
             --wrap-mode=forcefallback \
             -Ddefault_library=static \
-            -Dtools=false \
+            -Dtools=disabled \
             -Dcocoa=disabled \
             -Dsdl=disabled \
             -Dgtk=disabled \
             -Dvnc=disabled \
             -Dkvm=disabled \
             -Dxen=disabled \
-            -Dguest_agent=false \
+            -Dguest_agent=disabled \
             -Ddocs=disabled \
-            -Dpie=false
+            -Dpie=disabled
           
           
           
