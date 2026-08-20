@@ -39,6 +39,9 @@ jobs:
       - name: Configure and Build QEMU to WebAssembly
         run: |
           cd qemu-src
+               
+               export EMCC_CFLAGS="-s USE_ZLIB=1"
+               export EMXX_CFLAGS="-s USE_ZLIB=1"
           
           # Pass --cpu=wasm32 and --cross-prefix= to force Meson into cross-compile mode
           emconfigure ./configure \
@@ -52,9 +55,17 @@ jobs:
             --disable-gtk \
             --disable-vnc \
             --disable-kvm \
-            --disable-xen
-          
-          # Compile using Emscripten make
+            --disable-xen \
+            --disable-guest-agent \
+            --disable-pie \
+            --disable-modules \
+            --disable-blobs \
+            --disable-docs \
+            --enable-download \
+            --enable-wrap-mode=force
+  
+
+  # Compile using Emscripten make
           emmake make -j$(nproc)
           
           # Stage compiled outputs
