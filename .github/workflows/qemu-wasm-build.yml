@@ -35,8 +35,6 @@ jobs:
         run: |
           # Clone stable QEMU source with WASM patches
           git clone --depth 1 https://github.com/ktock/qemu-wasm.git qemu-src
-          
-
       - name: Configure and Build QEMU to WebAssembly
         run: |
           cd qemu-src
