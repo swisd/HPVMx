@@ -102,7 +102,7 @@ jobs:
             -Dxen=disabled \
             -Dguest_agent=disabled \
             -Ddocs=disabled \
-            -Dpie=disabled
+            -Db_pie=disabled
           
           
           
