@@ -1432,6 +1432,29 @@ const SYMBOL_LIB: [[u8; 16]; 256] = {
 };
 
 pub mod icons {
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    /// Upscales a square RGBA/ARGB pixel buffer.
+    ///
+    /// * `src`: The source pixel slice (length must equal `src_size * src_size`).
+    /// * `src_size`: The width/height of the input icon (e.g., 16).
+    /// * `scale`: The integer multiplier (e.g., 2 for 16x16 -> 32x32).
+    pub fn upscale_icon(src: &[u32], src_size: usize, scale: usize) -> Vec<u32> {
+        let dst_size = src_size * scale;
+        let mut dst = vec![0u32; dst_size * dst_size];
+
+        for y in 0..dst_size {
+            for x in 0..dst_size {
+                let src_x = x / scale;
+                let src_y = y / scale;
+                dst[y * dst_size + x] = src[src_y * src_size + src_x];
+            }
+        }
+
+        dst
+    }
+
 
     pub type ICON16 = [u32;256];
     pub type ICON32 = [u32;1024];

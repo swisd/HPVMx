@@ -16,7 +16,7 @@ use crate::terminal;
 /// Unified dispatcher to draw any dashboard tab content.
 pub fn draw_tab(
     tab: DashboardTab,
-    ui: &mut DashboardUI,
+    mut ui: &mut DashboardUI,
     pg: &mut PixelGraphics,
     origin_x: usize,
     origin_y: usize,
@@ -34,7 +34,7 @@ pub fn draw_tab(
         DashboardTab::Test => test::draw(ui, pg, origin_x, origin_y, width, height),
         DashboardTab::CreateVM => createvm::draw(ui, pg, origin_x, origin_y, width, height),
         DashboardTab::Editor => editor::draw(ui, pg, origin_x, origin_y, width, height),
-        DashboardTab::Settings => settings::draw(ui, pg, origin_x, origin_y, width, height),
+        DashboardTab::Settings => settings::draw(&mut ui, pg, origin_x, origin_y, width, height),
         DashboardTab::Packages => packages::draw(ui, pg, origin_x, origin_y, width, height),
         DashboardTab::Apps => apps::draw(ui, pg, origin_x, origin_y, width, height),
         DashboardTab::SystemInfo => sysinfo::draw(ui, pg, origin_x, origin_y, width, height),
@@ -2658,7 +2658,7 @@ pub mod storage {
             let icon = if entry.is_dir { pixel_graphics::icons::FOLDER_ICON_DATA } else {
                 let dec_syn = ["json", "xml", "toml", "yaml", "yml"];
                 let sys_syn = ["sys", "efi", "asm"];
-                let prog_syn = ["micro", "ufe", "dmx", "bin", "rs"];
+                let prog_syn = ["micro", ".bytex", "dmx", "bin", "rs"];
 
                 let ext = entry.name.split('.').last().unwrap_or("");
                 if dec_syn.contains(&ext) {

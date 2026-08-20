@@ -14,7 +14,7 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::any::Any;
-use core::char;
+use core::{array, char};
 use uefi::proto::console::text::{Color, Key, ScanCode};
 use uefi::{runtime, Identify};
 use uefi::runtime::VariableKey;
@@ -1871,14 +1871,35 @@ impl DashboardUI {
                         let row = idx / cols;
                         let x = grid_x_start + col * cell_width;
                         let y = grid_y_start + row * cell_height;
+                        let mut ico: [u32; 1024] = pixel_graphics::icons::FILE_32_ICON_DATA;
 
                         // Draw icon
-                        let icon = if *is_dir {
-                            &crate::ui::pixel_graphics::icons::FOLDER_32_ICON_DATA
+                        if *is_dir {
+                            ico = crate::ui::pixel_graphics::icons::FOLDER_32_ICON_DATA
                         } else {
-                            &crate::ui::pixel_graphics::icons::FILE_32_ICON_DATA
+                            let dec_syn = ["json", "xml", "toml", "yaml", "yml"];
+                            let sys_syn = ["sys", "efi", "asm", "bytex"];
+                            let prog_syn = ["micro", "dmx", "bin", "rs"];
+
+
+                            let ext = name.split('.').last().unwrap_or("");
+                            if dec_syn.contains(&ext) {
+                                ico = pixel_graphics::icons::upscale_icon(&pixel_graphics::icons::JSON_ICON_DATA, 16, 2)
+                                    .try_into()
+                                    .expect("Vector did not have exactly 1024 elements");
+                            } else if sys_syn.contains(&ext) {
+                                ico = pixel_graphics::icons::upscale_icon(&pixel_graphics::icons::EXECUTABLE_ICON_DATA, 16, 2)
+                                    .try_into()
+                                    .expect("Vector did not have exactly 1024 elements");
+                            } else if prog_syn.contains(&ext) {
+                                ico = pixel_graphics::icons::upscale_icon(&pixel_graphics::icons::CODE_ICON_DATA, 16, 2)
+                                    .try_into()
+                                    .expect("Vector did not have exactly 1024 elements");
+                            } else {
+                                ico = pixel_graphics::icons::FILE_32_ICON_DATA;
+                            }
                         };
-                        pg.draw_icon(x + (cell_width - 32) / 2, y, 32, 32, icon);
+                        pg.draw_icon(x + (cell_width - 32) / 2, y, 32, 32, &ico);
 
                         // Draw name below it
                         let name_display = if name.len() > 10 {
@@ -2355,7 +2376,9 @@ impl DashboardUI {
                 &self.current_path
             };
 
-            let mut target_dir = if sub_path == "\\" || sub_path == "/" || sub_path.is_empty() {
+            let is_root = sub_path == "\\" || sub_path == "/" || sub_path.is_empty() || sub_path.trim_start_matches('\\').trim_start_matches('/').is_empty();
+
+            let mut target_dir = if is_root {
                 root_dir
             } else {
                 let clean_path = sub_path.trim_start_matches('\\').trim_start_matches('/');
@@ -2390,11 +2413,21 @@ impl DashboardUI {
                 }
             };
 
+            let mut has_dotdot = false;
             let mut buffer = [0u8; 4096];
             loop {
                 match target_dir.read_entry(&mut buffer) {
                     Ok(Some(entry)) => {
                         let name = entry.file_name().to_string();
+                        if name == "." {
+                            continue;
+                        }
+                        if name == ".." {
+                            if is_root {
+                                continue;
+                            }
+                            has_dotdot = true;
+                        }
                         let size = entry.file_size();
                         let is_dir = entry.attribute().contains(FileAttribute::DIRECTORY);
 
@@ -2408,6 +2441,21 @@ impl DashboardUI {
                 }
             }
 
+            if !is_root && !has_dotdot {
+                self.files.insert(0, FileEntry {
+                    name: String::from(".."),
+                    size: 0,
+                    is_dir: true,
+                });
+            } else if !is_root && has_dotdot {
+                if let Some(pos) = self.files.iter().position(|f| f.name == "..") {
+                    if pos != 0 {
+                        let dotdot = self.files.remove(pos);
+                        self.files.insert(0, dotdot);
+                    }
+                }
+            }
+
             // Clamp selected index to new list size
             if !self.files.is_empty() {
                 if self.selected_file_idx >= self.files.len() {
@@ -2415,6 +2463,30 @@ impl DashboardUI {
                 }
             } else {
                 self.selected_file_idx = 0;
+            }
+        }
+
+        pub fn navigate_up_path(current_path: &str) -> String {
+            let colon_pos = current_path.find(':');
+            let min_pos = if let Some(cp) = colon_pos { cp + 1 } else { 0 };
+            let trimmed = current_path.trim_end_matches(['\\', '/']);
+
+            if let Some(pos) = trimmed.rfind(['\\', '/']) {
+                if pos <= min_pos {
+                    if let Some(cp) = colon_pos {
+                        format!("{}:\\", &current_path[..cp])
+                    } else {
+                        String::from("\\")
+                    }
+                } else {
+                    trimmed[..pos].to_string()
+                }
+            } else {
+                if let Some(cp) = colon_pos {
+                    format!("{}:\\", &current_path[..cp])
+                } else {
+                    String::from("\\")
+                }
             }
         }
 
@@ -2992,7 +3064,7 @@ impl DashboardUI {
             pg.draw_text(14, taskbar_y + 8, stringx, 0xFFFFFF);
 
             // Draw active window taskbar tabs next to start menu buttons (starting at x = 330)
-            let mut tab_x = 330usize;
+            let mut tab_x = 380usize;
             for (idx, app) in self.active_apps.iter().enumerate() {
                 if tab_x + 110 > width.saturating_sub(10) { break; }
                 let is_focused = self.focused_process_idx == Some(idx) && !app.window.is_minimized;
@@ -3729,6 +3801,36 @@ impl DashboardUI {
                                 }
                                 tab_x += tab_w + 6;
                             }
+                        } else {
+                            let content_top = 48usize + 32usize;
+                            let margin = 16usize;
+                            let base_y = content_top + margin;
+                            let disk_tab_y = base_y + 12;
+                            let path_y = disk_tab_y + 24;
+                            let list_x = margin;
+                            let list_y = path_y + 18;
+                            let list_w = core::cmp::min(width.saturating_sub(margin * 2), 720);
+                            let list_h = core::cmp::min(height.saturating_sub(list_y + 90), 440);
+                            let line_h = 24usize;
+                            let rows_start_y = list_y + line_h;
+
+                            if mouse_x >= list_x as i32
+                                && mouse_x <= (list_x + list_w) as i32
+                                && mouse_y >= rows_start_y as i32
+                                && mouse_y <= (list_y + list_h) as i32
+                            {
+                                let row = ((mouse_y - rows_start_y as i32) / line_h as i32) as usize;
+                                if row < self.files.len() {
+                                    if self.selected_file_idx == row {
+                                        let saved_action = self.filesys_action_idx;
+                                        self.filesys_action_idx = 0;
+                                        self.handle_input(Key::Special(ScanCode::END));
+                                        self.filesys_action_idx = saved_action;
+                                    } else {
+                                        self.selected_file_idx = row;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -3977,6 +4079,7 @@ impl DashboardUI {
                                 self.filesys_action_idx = 0;
                                 self.handle_input(Key::Special(ScanCode::END));
                                 self.filesys_action_idx = saved_action;
+                                return;
                             }
                         }
                         Key::Special(ScanCode::PAGE_UP) => {
@@ -4024,11 +4127,19 @@ impl DashboardUI {
                                 }
                                 return;
                             }
-                            let entry = self.files[self.selected_file_idx].clone();
+                            let entry = match self.files.get(self.selected_file_idx) {
+                                Some(e) => e.clone(),
+                                None => return,
+                            };
                             let sep = if self.current_path.ends_with('\\') || self.current_path.ends_with('/') { "" } else { "\\" };
                             let full_path = format!("{}{}{}", self.current_path, sep, entry.name);
 
                             if let Some(action) = self.filesys_pending_action {
+                                if entry.name == ".." || entry.name == "." {
+                                    self.filesys_pending_action = None;
+                                    self.status_line = String::from("Cannot perform operations on navigation entry");
+                                    return;
+                                }
                                 let result = match action {
                                     FilePendingAction::Rename => {
                                         // This branch is now handled above for user input, 
@@ -4083,23 +4194,12 @@ impl DashboardUI {
                                         if entry.name == "." {
                                             return;
                                         } else if entry.name == ".." {
-                                            if let Some(pos) = self.current_path.rfind('\\') {
-                                                let colon_pos = self.current_path.find(':');
-                                                let min_pos = if let Some(cp) = colon_pos { cp + 1 } else { 0 };
-                                                if pos <= min_pos {
-                                                    if let Some(cp) = colon_pos {
-                                                        self.current_path = format!("{}:\\", &self.current_path[..cp]);
-                                                    } else {
-                                                        self.current_path = String::from("\\");
-                                                    }
-                                                } else {
-                                                    self.current_path.truncate(pos);
-                                                }
-                                            }
+                                            self.current_path = Self::navigate_up_path(&self.current_path);
+                                            self.selected_file_idx = 0;
                                             self.refresh_storage();
                                             return;
                                         } else {
-                                            if !self.current_path.ends_with('\\') {
+                                            if !self.current_path.ends_with('\\') && !self.current_path.ends_with('/') {
                                                 self.current_path.push('\\');
                                             }
                                             self.current_path.push_str(&entry.name);
@@ -4156,21 +4256,37 @@ impl DashboardUI {
                                     }
                                 }
                                 4 => {
-                                    self.filesys_pending_action = Some(FilePendingAction::Rename);
-                                    self.filesys_rename_buffer = entry.name.clone();
-                                    self.status_line = format!("Rename: {}", entry.name);
+                                    if entry.name != ".." && entry.name != "." {
+                                        self.filesys_pending_action = Some(FilePendingAction::Rename);
+                                        self.filesys_rename_buffer = entry.name.clone();
+                                        self.status_line = format!("Rename: {}", entry.name);
+                                    } else {
+                                        self.status_line = String::from("Cannot rename navigation entry");
+                                    }
                                 }
                                 5 => {
-                                    self.filesys_pending_action = Some(FilePendingAction::Copy);
-                                    self.status_line = format!("Confirm copy of {}", entry.name);
+                                    if entry.name != ".." && entry.name != "." {
+                                        self.filesys_pending_action = Some(FilePendingAction::Copy);
+                                        self.status_line = format!("Confirm copy of {}", entry.name);
+                                    } else {
+                                        self.status_line = String::from("Cannot copy navigation entry");
+                                    }
                                 }
                                 6 => {
-                                    self.filesys_pending_action = Some(FilePendingAction::Move);
-                                    self.status_line = format!("Confirm move of {}", entry.name);
+                                    if entry.name != ".." && entry.name != "." {
+                                        self.filesys_pending_action = Some(FilePendingAction::Move);
+                                        self.status_line = format!("Confirm move of {}", entry.name);
+                                    } else {
+                                        self.status_line = String::from("Cannot move navigation entry");
+                                    }
                                 }
                                 7 => {
-                                    self.filesys_pending_action = Some(FilePendingAction::Delete);
-                                    self.status_line = format!("Confirm delete of {}", entry.name);
+                                    if entry.name != ".." && entry.name != "." {
+                                        self.filesys_pending_action = Some(FilePendingAction::Delete);
+                                        self.status_line = format!("Confirm delete of {}", entry.name);
+                                    } else {
+                                        self.status_line = String::from("Cannot delete navigation entry");
+                                    }
                                 }
                                 _ => {}
                             }
@@ -4744,32 +4860,6 @@ impl DashboardUI {
                                 } else if matches!(self.selected_tab, DashboardTab::Resources) {
                                     if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
                                         self.focus_selected_process();
-                                    }
-                                } else if matches!(self.selected_tab, DashboardTab::Storage) {
-                                    if self.selected_file_idx < self.files.len() {
-                                        let entry = &self.files[self.selected_file_idx];
-                                        if entry.is_dir {
-                                            if entry.name == "." {
-                                                // Do nothing
-                                            } else if entry.name == ".." {
-                                                // Go up
-                                                if let Some(pos) = self.current_path.rfind('\\') {
-                                                    if pos == 0 {
-                                                        self.current_path = String::from("\\");
-                                                    } else {
-                                                        self.current_path.truncate(pos);
-                                                    }
-                                                }
-                                            } else {
-                                                // Go down
-                                                if !self.current_path.ends_with('\\') {
-                                                    self.current_path.push('\\');
-                                                }
-                                                self.current_path.push_str(&entry.name);
-                                            }
-                                            self.selected_file_idx = 0;
-                                            self.refresh_storage();
-                                        }
                                     }
                                 } else if matches!(self.selected_tab, DashboardTab::Apps) {
                                     let (name, _, _, _) = crate::apps::APP_REGISTRY[self.selected_app_idx];

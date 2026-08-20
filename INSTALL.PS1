@@ -45,6 +45,8 @@ Copy-Item $EFI_PATH "$($MOUNT_LETTER):\EFI\BOOT\BOOTX64.EFI"
 New-Item -Path "$($MOUNT_LETTER):\docs\man" -ItemType Directory -Force
 Copy-Item "./doc/manual.md" "$($MOUNT_LETTER):\docs\man\manual.md"
 
+Copy-Item -Path "./internal/pm/*" -Destination "$($MOUNT_LETTER):\pm\" -Recurse -Force
+
 # 3. Detach
 Write-Output "Detaching VHD $MOUNT_LETTER"
 "select vdisk file=$VHD_PATH",

@@ -31,7 +31,7 @@ jobs:
       - name: Set up Rust Nightly Toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-08-07  # Pins to the day before the LLVM 23 upgrade
           targets: x86_64-unknown-uefi
 
       - name: Compile Rust Application (Nightly)
