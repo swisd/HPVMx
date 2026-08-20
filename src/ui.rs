@@ -192,6 +192,7 @@ pub enum DashboardTab {
     Settings,
     Packages,
     Apps,
+    SystemInfo,
 }
 
 impl DashboardTab {
@@ -210,6 +211,7 @@ impl DashboardTab {
             10 => DashboardTab::Settings,
             11 => DashboardTab::Packages,
             12 => DashboardTab::Apps,
+            13 => DashboardTab::SystemInfo,
             _ => DashboardTab::Overview,
         }
     }
@@ -367,10 +369,11 @@ pub enum EditorMode {
     Command,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ResourceMonitorTab {
     Resources,
     Processes,
+    SystemInfo,
 }
 
 #[derive(Clone)]
@@ -426,6 +429,7 @@ pub struct SystemResources {
     
     // History for graphs
     pub cpu_history: Vec<u32>,
+    pub cpu_core_history: Vec<Vec<u32>>,
     pub mem_history: Vec<u32>,
     pub disk_read_history: Vec<u64>,
     pub disk_write_history: Vec<u64>,
@@ -442,21 +446,23 @@ pub struct SystemResources {
 
 impl DashboardUI {
     pub fn new(package_manager: PackageManager) -> Self {
+        let cores = crate::hardware::cpu::core_count().max(1);
         let mut ui = Self {
             selected_tab: DashboardTab::Overview,
             vms: Vec::new(),
             resources: SystemResources {
                 total_memory_mb: 0,
                 used_memory_mb: 0,
-                cpu_count: 0,
+                cpu_count: cores,
                 cpu_usage: 0,
-                cpu_core_usage: Vec::new(),
+                cpu_core_usage: alloc::vec![0; cores as usize],
                 disk_read_kbps: 0,
                 disk_write_kbps: 0,
                 net_rx_kbps: 0,
                 net_tx_kbps: 0,
                 gpu_usage: 0,
                 cpu_history: Vec::with_capacity(100),
+                cpu_core_history: alloc::vec![Vec::with_capacity(100); cores as usize],
                 mem_history: Vec::with_capacity(100),
                 disk_read_history: Vec::with_capacity(100),
                 disk_write_history: Vec::with_capacity(100),
@@ -665,6 +671,7 @@ impl DashboardUI {
 
     pub fn set_resources(&mut self, resources: SystemResources) {
         let old_cpu_hist = self.resources.cpu_history.clone();
+        let old_cpu_core_hist = self.resources.cpu_core_history.clone();
         let old_mem_hist = self.resources.mem_history.clone();
         let old_disk_read_hist = self.resources.disk_read_history.clone();
         let old_disk_write_hist = self.resources.disk_write_history.clone();
@@ -678,6 +685,7 @@ impl DashboardUI {
 
         // Restore and update histories
         self.resources.cpu_history = old_cpu_hist;
+        self.resources.cpu_core_history = old_cpu_core_hist;
         self.resources.mem_history = old_mem_hist;
         self.resources.disk_read_history = old_disk_read_hist;
         self.resources.disk_write_history = old_disk_write_hist;
@@ -687,7 +695,6 @@ impl DashboardUI {
         self.resources.fps_history = old_fps_hist;
         self.resources.ft_ms_history = old_ft_hist;
 
-
         fn push_limit<T>(vec: &mut Vec<T>, val: T, limit: usize) {
             if vec.len() >= limit {
                 vec.remove(0);
@@ -696,6 +703,19 @@ impl DashboardUI {
         }
 
         push_limit(&mut self.resources.cpu_history, self.resources.cpu_usage, 100);
+
+        let core_count = self.resources.cpu_count as usize;
+        while self.resources.cpu_core_history.len() < core_count {
+            self.resources.cpu_core_history.push(Vec::with_capacity(100));
+        }
+        for (i, core_hist) in self.resources.cpu_core_history.iter_mut().enumerate() {
+            let usage = if i < self.resources.cpu_core_usage.len() {
+                self.resources.cpu_core_usage[i]
+            } else {
+                self.resources.cpu_usage
+            };
+            push_limit(core_hist, usage, 100);
+        }
         let mem_percent = if self.resources.total_memory_mb > 0 {
             (self.resources.used_memory_mb * 100 / self.resources.total_memory_mb)
         } else { 0 };
@@ -775,7 +795,7 @@ impl DashboardUI {
                 pg.draw_icon(0, 0, 1440, 1440, &crate::backgrounds::win_snowtree::ICON_DATA);
             } else {
                 pg.fill_rect(0, 32, width, 16, 0x444444); // Dark Gray
-                let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
+                let nav_text = "O Overview | V VMs | R Resources | I SysInfo | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
                 pg.draw_text(10, 36, nav_text, 0xFFFFFF);
             }
 
@@ -941,84 +961,18 @@ impl DashboardUI {
                         DashboardTab::Resources => {
                             match self.resmon_tab {
                                 ResourceMonitorTab::Resources => {
-                                    pg.draw_text(margin, content_top - 6, "[ Resources ]  | Processes |", 0xFFFFFF);
-
-                                    // Left info panel
-                                    let panel_x = margin;
-                                    let panel_y = content_top + margin;
-                                    let panel_w = 360usize;
-                                    let panel_h = 480usize;
-                                    pg.draw_rect_outline(panel_x, panel_y, panel_w, panel_h, 0x888888);
-                                    pg.draw_text_bg(panel_x, panel_y - 4, "Resource Monitor", 0x20FF20, 0x222222);
-
-                                    pg.draw_text(panel_x + 10, panel_y + 16, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
-                                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
-                                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h * 2, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
-
-                                    // Memory usage bar and graph
-                                    let bar_y = panel_y + 16 + line_h * 3 + gutter;
-                                    pg.draw_text(panel_x + 10, bar_y, "Memory History (10s):", 0xCCCCCC);
-                                    pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00, 60);
-
-                                    // I/O Stats and Graphs
-                                    let io_y = bar_y + 80 + gutter * 2;
-                                    pg.draw_text(panel_x + 10, io_y, "Net Traffic (RX:Cyan TX:Yellow)", 0xCCCCCC);
-                                    pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF, 60);
-                                    pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00, 60);
-
-                                    let disk_y = io_y + 80;
-                                    pg.draw_text(panel_x + 10, disk_y, "Disk I/O (Read:White Write:Red)", 0xCCCCCC);
-                                    pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF, 60);
-                                    pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000, 60);
-
-                                    let gpu_y = disk_y + 80;
-                                    pg.draw_text(panel_x + 10, gpu_y, "GPU Usage:", 0xCCCCCC);
-                                    pg.draw_line_graph(panel_x + 10, gpu_y + 20, 165, 50, &self.resources.gpu_history, 100, 0xFF7700, 60);
-
-
-                                    // Right CPU core list panel or Total CPU Graph
-                                    let right_x = panel_x + panel_w + gutter * 2;
-                                    let right_y = panel_y;
-                                    let right_w = core::cmp::min(width - right_x - margin, 360);
-                                    let right_h = core::cmp::min(height - right_y - 100, 260);
-                                    pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
-                                    pg.draw_text_bg(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF, 0x222222);
-                                    pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00, 60);
-
-                                    pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
-                                    for i in 0..self.resources.cpu_count {
-                                        let row_y = right_y + 120 + (i as usize * (line_h + 4));
-                                        if row_y + line_h > right_y + right_h - 8 { break; }
-                                        let usage = if i < self.resources.cpu_core_usage.len() as u32 { self.resources.cpu_core_usage[i as usize] } else { 0 };
-                                        pg.draw_text(right_x + 10, row_y, &alloc::format!("C{}:{:>2}%", i, usage), 0xCCCCCC);
-                                        pg.draw_progress_bar(right_x + 70, row_y, right_w - 80, 12, usage as usize, 100, 0x00FF00);
-                                    }
-
-                                    pg.draw_text_bg(right_x + 10, right_y + 300, "FPS History:", 0xFFFFFF, 0x222222);
-                                    pg.draw_line_graph(right_x + 10, right_y + 300, right_w - 20, 80, &self.resources.fps_history, 75, 0xFF44FF, 60);
-                                    pg.draw_text_bg(right_x + 10, right_y + 400, "Frame MS History:", 0xFFFFFF, 0x222222);
-                                    pg.draw_line_graph(right_x + 10, right_y + 400, right_w - 20, 80, &self.resources.ft_ms_history, 750, 0xFFAAFF, 60);
-
-                                    // Heatmap for CPU Core usage
-                                    let hm_y = right_y + 500;
-                                    pg.draw_text(right_x + 10, hm_y, "CPU Heatmap (Real-time Core Stress):", 0xFFFFFF);
-                                    let mut hm_data = [0.0f32; 16];
-                                    for i in 0..core::cmp::min(self.resources.cpu_core_usage.len(), 1) {
-                                        hm_data[i] = self.resources.cpu_core_usage[i] as f32 / 100.0;
-                                    }
-                                    pg.draw_heatmap(right_x + 10, hm_y + 20, right_w - 20, 80, 4, 4, &hm_data);
-
-                                    // draw u64 le text for all stats
-
-                                    pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.cpu_usage as u64, 0xFFFFFF);
-                                    pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.used_memory_mb as u64, 0xFFFFFF);
-                                    pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.frame_ms as u64, 0xFFFFFF);
-                                    pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.gpu_usage as u64, 0xFFFFFF);
+                                    self.draw_resources_tab(&mut pg, margin, content_top, width, height);
                                 }
                                 ResourceMonitorTab::Processes => {
                                     self.draw_processes_tab(&mut pg, margin, content_top, width, height);
                                 }
+                                ResourceMonitorTab::SystemInfo => {
+                                    self.draw_sysinfo_tab(&mut pg, margin, content_top, width, height);
+                                }
                             }
+                        }
+                        DashboardTab::SystemInfo => {
+                            self.draw_sysinfo_tab(&mut pg, margin, content_top, width, height);
                         }
                         DashboardTab::Network => {
                             let x = 20;
@@ -3262,6 +3216,42 @@ impl DashboardUI {
             }
         }
 
+        pub fn draw_resources_tab(
+            &self,
+            pg: &mut PixelGraphics,
+            margin: usize,
+            content_top: usize,
+            width: usize,
+            height: usize,
+        ) {
+            crate::ui::tabui::resources::draw_resources_view(
+                &self.resources,
+                pg,
+                margin,
+                content_top,
+                width,
+                height,
+            );
+        }
+
+        pub fn draw_sysinfo_tab(
+            &self,
+            pg: &mut PixelGraphics,
+            margin: usize,
+            content_top: usize,
+            width: usize,
+            height: usize,
+        ) {
+            crate::ui::tabui::resources::draw_sysinfo_view(
+                &self.resources,
+                pg,
+                margin,
+                content_top,
+                width,
+                height,
+            );
+        }
+
         pub fn draw_processes_tab(
             &self,
             pg: &mut PixelGraphics,
@@ -3278,6 +3268,10 @@ impl DashboardUI {
             pg.fill_rect(margin + 120, content_top - 6, 110, 22, 0x007799);
             pg.draw_rect_outline(margin + 120, content_top - 6, 110, 22, 0x00FFFF);
             pg.draw_text(margin + 132, content_top - 2, "Processes", 0xFFFFFF);
+
+            pg.fill_rect(margin + 240, content_top - 6, 120, 22, 0x333333);
+            pg.draw_rect_outline(margin + 240, content_top - 6, 120, 22, 0x666666);
+            pg.draw_text(margin + 250, content_top - 2, "System Info", 0xAAAAAA);
 
             let panel_x = margin;
             let panel_y = content_top + 22;
@@ -3323,13 +3317,15 @@ impl DashboardUI {
             let col_state = panel_x + 240;
             let col_cpu = panel_x + 340;
             let col_cyc = panel_x + 410;
-            let col_mem = panel_x + 500;
+            let col_cyc_time = panel_x + 480;
+            let col_mem = panel_x + 570;
 
             pg.draw_text(col_pid, table_y + 5, "PID", 0x88CCFF);
             pg.draw_text(col_name, table_y + 5, "Process Name", 0x88CCFF);
             pg.draw_text(col_state, table_y + 5, "State", 0x88CCFF);
             pg.draw_text(col_cpu, table_y + 5, "CPU %", 0x88CCFF);
             pg.draw_text(col_cyc, table_y + 5, "Cycles", 0x88CCFF);
+            pg.draw_text(col_cyc_time, table_y + 5, "Cpu Cyc %", 0x88CCFF);
             pg.draw_text(col_mem, table_y + 5, "Window / Memory", 0x88CCFF);
 
             // Process Rows
@@ -3350,90 +3346,97 @@ impl DashboardUI {
                 } else {
                     pg.fill_rect(panel_x, cur_y, panel_w, row_h - 2, 0x1F1F2A);
                 }
+                unsafe {
+                    let (pid_str, name_str, state_str, state_col, cpu_str, cyc_str, cyc_tim_str, mem_str) = if i == 0 {
+                        (
+                            "0".to_string(),
+                            "HPVMx Hypervisor".to_string(),
+                            "Running".to_string(),
+                            0x55FF55,
+                            format!("{}%", self.resources.cpu_usage),
+                            format!("{:.1}M", self.cycles as f64 / 1_000_000.0),
+                            format!("{:.1}%", ((self.cycles as f64 / 1_000_000.0) / TSC_PER_US as f64) * 100f64),
+                            "Kernel Ring 0".to_string(),
+                        )
+                    } else if i == 1 {
+                        (
+                            "1".to_string(),
+                            "Hardware & Timers".to_string(),
+                            "Active".to_string(),
+                            0x55FF55,
+                            "1%".to_string(),
+                            format!("{}K", tsc_mhz),
+                            format!("{}%", "xx.x"),
+                            "Hardware I/O".to_string(),
+                        )
+                    } else if i < 2 + self.active_apps.len() {
+                        let app_idx = i - 2;
+                        let app = &self.active_apps[app_idx];
+                        let is_min = app.window.is_minimized;
+                        let is_foc = self.focused_process_idx == Some(app_idx);
+                        let (st, st_col) = if is_min {
+                            ("Minimized".to_string(), 0xFFAA00)
+                        } else if is_foc {
+                            ("Focused".to_string(), 0x00FFFF)
+                        } else {
+                            ("Running".to_string(), 0x55FF55)
+                        };
 
-                let (pid_str, name_str, state_str, state_col, cpu_str, cyc_str, mem_str) = if i == 0 {
-                    (
-                        "0".to_string(),
-                        "HPVMx Hypervisor".to_string(),
-                        "Running".to_string(),
-                        0x55FF55,
-                        format!("{}%", self.resources.cpu_usage),
-                        format!("{:.1}M", self.cycles as f64 / 1_000_000.0),
-                        "Kernel Ring 0".to_string(),
-                    )
-                } else if i == 1 {
-                    (
-                        "1".to_string(),
-                        "Hardware & Timers".to_string(),
-                        "Active".to_string(),
-                        0x55FF55,
-                        "1%".to_string(),
-                        format!("{}K", tsc_mhz),
-                        "Hardware I/O".to_string(),
-                    )
-                } else if i < 2 + self.active_apps.len() {
-                    let app_idx = i - 2;
-                    let app = &self.active_apps[app_idx];
-                    let is_min = app.window.is_minimized;
-                    let is_foc = self.focused_process_idx == Some(app_idx);
-                    let (st, st_col) = if is_min {
-                        ("Minimized".to_string(), 0xFFAA00)
-                    } else if is_foc {
-                        ("Focused".to_string(), 0x00FFFF)
+                        let cpu_pct = ((app.cpu_time as u64 * self.resources.fps.max(1) as u64) / (tsc_mhz * 1_000_000).max(1)) * 100;
+                        let total_cyc = app.cpu_time + app.ui_time;
+                        let cyc_formatted = if total_cyc >= 1_000_000 {
+                            format!("{:.1}M", total_cyc as f64 / 1_000_000.0)
+                        } else if total_cyc >= 1_000 {
+                            format!("{:.1}K", total_cyc as f64 / 1000.0)
+                        } else {
+                            format!("{}", total_cyc)
+                        };
+
+                        let win_info = if app.window.is_maximized {
+                            "Maximized".to_string()
+                        } else if is_min {
+                            "Minimized (BG)".to_string()
+                        } else {
+                            format!("{}x{} @ {},{}", app.window.width, app.window.height, app.window.x, app.window.y)
+                        };
+
+                        (
+                            format!("{}", app.pid),
+                            app.application.name.clone(),
+                            st,
+                            st_col,
+                            format!("{}%", cpu_pct.min(100)),
+                            cyc_formatted,
+                            format!("{:.1}%", ((total_cyc as f64 / 1_000_000.0) / TSC_PER_US as f64) * 100f64),
+                            win_info,
+                        )
                     } else {
-                        ("Running".to_string(), 0x55FF55)
+                        let vm_idx = i - 2 - self.active_apps.len();
+                        let vm = &self.vms[vm_idx];
+                        let is_run = vm.state.contains("running");
+                        let st_col = if is_run { 0x55FF55 } else { 0x888888 };
+                        (
+                            format!("{}", 100 + vm.id),
+                            format!("VM: {}", vm.name),
+                            vm.state.clone(),
+                            st_col,
+                            format!("{}%", vm.cpu_usage),
+                            format!("{}s", vm.uptime_seconds),
+                            format!("{}%", "xx.x"),
+                            format!("{} MB RAM", vm.memory_usage_mb),
+                        )
                     };
 
-                    let cpu_pct = ((app.cpu_time as u64 * self.resources.fps.max(1) as u64) / (tsc_mhz * 1_000_000).max(1)) * 100;
-                    let total_cyc = app.cpu_time + app.ui_time;
-                    let cyc_formatted = if total_cyc >= 1_000_000 {
-                        format!("{:.1}M", total_cyc as f64 / 1_000_000.0)
-                    } else if total_cyc >= 1_000 {
-                        format!("{:.1}K", total_cyc as f64 / 1000.0)
-                    } else {
-                        format!("{}", total_cyc)
-                    };
 
-                    let win_info = if app.window.is_maximized {
-                        "Maximized".to_string()
-                    } else if is_min {
-                        "Minimized (BG)".to_string()
-                    } else {
-                        format!("{}x{} @ {},{}", app.window.width, app.window.height, app.window.x, app.window.y)
-                    };
-
-                    (
-                        format!("{}", app.pid),
-                        app.application.name.clone(),
-                        st,
-                        st_col,
-                        format!("{}%", cpu_pct.min(100)),
-                        cyc_formatted,
-                        win_info,
-                    )
-                } else {
-                    let vm_idx = i - 2 - self.active_apps.len();
-                    let vm = &self.vms[vm_idx];
-                    let is_run = vm.state.contains("running");
-                    let st_col = if is_run { 0x55FF55 } else { 0x888888 };
-                    (
-                        format!("{}", 100 + vm.id),
-                        format!("VM: {}", vm.name),
-                        vm.state.clone(),
-                        st_col,
-                        format!("{}%", vm.cpu_usage),
-                        format!("{}s", vm.uptime_seconds),
-                        format!("{} MB RAM", vm.memory_usage_mb),
-                    )
-                };
-
-                let txt_col = if is_selected { 0xFFFFFF } else { 0xDDDDDD };
-                pg.draw_text(col_pid, cur_y + 4, &pid_str, 0x888888);
-                pg.draw_text(col_name, cur_y + 4, &name_str, txt_col);
-                pg.draw_text(col_state, cur_y + 4, &state_str, state_col);
-                pg.draw_text(col_cpu, cur_y + 4, &cpu_str, if cpu_str != "0%" { 0xFF6666 } else { 0x888888 });
-                pg.draw_text(col_cyc, cur_y + 4, &cyc_str, 0xAAAAAA);
-                pg.draw_text(col_mem, cur_y + 4, &mem_str, 0xAAAAAA);
+                    let txt_col = if is_selected { 0xFFFFFF } else { 0xDDDDDD };
+                    pg.draw_text(col_pid, cur_y + 4, &pid_str, 0x888888);
+                    pg.draw_text(col_name, cur_y + 4, &name_str, txt_col);
+                    pg.draw_text(col_state, cur_y + 4, &state_str, state_col);
+                    pg.draw_text(col_cpu, cur_y + 4, &cpu_str, if cpu_str != "0%" { 0xFF6666 } else { 0x888888 });
+                    pg.draw_text(col_cyc, cur_y + 4, &cyc_str, 0xAAAAAA);
+                    pg.draw_text(col_cyc_time, cur_y + 4, &cyc_tim_str, 0xAAAAAA);
+                    pg.draw_text(col_mem, cur_y + 4, &mem_str, 0xAAAAAA);
+                }
             }
 
             // Action buttons bar at bottom
@@ -3456,12 +3459,17 @@ impl DashboardUI {
             pg.draw_text(panel_x + 265, btn_y + 4, "[M] Min/Restore", 0xFFFFFF);
 
             // [ < Resources ]
-            pg.fill_rect(panel_x + 395, btn_y, 115, btn_h, 0x333333);
-            pg.draw_rect_outline(panel_x + 395, btn_y, 115, btn_h, 0x888888);
-            pg.draw_text(panel_x + 405, btn_y + 4, "[<] Resources", 0xFFFFFF);
+            pg.fill_rect(panel_x + 395, btn_y, 110, btn_h, 0x007799);
+            pg.draw_rect_outline(panel_x + 395, btn_y, 110, btn_h, 0x00FFFF);
+            pg.draw_text(panel_x + 403, btn_y + 4, "[<] Resources", 0xFFFFFF);
+
+            // [ > SysInfo ]
+            pg.fill_rect(panel_x + 515, btn_y, 110, btn_h, 0x007799);
+            pg.draw_rect_outline(panel_x + 515, btn_y, 110, btn_h, 0x00FFFF);
+            pg.draw_text(panel_x + 525, btn_y + 4, "[>] SysInfo", 0xFFFFFF);
 
             // Key hints
-            pg.draw_text(panel_x + 520, btn_y + 4, "UP/DOWN: Select | K: Kill | F: Focus | M: Min", 0x888888);
+            pg.draw_text(panel_x + 635, btn_y + 4, "UP/DN: Select | K: Kill | F: Focus", 0x888888);
         }
 
         pub fn handle_mouse(&mut self, width: usize, height: usize) {
@@ -3589,26 +3597,46 @@ impl DashboardUI {
                         }
                     } else if mouse_y > 32 && mouse_y <= 55 {
                         let x = mouse_x;
-                        if x < 100 { self.selected_tab = DashboardTab::Overview; }
-                        else if x < 180 { self.selected_tab = DashboardTab::VirtualMachines; }
-                        else if x < 280 { self.selected_tab = DashboardTab::Resources; }
-                        else if x < 380 { self.selected_tab = DashboardTab::Storage; }
-                        else if x < 480 { self.selected_tab = DashboardTab::Network; }
-                        else if x < 580 { self.selected_tab = DashboardTab::Devices; }
-                        else if x < 680 { self.selected_tab = DashboardTab::Console; }
-                        else if x < 780 { self.selected_tab = DashboardTab::Test; }
-                        else if x < 880 { self.selected_tab = DashboardTab::Settings; }
-                        else if x < 980 { self.selected_tab = DashboardTab::Packages; }
-                        else if x < 1080 { self.selected_tab = DashboardTab::Apps; }
-                    } else if matches!(self.selected_tab, DashboardTab::Resources) {
+                        if x < 90 { self.selected_tab = DashboardTab::Overview; }
+                        else if x < 160 { self.selected_tab = DashboardTab::VirtualMachines; }
+                        else if x < 250 { self.selected_tab = DashboardTab::Resources; }
+                        else if x < 330 {
+                            self.resmon_tab = ResourceMonitorTab::SystemInfo;
+                            self.selected_tab = DashboardTab::SystemInfo;
+                        }
+                        else if x < 420 { self.selected_tab = DashboardTab::Storage; }
+                        else if x < 510 { self.selected_tab = DashboardTab::Network; }
+                        else if x < 600 { self.selected_tab = DashboardTab::Devices; }
+                        else if x < 690 { self.selected_tab = DashboardTab::Console; }
+                        else if x < 770 { self.selected_tab = DashboardTab::Test; }
+                        else if x < 860 { self.selected_tab = DashboardTab::Settings; }
+                        else if x < 950 { self.selected_tab = DashboardTab::Packages; }
+                        else if x < 1040 { self.selected_tab = DashboardTab::Apps; }
+                    } else if matches!(self.selected_tab, DashboardTab::Resources | DashboardTab::SystemInfo) {
                         let content_top = 48usize + 32usize;
                         let margin = 16usize;
                         // Check sub-tab switch
                         if mouse_y >= (content_top as i32 - 6) && mouse_y <= (content_top as i32 + 18) {
                             if mouse_x >= margin as i32 && mouse_x <= (margin + 110) as i32 {
                                 self.resmon_tab = ResourceMonitorTab::Resources;
+                                self.selected_tab = DashboardTab::Resources;
                             } else if mouse_x >= (margin + 120) as i32 && mouse_x <= (margin + 230) as i32 {
                                 self.resmon_tab = ResourceMonitorTab::Processes;
+                                self.selected_tab = DashboardTab::Resources;
+                            } else if mouse_x >= (margin + 240) as i32 && mouse_x <= (margin + 360) as i32 {
+                                self.resmon_tab = ResourceMonitorTab::SystemInfo;
+                                self.selected_tab = DashboardTab::Resources;
+                            }
+                        } else if matches!(self.resmon_tab, ResourceMonitorTab::Resources) {
+                            let panel_y = content_top + 22;
+                            let panel_h = height.saturating_sub(panel_y + 36);
+                            let btn_y = (panel_y + panel_h.saturating_sub(34)) as i32;
+                            if mouse_y >= btn_y && mouse_y <= btn_y + 24 {
+                                if mouse_x >= margin as i32 && mouse_x <= (margin + 110) as i32 {
+                                    self.resmon_tab = ResourceMonitorTab::Processes;
+                                } else if mouse_x >= (margin + 120) as i32 && mouse_x <= (margin + 230) as i32 {
+                                    self.resmon_tab = ResourceMonitorTab::SystemInfo;
+                                }
                             }
                         } else if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
                             let panel_y = content_top + 22;
@@ -3637,8 +3665,21 @@ impl DashboardUI {
                                     self.focus_selected_process();
                                 } else if mouse_x >= (margin + 255) as i32 && mouse_x <= (margin + 385) as i32 {
                                     self.toggle_min_selected_process();
-                                } else if mouse_x >= (margin + 395) as i32 && mouse_x <= (margin + 510) as i32 {
+                                } else if mouse_x >= (margin + 395) as i32 && mouse_x <= (margin + 505) as i32 {
                                     self.resmon_tab = ResourceMonitorTab::Resources;
+                                } else if mouse_x >= (margin + 515) as i32 && mouse_x <= (margin + 625) as i32 {
+                                    self.resmon_tab = ResourceMonitorTab::SystemInfo;
+                                }
+                            }
+                        } else if matches!(self.resmon_tab, ResourceMonitorTab::SystemInfo) {
+                            let panel_y = content_top + 22;
+                            let panel_h = height.saturating_sub(panel_y + 36);
+                            let btn_y = (panel_y + panel_h.saturating_sub(34)) as i32;
+                            if mouse_y >= btn_y && mouse_y <= btn_y + 24 {
+                                if mouse_x >= margin as i32 && mouse_x <= (margin + 110) as i32 {
+                                    self.resmon_tab = ResourceMonitorTab::Resources;
+                                } else if mouse_x >= (margin + 120) as i32 && mouse_x <= (margin + 230) as i32 {
+                                    self.resmon_tab = ResourceMonitorTab::Processes;
                                 }
                             }
                         }
@@ -4595,24 +4636,55 @@ impl DashboardUI {
                         _ => {}
                     }
                 }
-                DashboardTab::Resources => {
+                DashboardTab::Resources | DashboardTab::SystemInfo => {
                     match key {
                         Key::Printable(c) => {
-                            let ch = char::from(c).to_ascii_lowercase();
-                            if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
-                                match ch {
-                                    'k' => self.kill_selected_process(),
-                                    'f' => self.focus_selected_process(),
-                                    'm' => self.toggle_min_selected_process(),
-                                    _ => {}
+                            let code = u16::from(c);
+                            if code == 9 || code == b'\t' as u16 {
+                                self.resmon_tab = match self.resmon_tab {
+                                    ResourceMonitorTab::Resources => ResourceMonitorTab::Processes,
+                                    ResourceMonitorTab::Processes => ResourceMonitorTab::SystemInfo,
+                                    ResourceMonitorTab::SystemInfo => ResourceMonitorTab::Resources,
+                                };
+                            } else {
+                                let ch = char::from(c).to_ascii_lowercase();
+                                if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
+                                    match ch {
+                                        'k' => self.kill_selected_process(),
+                                        'f' => self.focus_selected_process(),
+                                        'm' => self.toggle_min_selected_process(),
+                                        'r' => self.resmon_tab = ResourceMonitorTab::Resources,
+                                        'i' => self.resmon_tab = ResourceMonitorTab::SystemInfo,
+                                        _ => {}
+                                    }
+                                } else if matches!(self.resmon_tab, ResourceMonitorTab::Resources) {
+                                    match ch {
+                                        'p' => self.resmon_tab = ResourceMonitorTab::Processes,
+                                        'i' => self.resmon_tab = ResourceMonitorTab::SystemInfo,
+                                        _ => {}
+                                    }
+                                } else if matches!(self.resmon_tab, ResourceMonitorTab::SystemInfo) {
+                                    match ch {
+                                        'r' => self.resmon_tab = ResourceMonitorTab::Resources,
+                                        'p' => self.resmon_tab = ResourceMonitorTab::Processes,
+                                        _ => {}
+                                    }
                                 }
                             }
                         }
                         Key::Special(ScanCode::RIGHT) => {
-                            self.resmon_tab = ResourceMonitorTab::Processes
+                            self.resmon_tab = match self.resmon_tab {
+                                ResourceMonitorTab::Resources => ResourceMonitorTab::Processes,
+                                ResourceMonitorTab::Processes => ResourceMonitorTab::SystemInfo,
+                                ResourceMonitorTab::SystemInfo => ResourceMonitorTab::Resources,
+                            };
                         }
                         Key::Special(ScanCode::LEFT) => {
-                            self.resmon_tab = ResourceMonitorTab::Resources
+                            self.resmon_tab = match self.resmon_tab {
+                                ResourceMonitorTab::Resources => ResourceMonitorTab::SystemInfo,
+                                ResourceMonitorTab::Processes => ResourceMonitorTab::Resources,
+                                ResourceMonitorTab::SystemInfo => ResourceMonitorTab::Processes,
+                            };
                         }
                         Key::Special(ScanCode::UP) => {
                             if matches!(self.resmon_tab, ResourceMonitorTab::Processes) {
@@ -4649,6 +4721,10 @@ impl DashboardUI {
                             'o' => self.set_tab(DashboardTab::Overview),
                             'v' => self.set_tab(DashboardTab::VirtualMachines),
                             'r' => self.set_tab(DashboardTab::Resources),
+                            'i' => {
+                                self.resmon_tab = ResourceMonitorTab::SystemInfo;
+                                self.set_tab(DashboardTab::SystemInfo);
+                            }
                             's' => self.set_tab(DashboardTab::Storage),
                             'n' => self.set_tab(DashboardTab::Network),
                             'd' => self.set_tab(DashboardTab::Devices),
@@ -4733,7 +4809,8 @@ impl DashboardUI {
                                 self.selected_tab = match self.selected_tab {
                                     DashboardTab::Overview => DashboardTab::VirtualMachines,
                                     DashboardTab::VirtualMachines => DashboardTab::Resources,
-                                    DashboardTab::Resources => DashboardTab::Storage,
+                                    DashboardTab::Resources => DashboardTab::SystemInfo,
+                                    DashboardTab::SystemInfo => DashboardTab::Storage,
                                     DashboardTab::Storage => DashboardTab::Network,
                                     DashboardTab::Network => DashboardTab::Devices,
                                     DashboardTab::Devices => DashboardTab::Console,
@@ -4743,7 +4820,7 @@ impl DashboardUI {
                                     DashboardTab::Editor => DashboardTab::Storage,
                                     DashboardTab::Settings => DashboardTab::Packages,
                                     DashboardTab::Packages => DashboardTab::Apps,
-                                    DashboardTab::Apps => DashboardTab::Overview
+                                    DashboardTab::Apps => DashboardTab::Overview,
                                 };
                             }
                             '/' => {

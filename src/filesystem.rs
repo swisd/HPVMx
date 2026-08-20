@@ -22,6 +22,33 @@ use uefi::proto::media::fs::SimpleFileSystem;
 use uefi_raw::protocol::device_path::{DeviceSubType, DeviceType};
 use crate::hpvmlog::LogEntry;
 use crate::state::{KernelState, Persistable};
+use core::sync::atomic::{AtomicU64, Ordering};
+
+pub static DISK_READ_BYTES: AtomicU64 = AtomicU64::new(0);
+pub static DISK_WRITE_BYTES: AtomicU64 = AtomicU64::new(0);
+pub static DISK_READ_OPS: AtomicU64 = AtomicU64::new(0);
+pub static DISK_WRITE_OPS: AtomicU64 = AtomicU64::new(0);
+
+#[inline]
+pub fn record_disk_read(bytes: usize) {
+    DISK_READ_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    DISK_READ_OPS.fetch_add(1, Ordering::Relaxed);
+}
+
+#[inline]
+pub fn record_disk_write(bytes: usize) {
+    DISK_WRITE_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    DISK_WRITE_OPS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn disk_stats() -> (u64, u64, u64, u64) {
+    (
+        DISK_READ_BYTES.load(Ordering::Relaxed),
+        DISK_WRITE_BYTES.load(Ordering::Relaxed),
+        DISK_READ_OPS.load(Ordering::Relaxed),
+        DISK_WRITE_OPS.load(Ordering::Relaxed),
+    )
+}
 
 /// Global file system state.
 ///
@@ -420,6 +447,7 @@ impl FileSystem {
         let mut buffer = Vec::new();
         buffer.resize(info.file_size() as usize, 0u8);
         src_file.read(&mut buffer).map_err(|_| "Read error")?;
+        record_disk_read(buffer.len());
 
         // Write to destination
         Self::write_to_file(dst, core::str::from_utf8(&buffer).unwrap_or(""), 'w')
@@ -498,6 +526,7 @@ impl FileSystem {
         let mut buffer = Vec::new();
         buffer.resize(info.file_size() as usize, 0u8);
         file.read(&mut buffer).map_err(|_| "Read error")?;
+        record_disk_read(buffer.len());
 
        
        if let Ok(text) = core::str::from_utf8(&buffer) {
@@ -555,7 +584,9 @@ impl FileSystem {
         if mode == 'a' {
             file.set_position(0xFFFFFFFFFFFFFFFF).map_err(|_| "Seek error")?;
         }
-        file.write(data.as_bytes()).map_err(|_| "Write error")?;
+        let bytes = data.as_bytes();
+        file.write(bytes).map_err(|_| "Write error")?;
+        record_disk_write(bytes.len());
         Ok(())
     }
 
@@ -572,6 +603,7 @@ impl FileSystem {
             file.set_position(0xFFFFFFFFFFFFFFFF).map_err(|_| "Seek error")?;
         }
         file.write(data).map_err(|_| "Write error")?;
+        record_disk_write(data.len());
         Ok(())
     }
 
@@ -586,6 +618,7 @@ impl FileSystem {
 
         file.set_position(position).map_err(|_| "Seek error")?;
         file.write(data).map_err(|_| "Write error")?;
+        record_disk_write(data.len());
         Ok(())
     }
     pub fn read_from_file_bytes_position(path: &str, buffer: &mut [u8], position: u64) -> Result<(), &'static str> {
@@ -600,6 +633,7 @@ impl FileSystem {
 
         file.set_position(position).map_err(|_| "Seek error")?;
         file.read(buffer).map_err(|_| "Read error")?;
+        record_disk_read(buffer.len());
         Ok(())
     }
 
@@ -764,6 +798,7 @@ impl FileSystem {
         let mut regular_file = file.into_regular_file().ok_or("not a regular file")?;
         regular_file.read(&mut buffer)
             .map_err(|_| "failed to read file")?;
+        record_disk_read(buffer.len());
 
         Ok(buffer)
     }

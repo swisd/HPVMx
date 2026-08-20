@@ -883,14 +883,15 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
             // Get system resources
             let stats = hv.get_stats();
             let net_stats = devices::net_stack::stats();
-            let mut core_usage = Vec::new();
-            for i in 0..8 { core_usage.push(25 + i); }
+            let cpu_count = crate::hardware::cpu::core_count().max(1);
+            let mut core_usage = Vec::with_capacity(cpu_count as usize);
+            for i in 0..cpu_count { core_usage.push(25 + (i % 10)); }
             devices::net_stack::poll_tick();
 
             dashboard.set_resources(ui::SystemResources {
                 total_memory_mb: stats.total_physical_memory_mb,
                 used_memory_mb: stats.used_physical_memory_mb,
-                cpu_count: 3,  // Placeholder
+                cpu_count,
                 cpu_usage: 35,  // Placeholder
                 cpu_core_usage: core_usage,
                 disk_read_kbps: 0,
@@ -899,6 +900,7 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                 net_tx_kbps: net_stats.tx_bytes / 1024,
                 gpu_usage: 0,
                 cpu_history: alloc::vec![],
+                cpu_core_history: alloc::vec![],
                 mem_history: alloc::vec![],
                 disk_read_history: alloc::vec![],
                 disk_write_history: alloc::vec![],
@@ -919,12 +921,17 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
 
     let mut RNG: XorShiftRng = XorShiftRng::new(20);
 
-
     let mut frame_count = 0;
     let mut last_second_time = uefi::runtime::get_time().unwrap();
     let mut current_fps = 0;
     let mut current_frame_ms = 0;
     let mut current_cpu_usage = 0;
+
+    let mut last_disk_read_bytes = 0u64;
+    let mut last_disk_write_bytes = 0u64;
+    let mut last_net_rx_bytes = 0u64;
+    let mut last_net_tx_bytes = 0u64;
+    let mut last_refresh_tsc = unsafe { core::arch::x86_64::_rdtsc() };
 
     loop {
         unsafe { crate::hpvmlog::BUSY_TSC = 0; }
@@ -974,27 +981,58 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                     let stats = hv.get_stats();
                     let net_stats = devices::net_stack::stats();
 
+                    let now_tsc = unsafe { core::arch::x86_64::_rdtsc() };
+                    let tsc_delta = now_tsc.saturating_sub(last_refresh_tsc).max(1);
+                    let tsc_per_us = unsafe { crate::TSC_PER_US }.max(1) as u64;
+                    let elapsed_ms = (tsc_delta / (tsc_per_us * 1000)).max(1);
+                    last_refresh_tsc = now_tsc;
+
+                    let (cur_disk_read, cur_disk_write, _, _) = crate::filesystem::disk_stats();
+                    let disk_read_delta = cur_disk_read.saturating_sub(last_disk_read_bytes);
+                    let disk_write_delta = cur_disk_write.saturating_sub(last_disk_write_bytes);
+                    last_disk_read_bytes = cur_disk_read;
+                    last_disk_write_bytes = cur_disk_write;
+
+                    let disk_read_kbps = (disk_read_delta * 1000) / (elapsed_ms * 1024);
+                    let disk_write_kbps = (disk_write_delta * 1000) / (elapsed_ms * 1024);
+
+                    let net_rx_delta = net_stats.rx_bytes.saturating_sub(last_net_rx_bytes);
+                    let net_tx_delta = net_stats.tx_bytes.saturating_sub(last_net_tx_bytes);
+                    last_net_rx_bytes = net_stats.rx_bytes;
+                    last_net_tx_bytes = net_stats.tx_bytes;
+
+                    let net_rx_kbps = (net_rx_delta * 1000) / (elapsed_ms * 1024);
+                    let net_tx_kbps = (net_tx_delta * 1000) / (elapsed_ms * 1024);
+
+                    let target_frame_budget_cycles = unsafe { 22_222 * crate::TSC_PER_US as u64 };
+                    let draw_cycles = dashboard.cycles as u64;
+                    let measured_gpu_usage = if target_frame_budget_cycles > 0 {
+                        ((draw_cycles * 100) / target_frame_budget_cycles).min(100) as u32
+                    } else {
+                        0
+                    };
+
                     // Real per-core usage isn't available easily in UEFI without timers/interrupts tracking,
                     // so we simulate it based on total cpu_usage or random jitter for "realism".
-                    let mut core_usage = Vec::new();
-                    for i in 0..8 {
+                    let cpu_count = crate::hardware::cpu::core_count().max(1);
+                    let mut core_usage = Vec::with_capacity(cpu_count as usize);
+                    for _ in 0..cpu_count {
                         core_usage.push((RNG.rand_range(0, 2) + current_cpu_usage as u64) as u32);
                     }
 
-
-                    // these values need to actually be measured (implement soon)
                     dashboard.set_resources(ui::SystemResources {
                         total_memory_mb: stats.total_physical_memory_mb,
                         used_memory_mb: stats.used_physical_memory_mb,
-                        cpu_count: 3,
+                        cpu_count,
                         cpu_usage: current_cpu_usage as u32,
                         cpu_core_usage: core_usage,
-                        disk_read_kbps: RNG.rand_range(50, 250), // Mocked
-                        disk_write_kbps: RNG.rand_range(50, 250), // Mocked
-                        net_rx_kbps: if RNG.rand_range(0, 500) < 400 { 0 } else { 150 }, //(net_stats.rx_bytes / 1024) % 1000, // Very rough
-                        net_tx_kbps: if RNG.rand_range(0, 500) < 400 { 0 } else { 150 }, //(net_stats.tx_bytes / 1024) % 1000, // Very rough
-                        gpu_usage: RNG.rand_range(1, 30) as u32, // Mocked
+                        disk_read_kbps,
+                        disk_write_kbps,
+                        net_rx_kbps,
+                        net_tx_kbps,
+                        gpu_usage: measured_gpu_usage,
                         cpu_history: alloc::vec![],
+                        cpu_core_history: alloc::vec![],
                         mem_history: alloc::vec![],
                         disk_read_history: alloc::vec![],
                         disk_write_history: alloc::vec![],

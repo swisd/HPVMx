@@ -12,7 +12,23 @@
     <!-- either micro-c or a custom scripting language -->
     <subscript name="testscript" type="module">
         fn add(a, b) {
-        return a + b;
+            return a + b;
+        }
+
+        fn mul(a, b) {
+            let result = 0;
+            let i = 0;
+
+            loop {
+                if (i == b) {
+                    break;
+                }
+
+                result = result + a;
+                i = i + 1;
+            }
+
+            return result;
         }
     </subscript>
     <DisplayGroup name="container">
@@ -21,7 +37,7 @@
             Test Text
         </Text>
         <Text x="20" y="50" color="0xFFFFFF">
-            Add: {testscript::add(1,2)}
+            Add: {testscript::add(1,2)}    Mul: {testscript::mul(3, 4)}
         </Text>
         <TextAdv x="20" y="80" text="Scaled Text" color="0xFFFFFF" scale="2" />
         <TextBg x="20" y="100" text="Text with BG" color="0xFFFFFF" bg="0x000000" />

@@ -53,41 +53,59 @@ pub struct Pagefile {
     pub(crate) header: PagefileHeader
 }
 
+impl Default for Pagefile {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Pagefile {
+    pub const fn new() -> Self {
+        Self {
+            header: PagefileHeader::DefaultHeader(),
+        }
+    }
+
+    pub fn max_blocks(&self) -> u32 {
+        self.header.block_count as u32
+    }
+
     pub fn create_pagefile(&mut self) {
         let mut page = vec![0u8; 134217728];
         let mut zvec = [0u8; 256];
 
         FileSystem::cd("/");
         match FileSystem::read_from_file_bytes_position("PAGEFILE", &mut zvec, 2048) {
-            Ok(r) => vdebug!("PAGE", "pagefile ok"),
+            Ok(_r) => vdebug!("PAGE", "pagefile ok"),
             Err(e) => {
                 vdebug!("PAGE", "cannot read pagefile: {:#?}", e);
                 vdebug!("PAGE", "creating new pagefile");
-                FileSystem::write_to_file_bytes("PAGEFILE", &*page, 'w');
+                let _ = FileSystem::write_to_file_bytes("PAGEFILE", &*page, 'w');
             }
         }
         vdebug!("PAGE", "updating pagefile headers");
         // Header PAGE magic, header size, block size (00 10 is 4096 in hex LE), block count (32767) (80 7F)
-        FileSystem::write_to_file_bytes_position("PAGEFILE", &self.header.to_hex_bytes(), 0x00);
+        let _ = FileSystem::write_to_file_bytes_position("PAGEFILE", &self.header.to_hex_bytes(), 0x00);
     }
 
-    pub fn write_block(&self, id: u32, data: &[u8; 4096]) {
-        if id >= self.header.block_count as u32 {  }
-        FileSystem::cd("/");
-        let position = 4096 + (4096*id);
-        FileSystem::write_to_file_bytes_position("PAGEFILE", data, position as u64);
-    }
-    pub fn read_block(&self, id: u32) -> [u8; 4096] {
-        let mut buf = [0u8; 4096];
+    pub fn write_block(&self, id: u32, data: &[u8; 4096]) -> Result<(), &'static str> {
         if id >= self.header.block_count as u32 {
-            [0u8; 4096];
+            return Err("Block ID out of bounds");
         }
-
         FileSystem::cd("/");
-        let position = 4096 + (4096 * id);
-        FileSystem::read_from_file_bytes_position("PAGEFILE", &mut buf, position as u64);
-        buf
+        let position = 4096 + (4096 * id as u64);
+        FileSystem::write_to_file_bytes_position("PAGEFILE", data, position)
+    }
+
+    pub fn read_block(&self, id: u32) -> Result<[u8; 4096], &'static str> {
+        if id >= self.header.block_count as u32 {
+            return Err("Block ID out of bounds");
+        }
+        let mut buf = [0u8; 4096];
+        FileSystem::cd("/");
+        let position = 4096 + (4096 * id as u64);
+        FileSystem::read_from_file_bytes_position("PAGEFILE", &mut buf, position)?;
+        Ok(buf)
     }
 }
 

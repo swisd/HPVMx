@@ -4,6 +4,9 @@
 //!
 //! This module contains the core UI logic, including the `DashboardUI`
 //! which manages the main display, active applications, and system status.
+//!
+//! This file is an older reference, and is considered to be archived
+//!
 pub static DASH_BACK_ENABLED: bool = true;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -176,6 +179,7 @@ pub enum DashboardTab {
     Settings,
     Packages,
     Apps,
+    SystemInfo,
 }
 
 impl DashboardTab {
@@ -194,6 +198,7 @@ impl DashboardTab {
             10 => DashboardTab::Settings,
             11 => DashboardTab::Packages,
             12 => DashboardTab::Apps,
+            13 => DashboardTab::SystemInfo,
             _ => DashboardTab::Overview,
         }
     }
@@ -351,10 +356,11 @@ pub enum EditorMode {
     Command,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ResourceMonitorTab {
     Resources,
     Processes,
+    SystemInfo,
 }
 
 #[derive(Clone)]
@@ -410,6 +416,7 @@ pub struct SystemResources {
 
     // History for graphs
     pub cpu_history: Vec<u32>,
+    pub cpu_core_history: Vec<Vec<u32>>,
     pub mem_history: Vec<u32>,
     pub disk_read_history: Vec<u64>,
     pub disk_write_history: Vec<u64>,
@@ -441,6 +448,7 @@ impl DashboardUI {
                 net_tx_kbps: 0,
                 gpu_usage: 0,
                 cpu_history: Vec::with_capacity(100),
+                cpu_core_history: alloc::vec![Vec::with_capacity(100); 0],
                 mem_history: Vec::with_capacity(100),
                 disk_read_history: Vec::with_capacity(100),
                 disk_write_history: Vec::with_capacity(100),
@@ -644,6 +652,7 @@ impl DashboardUI {
 
     pub fn set_resources(&mut self, resources: SystemResources) {
         let old_cpu_hist = self.resources.cpu_history.clone();
+        let old_cpu_core_hist = self.resources.cpu_core_history.clone();
         let old_mem_hist = self.resources.mem_history.clone();
         let old_disk_read_hist = self.resources.disk_read_history.clone();
         let old_disk_write_hist = self.resources.disk_write_history.clone();
@@ -657,6 +666,7 @@ impl DashboardUI {
 
         // Restore and update histories
         self.resources.cpu_history = old_cpu_hist;
+        self.resources.cpu_core_history = old_cpu_core_hist;
         self.resources.mem_history = old_mem_hist;
         self.resources.disk_read_history = old_disk_read_hist;
         self.resources.disk_write_history = old_disk_write_hist;
@@ -666,7 +676,6 @@ impl DashboardUI {
         self.resources.fps_history = old_fps_hist;
         self.resources.ft_ms_history = old_ft_hist;
 
-
         fn push_limit<T>(vec: &mut Vec<T>, val: T, limit: usize) {
             if vec.len() >= limit {
                 vec.remove(0);
@@ -675,6 +684,19 @@ impl DashboardUI {
         }
 
         push_limit(&mut self.resources.cpu_history, self.resources.cpu_usage, 100);
+
+        let core_count = self.resources.cpu_count as usize;
+        while self.resources.cpu_core_history.len() < core_count {
+            self.resources.cpu_core_history.push(Vec::with_capacity(100));
+        }
+        for (i, core_hist) in self.resources.cpu_core_history.iter_mut().enumerate() {
+            let usage = if i < self.resources.cpu_core_usage.len() {
+                self.resources.cpu_core_usage[i]
+            } else {
+                self.resources.cpu_usage
+            };
+            push_limit(core_hist, usage, 100);
+        }
         let mem_percent = if self.resources.total_memory_mb > 0 {
             (self.resources.used_memory_mb * 100 / self.resources.total_memory_mb)
         } else { 0 };

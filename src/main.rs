@@ -85,6 +85,7 @@ use uefi::runtime::ResetType;
 use uefi_raw::table::system::SystemTable;
 use uefi::proto::console::pointer::Pointer as SimplePointer;
 use uefi::proto::device_path::DevicePath;
+use uefi::proto::unsafe_protocol;
 //use ui::UI;
 use kernel::KernelLoader;
 use filesystem::FileSystem;
@@ -118,6 +119,18 @@ pub static mut GLOBALENV: Option<GlobalEnvironment> = None;
 
 pub static mut HYPERVISOR: Option<HypervisorManager> = None;
 static mut TOTAL_PHYSICAL_MEMORY_MB: u32 = 0;
+
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wcslen(mut s: *const u16) -> usize {
+    let mut len = 0;
+    while *s != 0 {
+        len += 1;
+        s = s.add(1);
+    }
+    len
+}
+
 
 //noinspection RsUnreachableCode
 #[allow(dead_code, unused, unused_must_use, non_camel_case_types, nonstandard_style)]

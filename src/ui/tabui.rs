@@ -37,6 +37,7 @@ pub fn draw_tab(
         DashboardTab::Settings => settings::draw(ui, pg, origin_x, origin_y, width, height),
         DashboardTab::Packages => packages::draw(ui, pg, origin_x, origin_y, width, height),
         DashboardTab::Apps => apps::draw(ui, pg, origin_x, origin_y, width, height),
+        DashboardTab::SystemInfo => sysinfo::draw(ui, pg, origin_x, origin_y, width, height),
     }
 }
 
@@ -57,6 +58,7 @@ pub fn handle_tab_input(tab: DashboardTab, ui: &mut DashboardUI, key: Key) -> bo
         DashboardTab::Settings => settings::input(ui, key),
         DashboardTab::Packages => packages::input(ui, key),
         DashboardTab::Apps => apps::input(ui, key),
+        DashboardTab::SystemInfo => sysinfo::input(ui, key),
     }
 }
 
@@ -76,6 +78,7 @@ pub fn update_tab_logic(tab: DashboardTab, ui: &mut DashboardUI) {
         DashboardTab::Settings => settings::logic(ui),
         DashboardTab::Packages => packages::logic(ui),
         DashboardTab::Apps => apps::logic(ui),
+        DashboardTab::SystemInfo => sysinfo::logic(ui),
     }
 }
 
@@ -162,7 +165,7 @@ pub mod overview {
     impl X_Overview {
         pub fn new() -> Self {
             Self {
-                cpu_count: 0,
+                cpu_count: crate::hardware::cpu::core_count().max(1),
                 cpu_usage: 0,
                 used_memory_mb: 0,
                 total_memory_mb: 0,
@@ -969,82 +972,431 @@ pub mod createvm {
 pub mod resources {
     use super::*;
 
+    pub fn draw_resources_view(
+        resources: &SystemResources,
+        pg: &mut PixelGraphics,
+        margin: usize,
+        content_top: usize,
+        width: usize,
+        height: usize,
+    ) {
+        // Top sub-tab selector buttons
+        pg.fill_rect(margin, content_top - 6, 110, 22, 0x007799);
+        pg.draw_rect_outline(margin, content_top - 6, 110, 22, 0x00FFFF);
+        pg.draw_text(margin + 12, content_top - 2, "Resources", 0xFFFFFF);
+
+        pg.fill_rect(margin + 120, content_top - 6, 110, 22, 0x333333);
+        pg.draw_rect_outline(margin + 120, content_top - 6, 110, 22, 0x666666);
+        pg.draw_text(margin + 132, content_top - 2, "Processes", 0xAAAAAA);
+
+        pg.fill_rect(margin + 240, content_top - 6, 120, 22, 0x333333);
+        pg.draw_rect_outline(margin + 240, content_top - 6, 120, 22, 0x666666);
+        pg.draw_text(margin + 250, content_top - 2, "System Info", 0xAAAAAA);
+
+        let panel_x = margin;
+        let panel_y = content_top + 22;
+        let panel_w = width.saturating_sub(margin * 2).min(780);
+        let panel_h = height.saturating_sub(panel_y + 36);
+
+        // Summary banner box (matching processes tab styling)
+        let banner_h = 42usize;
+        pg.fill_rect(panel_x, panel_y, panel_w, banner_h, 0x181F2A);
+        pg.draw_rect_outline(panel_x, panel_y, panel_w, banner_h, 0x0088AA);
+
+        let mem_pct = if resources.total_memory_mb > 0 {
+            (resources.used_memory_mb * 100 / resources.total_memory_mb)
+        } else {
+            0
+        };
+        let tsc_mhz = unsafe { crate::TSC_PER_US };
+
+        let summary_line1 = format!(
+            "CPU: {} Cores @ {}% Total Load | Memory: {} / {} MB ({}%) | Host Clock: {} MHz",
+            resources.cpu_count,
+            resources.cpu_usage,
+            resources.used_memory_mb,
+            resources.total_memory_mb,
+            mem_pct,
+            tsc_mhz,
+        );
+        let summary_line2 = format!(
+            "Net RX: {} KB/s | Net TX: {} KB/s | Disk R: {} KB/s | Disk W: {} KB/s | GPU: {}% | FPS: {} ({}ms)",
+            resources.net_rx_kbps,
+            resources.net_tx_kbps,
+            resources.disk_read_kbps,
+            resources.disk_write_kbps,
+            resources.gpu_usage,
+            resources.fps,
+            resources.frame_ms,
+        );
+        pg.draw_text(panel_x + 10, panel_y + 5, &summary_line1, 0x00FFFF);
+        pg.draw_text(panel_x + 10, panel_y + 22, &summary_line2, 0xCCCCCC);
+
+        // Content Area Columns
+        let content_y = panel_y + banner_h + 8;
+        let btn_h = 24usize;
+        let content_h = panel_h.saturating_sub(banner_h + 8 + btn_h + 10);
+        let col_gap = 8usize;
+        let left_w = (panel_w.saturating_sub(col_gap)) / 2;
+        let right_w = panel_w.saturating_sub(left_w + col_gap);
+        let left_x = panel_x;
+        let right_x = panel_x + left_w + col_gap;
+
+        // ==========================================
+        // LEFT COLUMN: CPU & Individual Core Graphs
+        // ==========================================
+        pg.fill_rect(left_x, content_y, left_w, content_h, 0x161B26);
+        pg.draw_rect_outline(left_x, content_y, left_w, content_h, 0x0088AA);
+
+        // Header
+        pg.fill_rect(left_x, content_y, left_w, 22, 0x243042);
+        pg.draw_rect_outline(left_x, content_y, left_w, 22, 0x4A607A);
+        let cpu_hdr = format!("CPU Utilization ({} Cores - {}%)", resources.cpu_count, resources.cpu_usage);
+        pg.draw_text(left_x + 8, content_y + 4, &cpu_hdr, 0x88CCFF);
+
+        // Total CPU Graph
+        let total_graph_y = content_y + 26;
+        let total_graph_h = 36usize;
+        let total_graph_w = left_w.saturating_sub(16);
+        let total_graph_x = left_x + 8;
+        pg.draw_text(total_graph_x, total_graph_y, "Total CPU Usage History:", 0x00FFFF);
+        pg.fill_rect(total_graph_x, total_graph_y + 14, total_graph_w, total_graph_h, 0x0D1117);
+        pg.draw_rect_outline(total_graph_x, total_graph_y + 14, total_graph_w, total_graph_h, 0x243447);
+        pg.draw_line_graph(total_graph_x, total_graph_y + 14, total_graph_w, total_graph_h, &resources.cpu_history, 100, 0x00FF88, 60);
+
+        // Individual Cores Grid Header
+        let cores_label_y = total_graph_y + 14 + total_graph_h + 4;
+        pg.draw_text(total_graph_x, cores_label_y, "Individual Core Graphs:", 0x88CCFF);
+
+        // Grid of Individual Core Graphs
+        let grid_x = left_x + 8;
+        let grid_y = cores_label_y + 15;
+        let grid_w = left_w.saturating_sub(16);
+        let grid_h = (content_y + content_h).saturating_sub(grid_y + 6);
+        let cores = (resources.cpu_count.max(1) as usize).min(16);
+        let cols = if cores <= 1 { 1 } else if cores <= 4 { 2 } else if cores <= 8 { 2 } else { 4 };
+        let rows = (cores + cols - 1) / cols;
+        let cell_gap = 4usize;
+        let cell_w = (grid_w.saturating_sub((cols - 1) * cell_gap)) / cols;
+        let cell_h = (grid_h.saturating_sub((rows - 1) * cell_gap)) / rows;
+
+        for i in 0..cores {
+            let c = i % cols;
+            let r = i / cols;
+            let cx = grid_x + c * (cell_w + cell_gap);
+            let cy = grid_y + r * (cell_h + cell_gap);
+            let usage = if i < resources.cpu_core_usage.len() {
+                resources.cpu_core_usage[i]
+            } else {
+                resources.cpu_usage
+            };
+
+            // Cell Container
+            pg.fill_rect(cx, cy, cell_w, cell_h, 0x141A24);
+            pg.draw_rect_outline(cx, cy, cell_w, cell_h, 0x0088AA);
+
+            // Mini Header
+            let hdr_h = 13usize.min(cell_h.saturating_sub(10));
+            pg.fill_rect(cx + 1, cy + 1, cell_w.saturating_sub(2), hdr_h, 0x1E293B);
+            pg.draw_text(cx + 3, cy + 1, &format!("C{}", i), 0x88CCFF);
+            let ucol = if usage > 80 { 0xFF5555 } else if usage > 50 { 0xFFAA00 } else { 0x00FF88 };
+            let ustr = format!("{:>3}%", usage);
+            let u_off = cell_w.saturating_sub(ustr.len() * 8 + 4);
+            if u_off > 20 {
+                pg.draw_text(cx + u_off, cy + 1, &ustr, ucol);
+            }
+
+            // Core Line Graph
+            if cell_h > hdr_h + 8 {
+                let gx = cx + 2;
+                let gy = cy + hdr_h + 2;
+                let gw = cell_w.saturating_sub(4);
+                let gh = cell_h.saturating_sub(hdr_h + 4);
+                pg.fill_rect(gx, gy, gw, gh, 0x0C1017);
+                pg.draw_rect_outline(gx, gy, gw, gh, 0x223040);
+                if let Some(hist) = resources.cpu_core_history.get(i) {
+                    pg.draw_line_graph(gx, gy, gw, gh, hist, 100, 0x00FF88, 60);
+                }
+            }
+        }
+
+        // ==========================================
+        // RIGHT COLUMN: Memory, Network, Disk, GPU
+        // ==========================================
+        let card_gap = 6usize;
+        let card_h = (content_h.saturating_sub(card_gap * 3)) / 4;
+
+        // 1. Memory Card
+        let ry0 = content_y;
+        pg.fill_rect(right_x, ry0, right_w, card_h, 0x161B26);
+        pg.draw_rect_outline(right_x, ry0, right_w, card_h, 0x0088AA);
+        pg.fill_rect(right_x, ry0, right_w, 18, 0x243042);
+        pg.draw_rect_outline(right_x, ry0, right_w, 18, 0x4A607A);
+        let mem_hdr = format!("Memory: {} / {} MB ({}%)", resources.used_memory_mb, resources.total_memory_mb, mem_pct);
+        pg.draw_text(right_x + 6, ry0 + 3, &mem_hdr, 0x88CCFF);
+        pg.draw_progress_bar(right_x + 6, ry0 + 20, right_w.saturating_sub(12), 5, mem_pct as usize, 100, 0x00CCFF);
+        let mg_y = ry0 + 27;
+        let mg_h = card_h.saturating_sub(31);
+        let mg_w = right_w.saturating_sub(12);
+        pg.fill_rect(right_x + 6, mg_y, mg_w, mg_h, 0x0D1117);
+        pg.draw_rect_outline(right_x + 6, mg_y, mg_w, mg_h, 0x243447);
+        pg.draw_line_graph(right_x + 6, mg_y, mg_w, mg_h, &resources.mem_history, 100, 0x00CCFF, 60);
+
+        // 2. Network Card
+        let ry1 = content_y + card_h + card_gap;
+        pg.fill_rect(right_x, ry1, right_w, card_h, 0x161B26);
+        pg.draw_rect_outline(right_x, ry1, right_w, card_h, 0x0088AA);
+        pg.fill_rect(right_x, ry1, right_w, 18, 0x243042);
+        pg.draw_rect_outline(right_x, ry1, right_w, 18, 0x4A607A);
+        let net_hdr = format!("Net Traffic (RX: {} KB/s | TX: {} KB/s)", resources.net_rx_kbps, resources.net_tx_kbps);
+        pg.draw_text(right_x + 6, ry1 + 3, &net_hdr, 0x88CCFF);
+        let sub_w = (right_w.saturating_sub(16)) / 2;
+        let sub_h = card_h.saturating_sub(35);
+        let sub_y1 = ry1 + 31;
+        pg.draw_text(right_x + 6, ry1 + 19, "RX (Cyan)", 0x00FFFF);
+        pg.fill_rect(right_x + 6, sub_y1, sub_w, sub_h, 0x0D1117);
+        pg.draw_rect_outline(right_x + 6, sub_y1, sub_w, sub_h, 0x243447);
+        pg.draw_line_graph(right_x + 6, sub_y1, sub_w, sub_h, &resources.net_rx_history, 1024, 0x00FFFF, 60);
+
+        let tx_x = right_x + 10 + sub_w;
+        pg.draw_text(tx_x, ry1 + 19, "TX (Yellow)", 0xFFFF00);
+        pg.fill_rect(tx_x, sub_y1, sub_w, sub_h, 0x0D1117);
+        pg.draw_rect_outline(tx_x, sub_y1, sub_w, sub_h, 0x243447);
+        pg.draw_line_graph(tx_x, sub_y1, sub_w, sub_h, &resources.net_tx_history, 1024, 0xFFFF00, 60);
+
+        // 3. Disk Card
+        let ry2 = content_y + (card_h + card_gap) * 2;
+        let sub_y2 = ry2 + 31;
+        pg.fill_rect(right_x, ry2, right_w, card_h, 0x161B26);
+        pg.draw_rect_outline(right_x, ry2, right_w, card_h, 0x0088AA);
+        pg.fill_rect(right_x, ry2, right_w, 18, 0x243042);
+        pg.draw_rect_outline(right_x, ry2, right_w, 18, 0x4A607A);
+        let disk_hdr = format!("Disk I/O (Read: {} KB/s | Write: {} KB/s)", resources.disk_read_kbps, resources.disk_write_kbps);
+        pg.draw_text(right_x + 6, ry2 + 3, &disk_hdr, 0x88CCFF);
+        pg.draw_text(right_x + 6, ry2 + 19, "Read (White)", 0xFFFFFF);
+        pg.fill_rect(right_x + 6, sub_y2, sub_w, sub_h, 0x0D1117);
+        pg.draw_rect_outline(right_x + 6, sub_y2, sub_w, sub_h, 0x243447);
+        pg.draw_line_graph(right_x + 6, sub_y2, sub_w, sub_h, &resources.disk_read_history, 1024, 0xFFFFFF, 60);
+
+        let wr_x = right_x + 10 + sub_w;
+        pg.draw_text(wr_x, ry2 + 19, "Write (Red)", 0xFF5555);
+        pg.fill_rect(wr_x, sub_y2, sub_w, sub_h, 0x0D1117);
+        pg.draw_rect_outline(wr_x, sub_y2, sub_w, sub_h, 0x243447);
+        pg.draw_line_graph(wr_x, sub_y2, sub_w, sub_h, &resources.disk_write_history, 1024, 0xFF4444, 60);
+
+        // 4. GPU & Display Card
+        let ry3 = content_y + (card_h + card_gap) * 3;
+        let sub_y3 = ry3 + 31;
+        pg.fill_rect(right_x, ry3, right_w, card_h, 0x161B26);
+        pg.draw_rect_outline(right_x, ry3, right_w, card_h, 0x0088AA);
+        pg.fill_rect(right_x, ry3, right_w, 18, 0x243042);
+        pg.draw_rect_outline(right_x, ry3, right_w, 18, 0x4A607A);
+        let gpu_hdr = format!("GPU: {}% | FPS: {} | Frame: {}ms", resources.gpu_usage, resources.fps, resources.frame_ms);
+        pg.draw_text(right_x + 6, ry3 + 3, &gpu_hdr, 0x88CCFF);
+        pg.draw_text(right_x + 6, ry3 + 19, "GPU Load", 0xFFAA00);
+        pg.fill_rect(right_x + 6, sub_y3, sub_w, sub_h, 0x0D1117);
+        pg.draw_rect_outline(right_x + 6, sub_y3, sub_w, sub_h, 0x243447);
+        pg.draw_line_graph(right_x + 6, sub_y3, sub_w, sub_h, &resources.gpu_history, 100, 0xFF7700, 60);
+
+        let fps_x = right_x + 10 + sub_w;
+        pg.draw_text(fps_x, ry3 + 19, "FPS History", 0xFF66FF);
+        pg.fill_rect(fps_x, sub_y3, sub_w, sub_h, 0x0D1117);
+        pg.draw_rect_outline(fps_x, sub_y3, sub_w, sub_h, 0x243447);
+        pg.draw_line_graph(fps_x, sub_y3, sub_w, sub_h, &resources.fps_history, 75, 0xFF44FF, 60);
+
+        // Action Buttons Bar at bottom
+        let btn_y = panel_y + panel_h.saturating_sub(34);
+        pg.fill_rect(panel_x, btn_y, 110, btn_h, 0x007799);
+        pg.draw_rect_outline(panel_x, btn_y, 110, btn_h, 0x00FFFF);
+        pg.draw_text(panel_x + 8, btn_y + 4, "[>] Processes", 0xFFFFFF);
+
+        pg.fill_rect(panel_x + 120, btn_y, 110, btn_h, 0x007799);
+        pg.draw_rect_outline(panel_x + 120, btn_y, 110, btn_h, 0x00FFFF);
+        pg.draw_text(panel_x + 128, btn_y + 4, "[>] SysInfo", 0xFFFFFF);
+
+        pg.draw_text(panel_x + 245, btn_y + 4, "RIGHT / Tab: Cycle Sub-tabs | F1: Start Menu", 0x888888);
+    }
+
+    pub fn draw_sysinfo_view(
+        resources: &SystemResources,
+        pg: &mut PixelGraphics,
+        margin: usize,
+        content_top: usize,
+        width: usize,
+        height: usize,
+    ) {
+        let sysinfo = crate::hardware::sysinfo::SystemInformation::collect(resources);
+
+        // Top sub-tab selector buttons
+        pg.fill_rect(margin, content_top - 6, 110, 22, 0x333333);
+        pg.draw_rect_outline(margin, content_top - 6, 110, 22, 0x666666);
+        pg.draw_text(margin + 12, content_top - 2, "Resources", 0xAAAAAA);
+
+        pg.fill_rect(margin + 120, content_top - 6, 110, 22, 0x333333);
+        pg.draw_rect_outline(margin + 120, content_top - 6, 110, 22, 0x666666);
+        pg.draw_text(margin + 132, content_top - 2, "Processes", 0xAAAAAA);
+
+        pg.fill_rect(margin + 240, content_top - 6, 120, 22, 0x007799);
+        pg.draw_rect_outline(margin + 240, content_top - 6, 120, 22, 0x00FFFF);
+        pg.draw_text(margin + 250, content_top - 2, "System Info", 0xFFFFFF);
+
+        let panel_x = margin;
+        let panel_y = content_top + 22;
+        let panel_w = width.saturating_sub(margin * 2).min(780);
+        let panel_h = height.saturating_sub(panel_y + 36);
+
+        // Summary banner box
+        let banner_h = 58usize;
+        pg.fill_rect(panel_x, panel_y, panel_w, banner_h, 0x181F2A);
+        pg.draw_rect_outline(panel_x, panel_y, panel_w, banner_h, 0x0088AA);
+
+        let banner_line1 = format!(
+            "Host: {} | Firmware: {} v{} (UEFI {}) | Status: OPERATIONAL",
+            sysinfo.boot_mode,
+            sysinfo.fw_vendor,
+            sysinfo.fw_revision,
+            sysinfo.uefi_version,
+        );
+        let banner_line2 = format!(
+            "CPU: {} | {} Cores @ {} MHz \n| Virt: {}",
+            sysinfo.cpu_brand,
+            sysinfo.cpu_cores,
+            sysinfo.cpu_clock_mhz,
+            sysinfo.virt_hardware_assist,
+        );
+        pg.draw_text(panel_x + 10, panel_y + 5, &banner_line1, 0x00FFFF);
+        pg.draw_text(panel_x + 10, panel_y + 22, &banner_line2, 0xCCCCCC);
+
+        // Content layout
+        let content_y = panel_y + banner_h + 8;
+        let btn_h = 24usize;
+        let content_h = panel_h.saturating_sub(banner_h + 8 + btn_h + 10);
+        let col_gap = 8usize;
+        let left_w = (panel_w.saturating_sub(col_gap)) / 2;
+        let right_w = panel_w.saturating_sub(left_w + col_gap);
+        let left_x = panel_x;
+        let right_x = panel_x + left_w + col_gap;
+
+        let card_gap = 6usize;
+        let left_card_h = (content_h.saturating_sub(card_gap * 2)) / 3;
+        let right_card_h = (content_h.saturating_sub(card_gap * 3)) / 4;
+
+        // LEFT 1: Processor & Microarchitecture
+        let ly0 = content_y;
+        pg.fill_rect(left_x, ly0, left_w, left_card_h, 0x161B26);
+        pg.draw_rect_outline(left_x, ly0, left_w, left_card_h, 0x0088AA);
+        pg.fill_rect(left_x, ly0, left_w, 20, 0x243042);
+        pg.draw_rect_outline(left_x, ly0, left_w, 20, 0x4A607A);
+        pg.draw_text(left_x + 8, ly0 + 4, "Processor & Microarchitecture", 0x88CCFF);
+        
+        pg.draw_text(left_x + 8, ly0 + 26, &format!("Model: {}", sysinfo.cpu_brand), 0xFFFFFF);
+        pg.draw_text(left_x + 8, ly0 + 42, &format!("Vendor: {} | Clock: {} MHz", sysinfo.cpu_vendor, sysinfo.cpu_clock_mhz), 0xCCCCCC);
+        pg.draw_text(left_x + 8, ly0 + 58, &format!("Cores: {} Physical \n| Threads: {} Logical \n| APs: {}", sysinfo.cpu_cores, sysinfo.cpu_threads, sysinfo.cpu_ap_count), 0x00FF88);
+        let exts = format!("Exts: VMX:{} SVM:{} AVX2:{} SSE4.2:{} 64Bit:{}", 
+            if sysinfo.cpu_vmx { "Y" } else { "N" },
+            if sysinfo.cpu_svm { "Y" } else { "N" },
+            if sysinfo.cpu_avx2 { "Y" } else { "N" },
+            if sysinfo.cpu_sse42 { "Y" } else { "N" },
+            if sysinfo.cpu_64bit { "Y" } else { "N" },
+        );
+        pg.draw_text(left_x + 8, ly0 + 110, &exts, 0x00FFFF);
+
+        // LEFT 2: Firmware & Platform Architecture
+        let ly1 = content_y + left_card_h + card_gap;
+        pg.fill_rect(left_x, ly1, left_w, left_card_h, 0x161B26);
+        pg.draw_rect_outline(left_x, ly1, left_w, left_card_h, 0x0088AA);
+        pg.fill_rect(left_x, ly1, left_w, 20, 0x243042);
+        pg.draw_rect_outline(left_x, ly1, left_w, 20, 0x4A607A);
+        pg.draw_text(left_x + 8, ly1 + 4, "UEFI Firmware & Platform", 0x88CCFF);
+
+        pg.draw_text(left_x + 8, ly1 + 26, &format!("Vendor: {}", sysinfo.fw_vendor), 0xFFFFFF);
+        pg.draw_text(left_x + 8, ly1 + 42, &format!("Firmware Rev: {} | Spec Rev: {}", sysinfo.fw_revision, sysinfo.uefi_version), 0xCCCCCC);
+        pg.draw_text(left_x + 8, ly1 + 58, &format!("Mode: {}", sysinfo.boot_mode), 0x00FF88);
+        pg.draw_text(left_x + 8, ly1 + 74, &format!("Paging: {}", sysinfo.paging_mode), 0x88CCFF);
+
+        // LEFT 3: Hypervisor Core & Virtualization
+        let ly2 = content_y + (left_card_h + card_gap) * 2;
+        let left_last_h = (content_y + content_h).saturating_sub(ly2);
+        pg.fill_rect(left_x, ly2, left_w, left_last_h, 0x161B26);
+        pg.draw_rect_outline(left_x, ly2, left_w, left_last_h, 0x0088AA);
+        pg.fill_rect(left_x, ly2, left_w, 20, 0x243042);
+        pg.draw_rect_outline(left_x, ly2, left_w, 20, 0x4A607A);
+        pg.draw_text(left_x + 8, ly2 + 4, "Hypervisor & Virtualization", 0x88CCFF);
+
+        pg.draw_text(left_x + 8, ly2 + 26, &format!("Engine: {}", sysinfo.hypervisor_engine), 0x00FFFF);
+        pg.draw_text(left_x + 8, ly2 + 42, &format!("Virt Assist: {}", sysinfo.virt_hardware_assist), 0xFFFFFF);
+        pg.draw_text(left_x + 8, ly2 + 58, &format!("Virtual Machines: {} Total ({} Running)", sysinfo.vm_count, sysinfo.vm_running), 0x00FF88);
+
+        // RIGHT 1: Memory Subsystem
+        let ry0 = content_y;
+        pg.fill_rect(right_x, ry0, right_w, right_card_h, 0x161B26);
+        pg.draw_rect_outline(right_x, ry0, right_w, right_card_h, 0x0088AA);
+        pg.fill_rect(right_x, ry0, right_w, 18, 0x243042);
+        pg.draw_rect_outline(right_x, ry0, right_w, 18, 0x4A607A);
+        pg.draw_text(right_x + 6, ry0 + 3, "Memory Subsystem", 0x88CCFF);
+        let mem_pct = if sysinfo.total_memory_mb > 0 { (sysinfo.used_memory_mb * 100 / sysinfo.total_memory_mb) as usize } else { 0 };
+        pg.draw_text(right_x + 6, ry0 + 22, &format!("Total: {} MB | Used: {} MB | Free: {} MB", sysinfo.total_memory_mb, sysinfo.used_memory_mb, sysinfo.free_memory_mb), 0xFFFFFF);
+        pg.draw_progress_bar(right_x + 6, ry0 + 38, right_w.saturating_sub(12), 6, mem_pct, 100, 0x00CCFF);
+
+        // RIGHT 2: GPU & Display Subsystem
+        let ry1 = content_y + right_card_h + card_gap;
+        pg.fill_rect(right_x, ry1, right_w, right_card_h, 0x161B26);
+        pg.draw_rect_outline(right_x, ry1, right_w, right_card_h, 0x0088AA);
+        pg.fill_rect(right_x, ry1, right_w, 18, 0x243042);
+        pg.draw_rect_outline(right_x, ry1, right_w, 18, 0x4A607A);
+        pg.draw_text(right_x + 6, ry1 + 3, "GPU & Display Graphics (GOP)", 0x88CCFF);
+        pg.draw_text(right_x + 6, ry1 + 22, &format!("Device: {}", sysinfo.gpu_device_name), 0xFFFFFF);
+        pg.draw_text(right_x + 6, ry1 + 36, &format!("Resolution: {}x{} (Stride: {} px)", sysinfo.display_res.0, sysinfo.display_res.1, sysinfo.display_stride), 0xCCCCCC);
+        pg.draw_text(right_x + 6, ry1 + 50, &format!("GPU Load: {}% | Rate: {} FPS ({} ms)", sysinfo.gpu_usage, sysinfo.fps, sysinfo.frame_ms), 0xFFAA00);
+
+        // RIGHT 3: Storage Subsystem & Disks
+        let ry2 = content_y + (right_card_h + card_gap) * 2;
+        pg.fill_rect(right_x, ry2, right_w, right_card_h, 0x161B26);
+        pg.draw_rect_outline(right_x, ry2, right_w, right_card_h, 0x0088AA);
+        pg.fill_rect(right_x, ry2, right_w, 18, 0x243042);
+        pg.draw_rect_outline(right_x, ry2, right_w, 18, 0x4A607A);
+        pg.draw_text(right_x + 6, ry2 + 3, "Storage & Disk I/O", 0x88CCFF);
+        pg.draw_text(right_x + 6, ry2 + 22, &format!("Volumes: {} Mounted | I/O: R:{} KB/s W:{} KB/s", sysinfo.volume_count, sysinfo.disk_read_kbps, sysinfo.disk_write_kbps), 0xFFFFFF);
+        pg.draw_text(right_x + 6, ry2 + 36, &format!("Read: {} B ({} ops) | Write: {} B ({} ops)", sysinfo.disk_read_total_bytes, sysinfo.disk_read_ops, sysinfo.disk_write_total_bytes, sysinfo.disk_write_ops), 0xCCCCCC);
+
+        // RIGHT 4: Network Stack & Interface
+        let ry3 = content_y + (right_card_h + card_gap) * 3;
+        let right_last_h = (content_y + content_h).saturating_sub(ry3);
+        pg.fill_rect(right_x, ry3, right_w, right_last_h, 0x161B26);
+        pg.draw_rect_outline(right_x, ry3, right_w, right_last_h, 0x0088AA);
+        pg.fill_rect(right_x, ry3, right_w, 18, 0x243042);
+        pg.draw_rect_outline(right_x, ry3, right_w, 18, 0x4A607A);
+        pg.draw_text(right_x + 6, ry3 + 3, "Network Interface & Stack", 0x88CCFF);
+        pg.draw_text(right_x + 6, ry3 + 22, &format!("Backend: {} | MAC: {}", sysinfo.net_backend, sysinfo.net_mac), 0xFFFFFF);
+        pg.draw_text(right_x + 6, ry3 + 36, &format!("IPv4: {} / {}", sysinfo.net_ip, sysinfo.net_mask), 0x00FFFF);
+        pg.draw_text(right_x + 6, ry3 + 50, &format!("Traffic: RX:{} KB/s ({} pkts) | TX:{} KB/s ({} pkts)", sysinfo.net_rx_kbps, sysinfo.net_rx_pkts, sysinfo.net_tx_kbps, sysinfo.net_tx_pkts), 0xCCCCCC);
+
+        // Action Buttons Bar at bottom
+        let btn_y = panel_y + panel_h.saturating_sub(34);
+        pg.fill_rect(panel_x, btn_y, 110, btn_h, 0x007799);
+        pg.draw_rect_outline(panel_x, btn_y, 110, btn_h, 0x00FFFF);
+        pg.draw_text(panel_x + 8, btn_y + 4, "[<] Resources", 0xFFFFFF);
+
+        pg.fill_rect(panel_x + 120, btn_y, 110, btn_h, 0x007799);
+        pg.draw_rect_outline(panel_x + 120, btn_y, 110, btn_h, 0x00FFFF);
+        pg.draw_text(panel_x + 128, btn_y + 4, "[>] Processes", 0xFFFFFF);
+
+        pg.draw_text(panel_x + 245, btn_y + 4, "LEFT / RIGHT / Tab: Cycle Sub-tabs | F1: Start Menu", 0x888888);
+    }
+
     pub fn draw(ui: &DashboardUI, pg: &mut PixelGraphics, _x: usize, _y: usize, width: usize, height: usize) {
         let margin = 16usize;
-        let gutter = 12usize;
-        let line_h = 15usize;
         let content_top = 80usize;
 
         match ui.resmon_tab {
             ResourceMonitorTab::Resources => {
-                pg.draw_text(margin, content_top - 6, "[ Resources ]  | Processes |", 0xFFFFFF);
-
-                let panel_x = margin;
-                let panel_y = content_top + margin;
-                let panel_w = 360usize;
-                let panel_h = 480usize;
-                pg.draw_rect_outline(panel_x, panel_y, panel_w, panel_h, 0x888888);
-                pg.draw_text_bg(panel_x, panel_y - 4, "Resource Monitor", 0x20FF20, 0x222222);
-
-                pg.draw_text(panel_x + 10, panel_y + 16, &alloc::format!("CPU Cores: {}", ui.resources.cpu_count), 0xFFFFFF);
-                pg.draw_text(panel_x + 10, panel_y + 16 + line_h, &alloc::format!("Total Memory: {} MB", ui.resources.total_memory_mb), 0xFFFFFF);
-                pg.draw_text(panel_x + 10, panel_y + 16 + line_h * 2, &alloc::format!("Used Memory: {} MB", ui.resources.used_memory_mb), 0xFFFFFF);
-
-                let bar_y = panel_y + 16 + line_h * 3 + gutter;
-                pg.draw_text(panel_x + 10, bar_y, "Memory History (10s):", 0xCCCCCC);
-                pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &ui.resources.mem_history, 100, 0x00FF00, 60);
-
-                let io_y = bar_y + 80 + gutter * 2;
-                pg.draw_text(panel_x + 10, io_y, "Net Traffic (RX:Cyan TX:Yellow)", 0xCCCCCC);
-                pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &ui.resources.net_rx_history, 1024, 0x00FFFF, 60);
-                pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &ui.resources.net_tx_history, 1024, 0xFFFF00, 60);
-
-                let disk_y = io_y + 80;
-                pg.draw_text(panel_x + 10, disk_y, "Disk I/O (Read:White Write:Red)", 0xCCCCCC);
-                pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &ui.resources.disk_read_history, 1024, 0xFFFFFF, 60);
-                pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &ui.resources.disk_write_history, 1024, 0xFF0000, 60);
-
-                let gpu_y = disk_y + 80;
-                pg.draw_text(panel_x + 10, gpu_y, "GPU Usage:", 0xCCCCCC);
-                pg.draw_line_graph(panel_x + 10, gpu_y + 20, 165, 50, &ui.resources.gpu_history, 100, 0xFF7700, 60);
-
-                let right_x = panel_x + panel_w + gutter * 2;
-                let right_y = panel_y;
-                let right_w = core::cmp::min(width.saturating_sub(right_x + margin), 360);
-                let right_h = core::cmp::min(height.saturating_sub(right_y + 100), 260);
-                pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
-                pg.draw_text_bg(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF, 0x222222);
-                pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &ui.resources.cpu_history, 100, 0x00FF00, 60);
-
-                pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
-                for i in 0..ui.resources.cpu_count {
-                    let row_y = right_y + 120 + (i as usize * (line_h + 4));
-                    if row_y + line_h > right_y + right_h - 8 { break; }
-                    let usage = if (i as usize) < ui.resources.cpu_core_usage.len() { ui.resources.cpu_core_usage[i as usize] } else { 0 };
-                    pg.draw_text(right_x + 10, row_y, &alloc::format!("C{}:{:>2}%", i, usage), 0xCCCCCC);
-                    pg.draw_progress_bar(right_x + 70, row_y, right_w.saturating_sub(80), 12, usage as usize, 100, 0x00FF00);
-                }
-
-                pg.draw_text_bg(right_x + 10, right_y + 300, "FPS History:", 0xFFFFFF, 0x222222);
-                pg.draw_line_graph(right_x + 10, right_y + 300, right_w.saturating_sub(20), 80, &ui.resources.fps_history, 75, 0xFF44FF, 60);
-                pg.draw_text_bg(right_x + 10, right_y + 400, "Frame MS History:", 0xFFFFFF, 0x222222);
-                pg.draw_line_graph(right_x + 10, right_y + 400, right_w.saturating_sub(20), 80, &ui.resources.ft_ms_history, 750, 0xFFAAFF, 60);
-
-                let hm_y = right_y + 500;
-                pg.draw_text(right_x + 10, hm_y, "CPU Heatmap (Real-time Core Stress):", 0xFFFFFF);
-                let mut hm_data = [0.0f32; 16];
-                for i in 0..core::cmp::min(ui.resources.cpu_core_usage.len(), 1) {
-                    hm_data[i] = ui.resources.cpu_core_usage[i] as f32 / 100.0;
-                }
-                pg.draw_heatmap(right_x + 10, hm_y + 20, right_w.saturating_sub(20), 80, 4, 4, &hm_data);
-
-                pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, ui.resources.cpu_usage as u64, 0xFFFFFF);
-                pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, ui.resources.used_memory_mb as u64, 0xFFFFFF);
-                pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, ui.resources.frame_ms as u64, 0xFFFFFF);
-                pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, ui.resources.gpu_usage as u64, 0xFFFFFF);
+                draw_resources_view(&ui.resources, pg, margin, content_top, width, height);
             }
             ResourceMonitorTab::Processes => {
                 ui.draw_processes_tab(pg, margin, content_top, width, height);
+            }
+            ResourceMonitorTab::SystemInfo => {
+                draw_sysinfo_view(&ui.resources, pg, margin, content_top, width, height);
             }
         }
     }
@@ -1054,13 +1406,36 @@ pub mod resources {
     pub fn input(ui: &mut DashboardUI, key: Key) -> bool {
         match key {
             Key::Printable(c) => {
+                let code = u16::from(c);
+                if code == 9 || code == b'\t' as u16 {
+                    ui.resmon_tab = match ui.resmon_tab {
+                        ResourceMonitorTab::Resources => ResourceMonitorTab::Processes,
+                        ResourceMonitorTab::Processes => ResourceMonitorTab::SystemInfo,
+                        ResourceMonitorTab::SystemInfo => ResourceMonitorTab::Resources,
+                    };
+                    return true;
+                }
                 let ch = char::from(c).to_ascii_lowercase();
                 if matches!(ui.resmon_tab, ResourceMonitorTab::Processes) {
                     match ch {
                         'k' => { ui.kill_selected_process(); true }
                         'f' => { ui.focus_selected_process(); true }
                         'm' => { ui.toggle_min_selected_process(); true }
+                        'r' => { ui.resmon_tab = ResourceMonitorTab::Resources; true }
+                        'i' => { ui.resmon_tab = ResourceMonitorTab::SystemInfo; true }
                         '\r' | '\n' => { ui.focus_selected_process(); true }
+                        _ => false,
+                    }
+                } else if matches!(ui.resmon_tab, ResourceMonitorTab::Resources) {
+                    match ch {
+                        'p' => { ui.resmon_tab = ResourceMonitorTab::Processes; true }
+                        'i' => { ui.resmon_tab = ResourceMonitorTab::SystemInfo; true }
+                        _ => false,
+                    }
+                } else if matches!(ui.resmon_tab, ResourceMonitorTab::SystemInfo) {
+                    match ch {
+                        'r' => { ui.resmon_tab = ResourceMonitorTab::Resources; true }
+                        'p' => { ui.resmon_tab = ResourceMonitorTab::Processes; true }
                         _ => false,
                     }
                 } else {
@@ -1068,11 +1443,19 @@ pub mod resources {
                 }
             }
             Key::Special(ScanCode::RIGHT) => {
-                ui.resmon_tab = ResourceMonitorTab::Processes;
+                ui.resmon_tab = match ui.resmon_tab {
+                    ResourceMonitorTab::Resources => ResourceMonitorTab::Processes,
+                    ResourceMonitorTab::Processes => ResourceMonitorTab::SystemInfo,
+                    ResourceMonitorTab::SystemInfo => ResourceMonitorTab::Resources,
+                };
                 true
             }
             Key::Special(ScanCode::LEFT) => {
-                ui.resmon_tab = ResourceMonitorTab::Resources;
+                ui.resmon_tab = match ui.resmon_tab {
+                    ResourceMonitorTab::Resources => ResourceMonitorTab::SystemInfo,
+                    ResourceMonitorTab::Processes => ResourceMonitorTab::Resources,
+                    ResourceMonitorTab::SystemInfo => ResourceMonitorTab::Processes,
+                };
                 true
             }
             Key::Special(ScanCode::UP) => {
@@ -1132,9 +1515,10 @@ pub mod resources {
 
     impl X_Resources {
         pub fn new() -> Self {
+            let cores = crate::hardware::cpu::core_count().max(1);
             Self {
                 resources: SystemResources {
-                    cpu_count: 0,
+                    cpu_count: cores,
                     cpu_usage: 0,
                     total_memory_mb: 0,
                     used_memory_mb: 0,
@@ -1153,7 +1537,8 @@ pub mod resources {
                     gpu_history: vec![],
                     fps_history: vec![],
                     ft_ms_history: vec![],
-                    cpu_core_usage: vec![],
+                    cpu_core_usage: alloc::vec![0; cores as usize],
+                    cpu_core_history: alloc::vec![Vec::with_capacity(100); cores as usize],
                     cpu_history: vec![],
                 },
                 resmon_tab: ResourceMonitorTab::Resources,
@@ -1179,76 +1564,7 @@ pub mod resources {
             let height = 540;
             match self.resmon_tab {
                 ResourceMonitorTab::Resources => {
-                    pg.draw_text(margin, content_top - 6, "[ Resources ]  | Processes |", 0xFFFFFF);
-
-                    // Left info panel
-                    let panel_x = margin;
-                    let panel_y = content_top + margin;
-                    let panel_w = 360usize;
-                    let panel_h = 480usize;
-                    pg.draw_rect_outline(panel_x, panel_y, panel_w, panel_h, 0x888888);
-                    pg.draw_text_bg(panel_x, panel_y - 4, "Resource Monitor", 0x20FF20, 0x222222);
-
-                    pg.draw_text(panel_x + 10, panel_y + 16, &alloc::format!("CPU Cores: {}", self.resources.cpu_count), 0xFFFFFF);
-                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h, &alloc::format!("Total Memory: {} MB", self.resources.total_memory_mb), 0xFFFFFF);
-                    pg.draw_text(panel_x + 10, panel_y + 16 + line_h * 2, &alloc::format!("Used Memory: {} MB", self.resources.used_memory_mb), 0xFFFFFF);
-
-                    // Memory usage bar and graph
-                    let bar_y = panel_y + 16 + line_h * 3 + gutter;
-                    pg.draw_text(panel_x + 10, bar_y, "Memory History (10s):", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, bar_y + 20, 340, 60, &self.resources.mem_history, 100, 0x00FF00, 60);
-
-                    // I/O Stats and Graphs
-                    let io_y = bar_y + 80 + gutter * 2;
-                    pg.draw_text(panel_x + 10, io_y, "Net Traffic (RX:Cyan TX:Yellow)", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, io_y + 20, 165, 50, &self.resources.net_rx_history, 1024, 0x00FFFF, 60);
-                    pg.draw_line_graph(panel_x + 185, io_y + 20, 165, 50, &self.resources.net_tx_history, 1024, 0xFFFF00, 60);
-
-                    let disk_y = io_y + 80;
-                    pg.draw_text(panel_x + 10, disk_y, "Disk I/O (Read:White Write:Red)", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, disk_y + 20, 165, 50, &self.resources.disk_read_history, 1024, 0xFFFFFF, 60);
-                    pg.draw_line_graph(panel_x + 185, disk_y + 20, 165, 50, &self.resources.disk_write_history, 1024, 0xFF0000, 60);
-
-                    let gpu_y = disk_y + 80;
-                    pg.draw_text(panel_x + 10, gpu_y, "GPU Usage:", 0xCCCCCC);
-                    pg.draw_line_graph(panel_x + 10, gpu_y + 20, 165, 50, &self.resources.gpu_history, 100, 0xFF7700, 60);
-
-                    // Right CPU core list panel or Total CPU Graph
-                    let right_x = panel_x + panel_w + gutter * 2;
-                    let right_y = panel_y;
-                    let right_w = core::cmp::min(width - right_x - margin, 360);
-                    let right_h = core::cmp::min(height - right_y - 100, 260);
-                    pg.draw_rect_outline(right_x, right_y, right_w, right_h, 0x888888);
-                    pg.draw_text_bg(right_x + 10, right_y - 4, "Total CPU Usage History:", 0xFFFFFF, 0x222222);
-                    pg.draw_line_graph(right_x + 10, right_y + 10, right_w - 20, 80, &self.resources.cpu_history, 100, 0x00FF00, 60);
-
-                    pg.draw_text(right_x + 10, right_y + 100, "CPU Usage per Core:", 0xFFFFFF);
-                    for i in 0..self.resources.cpu_count {
-                        let row_y = right_y + 120 + (i as usize * (line_h + 4));
-                        if row_y + line_h > right_y + right_h - 8 { break; }
-                        let usage = if i < self.resources.cpu_core_usage.len() as u32 { self.resources.cpu_core_usage[i as usize] } else { 0 };
-                        pg.draw_text(right_x + 10, row_y, &alloc::format!("C{}:{:>2}%", i, usage), 0xCCCCCC);
-                        pg.draw_progress_bar(right_x + 70, row_y, right_w - 80, 12, usage as usize, 100, 0x00FF00);
-                    }
-
-                    pg.draw_text_bg(right_x + 10, right_y + 300, "FPS History:", 0xFFFFFF, 0x222222);
-                    pg.draw_line_graph(right_x + 10, right_y + 300, right_w - 20, 80, &self.resources.fps_history, 75, 0xFF44FF, 60);
-                    pg.draw_text_bg(right_x + 10, right_y + 400, "Frame MS History:", 0xFFFFFF, 0x222222);
-                    pg.draw_line_graph(right_x + 10, right_y + 400, right_w - 20, 80, &self.resources.ft_ms_history, 750, 0xFFAAFF, 60);
-
-                    // Heatmap for CPU Core usage
-                    let hm_y = right_y + 500;
-                    pg.draw_text(right_x + 10, hm_y, "CPU Heatmap (Real-time Core Stress):", 0xFFFFFF);
-                    let mut hm_data = [0.0f32; 16];
-                    for i in 0..core::cmp::min(self.resources.cpu_core_usage.len(), 1) {
-                        hm_data[i] = self.resources.cpu_core_usage[i] as f32 / 100.0;
-                    }
-                    pg.draw_heatmap(right_x + 10, hm_y + 20, right_w - 20, 80, 4, 4, &hm_data);
-
-                    pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.cpu_usage as u64, 0xFFFFFF);
-                    pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.used_memory_mb as u64, 0xFFFFFF);
-                    pg.draw_u64_le_sym(panel_x + 8, hm_y + 20, self.resources.frame_ms as u64, 0xFFFFFF);
-                    pg.draw_u64_le_sym(panel_x + 20, hm_y + 20, self.resources.gpu_usage as u64, 0xFFFFFF);
+                    draw_resources_view(&self.resources, pg, margin, content_top, width, height);
                 }
                 ResourceMonitorTab::Processes => {
                     // Top sub-tab selector buttons
@@ -1441,6 +1757,9 @@ pub mod resources {
                     // Keybind hints footer
                     let hint_y = btn_y + btn_h + 4;
                     pg.draw_text(panel_x, hint_y, "UP/DOWN: Select | LEFT/RIGHT: Tab | DEL/K: Kill | F/ENTER: Focus | M: Minimize", 0x6688AA);
+                }
+                ResourceMonitorTab::SystemInfo => {
+                    draw_sysinfo_view(&self.resources, pg, margin, content_top, width, height);
                 }
             }
         }
@@ -4441,5 +4760,48 @@ pub mod packages {
         fn version(&self) -> &str { "1.0.0" }
         fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::ADD_PLUS_32_ICON_DATA }
         fn dimensions(&self) -> (usize, usize) { (800, 600) }
+    }
+}
+
+// =========================================================================
+// 14. System Information Tab
+// =========================================================================
+pub mod sysinfo {
+    use super::*;
+
+    pub fn draw(ui: &DashboardUI, pg: &mut PixelGraphics, _x: usize, _y: usize, width: usize, height: usize) {
+        let margin = 16usize;
+        let content_top = 80usize;
+        resources::draw_sysinfo_view(&ui.resources, pg, margin, content_top, width, height);
+    }
+
+    pub fn logic(_ui: &mut DashboardUI) {}
+
+    pub fn input(ui: &mut DashboardUI, key: Key) -> bool {
+        match key {
+            Key::Printable(c) => {
+                let code = u16::from(c);
+                if code == 9 || code == b'\t' as u16 {
+                    ui.resmon_tab = ResourceMonitorTab::Resources;
+                    true
+                } else {
+                    let ch = char::from(c).to_ascii_lowercase();
+                    match ch {
+                        'r' => { ui.resmon_tab = ResourceMonitorTab::Resources; true }
+                        'p' => { ui.resmon_tab = ResourceMonitorTab::Processes; true }
+                        _ => false,
+                    }
+                }
+            }
+            Key::Special(ScanCode::RIGHT) => {
+                ui.resmon_tab = ResourceMonitorTab::Resources;
+                true
+            }
+            Key::Special(ScanCode::LEFT) => {
+                ui.resmon_tab = ResourceMonitorTab::Processes;
+                true
+            }
+            _ => false,
+        }
     }
 }

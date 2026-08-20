@@ -799,20 +799,22 @@ pub struct GlobalEnvironmentData {
 
 impl GlobalEnvironmentData {
     pub fn new() -> Self {
+        let cores = crate::hardware::cpu::core_count().max(1);
         GlobalEnvironmentData {
         vms: Vec::new(),
         resources: SystemResources {
             total_memory_mb: 0,
             used_memory_mb: 0,
-            cpu_count: 0,
+            cpu_count: cores,
             cpu_usage: 0,
-            cpu_core_usage: Vec::new(),
+            cpu_core_usage: alloc::vec![0; cores as usize],
             disk_read_kbps: 0,
             disk_write_kbps: 0,
             net_rx_kbps: 0,
             net_tx_kbps: 0,
             gpu_usage: 0,
             cpu_history: Vec::with_capacity(100),
+            cpu_core_history: alloc::vec![Vec::with_capacity(100); cores as usize],
             mem_history: Vec::with_capacity(100),
             disk_read_history: Vec::with_capacity(100),
             disk_write_history: Vec::with_capacity(100),
@@ -2009,6 +2011,19 @@ pub fn run_async_tests() -> bool {
         return false;
     }
     if x_ctx_tracked.background_tasks.as_ref().map(|t| t.len()).unwrap_or(0) != 0 {
+        return false;
+    }
+
+    // 7. Verify GlobalEnvironmentData and DashboardUI core count accuracy
+    let global_env_data = GlobalEnvironmentData::new();
+    let detected_cores = crate::hardware::cpu::core_count().max(1);
+    if global_env_data.resources.cpu_count != detected_cores {
+        return false;
+    }
+    if global_env_data.resources.cpu_core_usage.len() != detected_cores as usize {
+        return false;
+    }
+    if global_env_data.resources.cpu_core_history.len() != detected_cores as usize {
         return false;
     }
 

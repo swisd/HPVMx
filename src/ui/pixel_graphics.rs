@@ -319,8 +319,18 @@ impl PixelGraphics {
 
     pub fn draw_text(&mut self, x: usize, y: usize, text: &str, color: u32) {
         let mut curr_x = x;
+        let mut curr_y = y;
         for c in text.chars() {
-            self.draw_char(curr_x, y, c, color);
+            self.draw_char(curr_x, curr_y, c, color);
+            // Create a buffer. A UTF-8 char is 4 bytes max.
+            let mut buf = [0; 4];
+
+            // Encode the char into the buffer and return a &str slice
+            let my_str: &str = c.encode_utf8(&mut buf);
+            if my_str == "\n" {
+                curr_y += 16;
+                curr_x = x;
+            }
             curr_x += 8;
         }
     }
