@@ -88,7 +88,7 @@ jobs:
           #          --meson="meson --wrap-mode=force"
           
           # Force Meson to build the environment and download fallbacks safely
-          meson setup build \
+          build/pyvenv/bin/meson setup build \
             --cross-file emscripten-cross.txt \
             --wrap-mode=force \
             -Ddefault_library=static \
@@ -106,7 +106,7 @@ jobs:
           
           
           # Compile using all available processor cores
-          meson compile -C build -j$(nproc)
+          build/pyvenv/bin/meson compile -C build -j$(nproc)
           
           # Stage your outputs into your output folder
           mkdir -p ../output
