@@ -69,24 +69,24 @@ jobs:
           EOF
           
           # Point configuration to compile dependencies via Meson internally using its download wrap system
-          #          emconfigure ./configure \
-          #          --target-list=x86_64-softmmu \
-          #          --cpu=wasm32 \
-          #          --cross-prefix= \
-          #          --static \
-          #          --disable-tools \
-          #          --disable-cocoa \
-          #          --disable-sdl \
-          #          --disable-gtk \
-          #          --disable-vnc \
-          #          --disable-kvm \
-          #          --disable-xen \
-          #          --disable-guest-agent \
-          #          --disable-pie \
-          #          --disable-modules \
-          #          --disable-docs \
-          #          --enable-download \
-          #          --meson="meson --wrap-mode=force"
+          emconfigure ./configure \
+            --target-list=x86_64-softmmu \
+            --cpu=wasm32 \
+            --cross-prefix= \
+            --static \
+            --disable-tools \
+            --disable-cocoa \
+            --disable-sdl \
+            --disable-gtk \
+            --disable-vnc \
+            --disable-kvm \
+            --disable-xen \
+            --disable-guest-agent \
+            --disable-pie \
+            --disable-modules \
+            --disable-docs \
+            --enable-download || true
+          
           
           # Force Meson to build the environment and download fallbacks safely
           build/pyvenv/bin/meson setup build \
