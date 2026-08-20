@@ -45,34 +45,70 @@ jobs:
           unset EMCC_CFLAGS
           unset EMXX_CFLAGS
           
-          # Point configuration to compile dependencies via Meson internally using its download wrap system
-          emconfigure ./configure \
-          --target-list=x86_64-softmmu \
-          --cpu=wasm32 \
-          --cross-prefix= \
-          --static \
-          --disable-tools \
-          --disable-cocoa \
-          --disable-sdl \
-          --disable-gtk \
-          --disable-vnc \
-          --disable-kvm \
-          --disable-xen \
-          --disable-guest-agent \
-          --disable-pie \
-          --disable-modules \
-          --disable-docs \
-          --enable-download \
-          --meson="meson --wrap-mode=force"
-  
-
-          # Compile using Emscripten make
-          emmake make -j$(nproc)
+          # 2. Tell Emscripten to inherit standard zlib utilities
+          export EMCC_CFLAGS="-s USE_ZLIB=1 -s ALLOW_MEMORY_GROWTH=1"
+          export EMXX_CFLAGS="-s USE_ZLIB=1 -s ALLOW_MEMORY_GROWTH=1"
           
-          # Stage compiled outputs
+          cat <<EOF > emscripten-cross.txt
+          [binaries]
+          c = 'emcc'
+          cpp = 'em++'
+          ar = 'emar'
+          strip = 'emstrip'
+          pkgconfig = 'pkg-config'
+          
+          [host_machine]
+          system = 'emscripten'
+          cpu_family = 'wasm32'
+          cpu = 'wasm32'
+          endian = 'little'
+          EOF
+          
+          # Point configuration to compile dependencies via Meson internally using its download wrap system
+          #          emconfigure ./configure \
+          #          --target-list=x86_64-softmmu \
+          #          --cpu=wasm32 \
+          #          --cross-prefix= \
+          #          --static \
+          #          --disable-tools \
+          #          --disable-cocoa \
+          #          --disable-sdl \
+          #          --disable-gtk \
+          #          --disable-vnc \
+          #          --disable-kvm \
+          #          --disable-xen \
+          #          --disable-guest-agent \
+          #          --disable-pie \
+          #          --disable-modules \
+          #          --disable-docs \
+          #          --enable-download \
+          #          --meson="meson --wrap-mode=force"
+          
+          # Force Meson to build the environment and download fallbacks safely
+          meson setup build \
+            --cross-file emscripten-cross.txt \
+            --wrap-mode=force \
+            -Ddefault_library=static \
+            -Dtools=false \
+            -Dcocoa=disabled \
+            -Dsdl=disabled \
+            -Dgtk=disabled \
+            -Dvnc=disabled \
+            -Dkvm=disabled \
+            -Dxen=disabled \
+            -Dguest_agent=false \
+            -Ddocs=disabled \
+            -Dpie=false
+          
+          
+          
+          # Compile using all available processor cores
+          meson compile -C build -j$(nproc)
+          
+          # Stage your outputs into your output folder
           mkdir -p ../output
-          cp build/qemu-system-x86_64.js ../output/qemu-system-x86_64.js
-          cp build/qemu-system-x86_64.wasm ../output/qemu-system-x86_64.wasm
+          cp build/qemu-system-x86_64 ../output/qemu-system-x86_64.js 2>/dev/null || cp build/qemu-system-x86_64.wasm ../output/qemu-system-x86_64.wasm
+
 
       - name: Commit and Push Binaries to Web Folder
         run: |
