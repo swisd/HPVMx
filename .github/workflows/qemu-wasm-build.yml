@@ -59,8 +59,7 @@ jobs:
             --disable-pie \
             --disable-modules \
             --disable-docs \
-            --enable-download \
-            --wrap-mode=force
+            --enable-download
   
 
           # Compile using Emscripten make
