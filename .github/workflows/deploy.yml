@@ -36,6 +36,7 @@ jobs:
 
       - name: Compile Rust Application (Nightly)
         run: |
+          rustup target add x86_64-unknown-uefi
           # Use internal LLVM linker to ensure valid PE/COFF generation on Ubuntu
           export RUSTFLAGS="-C linker-flavor=lld-link -C linker=rust-lld"
           cargo build --release --target x86_64-unknown-uefi
