@@ -49,6 +49,9 @@ jobs:
           export EMCC_CFLAGS="-s USE_ZLIB=1 -s ALLOW_MEMORY_GROWTH=1"
           export EMXX_CFLAGS="-s USE_ZLIB=1 -s ALLOW_MEMORY_GROWTH=1"
           
+          python3 scripts/mkvenv.py create build/pyvenv
+          python3 build/pyvenv/bin/pip install meson==1.2.3
+          
           cat <<EOF > emscripten-cross.txt
           [binaries]
           c = 'emcc'
