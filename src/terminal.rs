@@ -1313,3 +1313,21 @@ fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
 
 
 
+
+struct Command {
+    program: String,
+    args: Vec<String>,
+    stdin: Option<Stdio>,
+    stdout: Option<Stdio>,
+    stderr: Option<Stdio>,
+    env: Environment,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Stdio {
+    Inherit,
+    Null,
+    MakePipe,
+}
+
+

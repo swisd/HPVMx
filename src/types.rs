@@ -17,6 +17,9 @@ use core::fmt::{Display, Formatter};
 use core::sync::atomic::Atomic;
 use crate::message;
 
+
+pub type C_VOID = core::ffi::c_void;
+
 pub type BYTE = u8;
 pub type WORD = u16;
 pub type DWORD = u32;
@@ -1472,5 +1475,14 @@ impl<T: AsRef<[u8]> + Copy + PartialEq> Display for Compressed<T> {
             }
         }
         write!(f, "[{} x {}]", current_val as char, count)
+    }
+}
+
+
+struct Deferred<F: FnMut()>(F);
+
+impl<F: FnMut()> Drop for Deferred<F> {
+    fn drop(&mut self) {
+        (self.0)();
     }
 }

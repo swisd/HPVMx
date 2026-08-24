@@ -308,6 +308,8 @@ pub fn dummy_waker() -> Waker {
 }
 
 pub use crate::multipar::task::{TaskHandle, TaskId, ExecutorStats};
+use crate::x4::counter::cvt;
+use crate::x4::ops::to_u16s;
 
 /// A background task adapter tracking an asynchronous future offloaded to the multi-core executor.
 ///
@@ -1026,7 +1028,36 @@ impl GlobalEnvironmentData {
 
 
 
+pub fn getenv(k: String) -> Option<String> {
+    let k = to_u16s(k).ok()?;
+    /*fill_utf16_buf(
+        |buf, sz| unsafe { c::GetEnvironmentVariableW(k.as_ptr(), buf, sz) },
+        OsStringExt::from_wide,
+    )
+        .ok()
 
+     */
+    todo!()
+}
+
+pub unsafe fn setenv(k: String, v: String) -> Result<(), String> {
+    // SAFETY: We ensure that k and v are null-terminated wide strings.
+    unsafe {
+        let k = to_u16s(k)?;
+        let v = to_u16s(v)?;
+
+        cvt(/*set_env_ptr_base(k.as_ptr(), v.as_ptr())*/0).map(drop)
+    }
+}
+
+pub unsafe fn unsetenv(n: String) -> Result<(), String> {
+    // SAFETY: We ensure that v is a null-terminated wide strings.
+    unsafe {
+        let v = to_u16s(n)?;
+
+        cvt(/*set_env_ptr_base(k.as_ptr(), ptr::null())*/0).map(drop)
+    }
+}
 
 
 
@@ -2028,4 +2059,29 @@ pub fn run_async_tests() -> bool {
     }
 
     true
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct ExitCode(u32);
+
+impl ExitCode {
+    pub const SUCCESS: ExitCode = ExitCode(0 as _);
+    pub const FAILURE: ExitCode = ExitCode(1 as _);
+
+    #[inline]
+    pub fn as_i32(&self) -> i32 {
+        self.0 as i32
+    }
+}
+
+impl From<u8> for ExitCode {
+    fn from(code: u8) -> Self {
+        ExitCode(u32::from(code))
+    }
+}
+
+impl From<u32> for ExitCode {
+    fn from(code: u32) -> Self {
+        ExitCode(code)
+    }
 }

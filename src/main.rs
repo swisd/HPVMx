@@ -45,6 +45,8 @@ mod dls;
 mod backgrounds;
 mod xmlui;
 mod multipar;
+mod x4;
+mod version;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -237,7 +239,7 @@ fn main() -> Status {
 
     unsafe {
         vdebug!("page", "creating pagefile");
-        PAGEFILE.create_pagefile();
+        PAGEFILE.create_pagefile(268435456, 8);
     }
 
     unsafe {

@@ -1,4 +1,4 @@
-use crate::Color;
+use crate::{far_fn, far_fn_addr, Color};
 use crate::hpvm_log;
 use elf::{ElfBytes, endian::AnyEndian};
 use uefi::prelude::*;
@@ -62,15 +62,12 @@ pub unsafe fn load_and_jump_os(path: &str) -> ! {
         crate::vdebug!("loader", "vaddr {:#x} aligned_vaddr {:#x} page_int_offset {:#x} total_sz {:#x} pages {:?} alloc_addr {:?} dest_ptr {:?}", vaddr, aligned_vaddr, offset_within_page, total_size, pages, allocated_addr, dest_ptr);
     }
 
-    // 4. Calculate Dynamic Entry Point
-    // entry_point = (Original Entry) + (New Base - Original Base)
     let entry_point = file.ehdr.e_entry + load_base.expect("No loadable segments found");
-    // let entry_offset: u64 = file.ehdr.e_entry - file.ehdr.;   // Fix this to add offset
+
     let actual_jump_address = entry_point; // + entry_offset;
     crate::vdebug!("loader", "ac_jump_addr {:#x} e_entry {:#x} load_base {:#x}", actual_jump_address, file.ehdr.e_entry, load_base.expect("No loadable segments found"));
 
-    // 5. Exit Boot Services (Safety: Disable interrupts first)
-    // Note: You should ideally pass the memory map to the kernel here!
+
     let _mmap = unsafe {
 
         x86_64::instructions::interrupts::disable(); // Recommended if available
@@ -78,7 +75,9 @@ pub unsafe fn load_and_jump_os(path: &str) -> ! {
         boot::exit_boot_services(Some(MemoryType::LOADER_DATA))
 
     };
-    // 6. Hand over to OS
-    let entry_fn: extern "C" fn(fb: *mut u32, size: usize) -> ! = core::mem::transmute(actual_jump_address);
-    entry_fn(fb_ptr as *mut u32, fb_size);
+
+
+    far_fn_addr!(entry_fn, extern "C" fn(fb: *mut u32, size: usize) -> !);
+    (entry_fn(actual_jump_address).unwrap())(fb_ptr as *mut u32, fb_size)
+
 }

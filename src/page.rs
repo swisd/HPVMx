@@ -70,8 +70,11 @@ impl Pagefile {
         self.header.block_count as u32
     }
 
-    pub fn create_pagefile(&mut self) {
-        let mut page = vec![0u8; 134217728];
+    pub fn create_pagefile(&mut self, disk_size_bytes: usize, scale: usize) {
+        // Calculate 1/4 of the disk size, then round down to the nearest multiple of 4
+        let target_size = (disk_size_bytes / scale) & !3;
+
+        let mut page = vec![0u8; target_size];
         let mut zvec = [0u8; 256];
 
         FileSystem::cd("/");
@@ -84,7 +87,7 @@ impl Pagefile {
             }
         }
         vdebug!("PAGE", "updating pagefile headers");
-        // Header PAGE magic, header size, block size (00 10 is 4096 in hex LE), block count (32767) (80 7F)
+        // Header PAGE magic, header size, block size (00 10 is 4096 in hex LE), block count
         let _ = FileSystem::write_to_file_bytes_position("PAGEFILE", &self.header.to_hex_bytes(), 0x00);
     }
 
