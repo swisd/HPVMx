@@ -1,4 +1,4 @@
-use crate::{far_fn, far_fn_addr, Color};
+use crate::{far_fn_addr, Color};
 use crate::hpvm_log;
 use elf::{ElfBytes, endian::AnyEndian};
 use uefi::prelude::*;

@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use uefi::proto::console::text::Key;
 use crate::env::{AppInfo, Environment, Runnable, RunnableClone};
 use crate::ui::pixel_graphics::{icons, PixelGraphics};
+use crate::vdebug_autoprefix;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Direction { Up, Down, Left, Right }
@@ -29,6 +30,7 @@ impl SnakeApp {
             game_over: false,
             move_timer: 0,
         }
+
     }
 }
 

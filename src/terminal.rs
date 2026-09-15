@@ -421,6 +421,12 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
             message!("\n", "run-app is deprecated. use the Apps tab in dashboard instead")
         }
 
+        "dbgtest" => {
+            crate::vdebug_autoprefix!("Running autoprefix debug test...");
+            crate::testmodules::terminal::test::test_terminal();
+            // Add your debug test code here
+        }
+
 
         _ => message!("\n", "unknown command: {:?}", command),
     }

@@ -2,6 +2,7 @@
 //! Zero-Request Model: The GHM accepts zero incoming requests from VMs, eliminating hypercall-based privilege escalation.
 
 use alloc::vec::Vec;
+use crate::vdebug_autoprefix;
 
 #[derive(Debug, Clone, Copy)]
 pub enum PhysicalResourceId {
@@ -22,6 +23,7 @@ pub struct GlobalHardwareManager {
 
 impl GlobalHardwareManager {
     pub fn new(total_cores: u32, total_memory_mb: usize) -> Self {
+        vdebug_autoprefix!("GHM: initializing with {} cores, {} MB memory", total_cores, total_memory_mb);
         let mut available_cores = Vec::new();
         for i in 0..total_cores {
             available_cores.push(i);
@@ -41,6 +43,7 @@ impl GlobalHardwareManager {
     /// Push an assignment to a VM. This is the only way resources are allocated.
     /// There is no "request_resource" method accessible to VMs.
     pub fn push_assignment(&mut self, vm_id: u32, resource: PhysicalResourceId) {
+        vdebug_autoprefix!("GHM: pushing resource assignment to VM {}", vm_id);
         self.assignments.push(ResourceAssignment {
             vm_id,
             resource_id: resource,
@@ -49,6 +52,7 @@ impl GlobalHardwareManager {
 
     pub fn allocate_core_to_vm(&mut self, vm_id: u32) -> Result<u32, &'static str> {
         if let Some(core) = self.available_cores.pop() {
+            vdebug_autoprefix!("GHM: allocated core {} to VM {}", core, vm_id);
             self.push_assignment(vm_id, PhysicalResourceId::CpuCore(core));
             Ok(core)
         } else {
@@ -66,6 +70,7 @@ impl GlobalHardwareManager {
                 } else {
                     self.available_memory[i] = (base + size_bytes as u64, size - size_bytes);
                 }
+                vdebug_autoprefix!("GHM: allocated {} bytes at 0x{:x} to VM {}", size_bytes, allocated_base, vm_id);
                 self.push_assignment(vm_id, PhysicalResourceId::MemorySegment(allocated_base, size_bytes));
                 return Ok(allocated_base);
             }
@@ -75,6 +80,7 @@ impl GlobalHardwareManager {
 
     /// Revoke all assignments for a specific VM (used during decommissioning)
     pub fn revoke_assignments(&mut self, vm_id: u32) {
+        vdebug_autoprefix!("GHM: revoking all assignments for VM {}", vm_id);
         self.assignments.retain(|a| {
             if a.vm_id == vm_id {
                 match a.resource_id {

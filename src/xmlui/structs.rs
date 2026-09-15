@@ -4,7 +4,7 @@ use hashbrown::HashMap;
 
 pub type NodeProp = (String, String);
 
-enum NodeDataType {
+pub enum NodeDataType {
     Text(String),
     Number(i64),
     Boolean(bool),

@@ -7,6 +7,7 @@ use crate::dls::{
 };
 use crate::vmm::hwbus::{HwBus, HwBusMessage};
 use crate::vmm::vmbus::{VmBus, VmBusMessage};
+use crate::vdebug_autoprefix;
 
 pub struct DeepLevelSecurity {
     pub policy: DeepSecurityPolicy,
@@ -22,6 +23,7 @@ pub struct DeepSecurityPolicy {
 
 impl DeepLevelSecurity {
     pub fn new() -> Self {
+        vdebug_autoprefix!("DeepLevelSecurity: initialized with default policy");
         Self {
             policy: DeepSecurityPolicy::default(),
             memory: SoftwareAnalysisMemory::new(),
@@ -29,6 +31,7 @@ impl DeepLevelSecurity {
     }
 
     pub fn with_policy(policy: DeepSecurityPolicy) -> Self {
+        vdebug_autoprefix!("DeepLevelSecurity: initialized with policy level {:?}", policy.level);
         Self {
             policy,
             memory: SoftwareAnalysisMemory::new(),
@@ -68,6 +71,7 @@ impl DeepLevelSecurity {
         self.learn_from_sample(sample.clone());
 
         if violations || matches!(sample.verdict, AnalysisVerdict::FailStop) {
+            vdebug_autoprefix!("DeepLevelSecurity: VMBUS violation detected on VM {}", bus.vm_id);
             Err("VMBUS security policy violation detected")
         } else {
             Ok(sample)
@@ -98,6 +102,7 @@ impl DeepLevelSecurity {
         self.learn_from_sample(sample.clone());
 
         if violations || matches!(sample.verdict, AnalysisVerdict::FailStop) {
+            vdebug_autoprefix!("DeepLevelSecurity: HWBUS violation detected on VM {}", bus.vm_id);
             Err("HWBUS security policy violation detected")
         } else {
             Ok(sample)

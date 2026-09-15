@@ -6,6 +6,7 @@
 use alloc::collections::VecDeque;
 use alloc::string::String;
 use alloc::vec::Vec;
+use crate::vdebug_autoprefix;
 
 #[derive(Debug, Clone)]
 pub enum HwBusMessage {
@@ -24,6 +25,7 @@ pub struct HwBus {
 
 impl HwBus {
     pub fn new(vm_id: u32) -> Self {
+        vdebug_autoprefix!("HwBus: initialized for VM {}", vm_id);
         Self {
             vm_id,
             queue: VecDeque::new(),
@@ -31,11 +33,16 @@ impl HwBus {
     }
 
     pub fn send_message(&mut self, message: HwBusMessage) {
+        vdebug_autoprefix!("HwBus: send hardware message to VM {}", self.vm_id);
         self.queue.push_back(message);
     }
 
     pub fn receive_message(&mut self) -> Option<HwBusMessage> {
-        self.queue.pop_front()
+        let msg = self.queue.pop_front();
+        if msg.is_some() {
+            vdebug_autoprefix!("HwBus: message received from VM {}", self.vm_id);
+        }
+        msg
     }
 
     pub fn queued_messages(&self) -> Vec<HwBusMessage> {

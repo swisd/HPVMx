@@ -6,6 +6,8 @@ use crate::vmm::vcpu::VirtualCpu;
 use crate::vmm::hwbus::HwBus;
 use crate::vmm::vmbus::VmBus;
 use crate::vmm::mapper::ResourceMapper;
+use crate::vmm::interface::{PortIoInterface, PortOwner};
+use crate::vdebug_autoprefix;
 
 /// Virtual Machine state
 /// Possible execution states for a virtual machine.
@@ -61,6 +63,8 @@ pub struct VirtualMachine {
     pub hwbus: HwBus,
     /// Mapper for virtualized resources (Memory, Disk).
     pub mapper: ResourceMapper,
+    /// Explicit VM port-I/O boundary; host devices are never implicitly exposed.
+    pub ports: PortIoInterface,
 }
 
 #[allow(dead_code)]
@@ -71,6 +75,7 @@ impl VirtualMachine {
             return Err("Memory and vCPU count must be > 0");
         }
 
+        vdebug_autoprefix!("VirtualMachine: creating VM {} (name='{}', mem={}MB, vcpus={})", id, name, memory_mb, vcpu_count);
         let mut vcpus = Vec::new();
         for i in 0..vcpu_count {
             vcpus.push(VirtualCpu::new(i));
@@ -87,6 +92,7 @@ impl VirtualMachine {
             vmbus: VmBus::new(id),
             hwbus: HwBus::new(id),
             mapper: ResourceMapper::new(id),
+            ports: PortIoInterface::new(PortOwner::Vm(id)),
         })
     }
 
@@ -102,6 +108,7 @@ impl VirtualMachine {
             return Err("Invalid memory size");
         }
 
+        vdebug_autoprefix!("VirtualMachine: VM {} allocated guest memory at 0x{:x}", self.id, base_addr);
         self.guest_memory_base = Some(base_addr);
         Ok(())
     }
@@ -119,6 +126,7 @@ impl VirtualMachine {
     /// Add a vCPU to this VM
     pub fn add_vcpu(&mut self) -> u32 {
         let vcpu_id = self.vcpu_count;
+        vdebug_autoprefix!("VirtualMachine: VM {} added vCPU {}", self.id, vcpu_id);
         self.vcpus.push(VirtualCpu::new(vcpu_id));
         self.vcpu_count += 1;
         vcpu_id
@@ -137,6 +145,7 @@ impl VirtualMachine {
     /// Resume execution
     pub fn resume(&mut self) -> Result<(), &'static str> {
         if self.state == VmState::Paused {
+            vdebug_autoprefix!("VirtualMachine: VM {} resumed", self.id);
             self.state = VmState::Running;
             Ok(())
         } else {
@@ -147,6 +156,7 @@ impl VirtualMachine {
     /// Pause execution
     pub fn pause(&mut self) -> Result<(), &'static str> {
         if self.state == VmState::Running {
+            vdebug_autoprefix!("VirtualMachine: VM {} paused", self.id);
             self.state = VmState::Paused;
             Ok(())
         } else {

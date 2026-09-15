@@ -1,14 +1,14 @@
-#[repr(C)]
+// #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct M128A {
     pub Low: u64,
     pub High: i64,
 }
 
-#[repr(C)]
+// #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct CONDITION_VARIABLE {
-    pub Ptr: *mut core::ffi::c_void,
+    pub Ptr: *mut u64,
 }
 impl Default for CONDITION_VARIABLE {
     fn default() -> Self {
@@ -19,7 +19,7 @@ impl Default for CONDITION_VARIABLE {
 
 pub type CONTEXT_FLAGS = u32;
 
-#[repr(C)]
+// #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct CONTEXT {
     pub P1Home: u64,
@@ -75,7 +75,7 @@ impl Default for CONTEXT {
         unsafe { core::mem::zeroed() }
     }
 }
-#[repr(C)]
+// #[repr(C)]
 #[derive(Clone, Copy)]
 pub union CONTEXT_0 {
     pub FltSave: XSAVE_FORMAT,
@@ -88,7 +88,7 @@ impl Default for CONTEXT_0 {
     }
 }
 
-#[repr(C)]
+// #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct CONTEXT_0_0 {
     pub Header: [M128A; 2],
@@ -117,7 +117,7 @@ impl Default for CONTEXT_0_0 {
     }
 }
 
-#[repr(C)]
+// #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct XSAVE_FORMAT {
     pub ControlWord: u16,
@@ -147,7 +147,7 @@ impl Default for XSAVE_FORMAT {
 
 pub type EXCEPTION_DISPOSITION = i32;
 pub const EXCEPTION_MAXIMUM_PARAMETERS: u32 = 15u32;
-#[repr(C)]
+// #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct EXCEPTION_POINTERS {
     pub ExceptionRecord: *mut EXCEPTION_RECORD,
@@ -158,13 +158,13 @@ impl Default for EXCEPTION_POINTERS {
         unsafe { core::mem::zeroed() }
     }
 }
-#[repr(C)]
+// #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct EXCEPTION_RECORD {
     pub ExceptionCode: STATUS,
     pub ExceptionFlags: u32,
     pub ExceptionRecord: *mut EXCEPTION_RECORD,
-    pub ExceptionAddress: *mut core::ffi::c_void,
+    pub ExceptionAddress: *mut u64,
     pub NumberParameters: u32,
     pub ExceptionInformation: [usize; 15],
 }
@@ -176,10 +176,10 @@ impl Default for EXCEPTION_RECORD {
 pub const EXCEPTION_STACK_OVERFLOW: STATUS = 0xC00000FD_u32 as _;
 pub const EXTENDED_STARTUPINFO_PRESENT: PROCESS_CREATION_FLAGS = 524288u32;
 pub const E_NOTIMPL: RESULT = 0x80004001_u32 as _;
-pub const ExceptionCollidedUnwind: EXCEPTION_DISPOSITION = 3i32;
-pub const ExceptionContinueExecution: EXCEPTION_DISPOSITION = 0i32;
-pub const ExceptionContinueSearch: EXCEPTION_DISPOSITION = 1i32;
-pub const ExceptionNestedException: EXCEPTION_DISPOSITION = 2i32;
+pub const EXCEPTION_COLLIDED_UNWIND: EXCEPTION_DISPOSITION = 3i32;
+pub const EXCEPTION_CONTINUE_EXECUTION: EXCEPTION_DISPOSITION = 0i32;
+pub const EXCEPTION_CONTINUE_SEARCH: EXCEPTION_DISPOSITION = 1i32;
+pub const EXCEPTION_NESTED_EXCEPTION: EXCEPTION_DISPOSITION = 2i32;
 
 
 pub type STATUS = i32;
@@ -190,7 +190,7 @@ pub type PROCESS_CREATION_FLAGS = u32;
 pub mod misc {
     use super::{EXCEPTION_POINTERS, PROCESS_CREATION_FLAGS, STATUS};
 
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct FLOATING_SAVE_AREA {
         pub ControlWord: u32,
@@ -210,7 +210,7 @@ pub mod misc {
         }
     }
 
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct GUID {
         pub data1: u32,
@@ -228,17 +228,17 @@ pub mod misc {
             }
         }
     }
-    pub type HANDLE = *mut core::ffi::c_void;
+    pub type HANDLE = *mut u64;
     pub type HANDLE_FLAGS = u32;
     pub const HANDLE_FLAG_INHERIT: HANDLE_FLAGS = 1u32;
     pub const HANDLE_FLAG_PROTECT_FROM_CLOSE: HANDLE_FLAGS = 2u32;
     pub const HIGH_PRIORITY_CLASS: PROCESS_CREATION_FLAGS = 128u32;
-    pub type HINSTANCE = *mut core::ffi::c_void;
-    pub type HLOCAL = *mut core::ffi::c_void;
-    pub type HMODULE = *mut core::ffi::c_void;
+    pub type HINSTANCE = *mut u64;
+    pub type HLOCAL = *mut u64;
+    pub type HMODULE = *mut u64;
     pub type HRESULT = i32;
     pub const IDLE_PRIORITY_CLASS: PROCESS_CREATION_FLAGS = 64u32;
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct IN6_ADDR {
         pub u: IN6_ADDR_0,
@@ -248,7 +248,7 @@ pub mod misc {
             unsafe { core::mem::zeroed() }
         }
     }
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub union IN6_ADDR_0 {
         pub Byte: [u8; 16],
@@ -260,10 +260,10 @@ pub mod misc {
         }
     }
 
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub union INIT_ONCE {
-        pub Ptr: *mut core::ffi::c_void,
+        pub Ptr: *mut u64,
     }
     impl Default for INIT_ONCE {
         fn default() -> Self {
@@ -280,7 +280,7 @@ pub mod misc {
             lpoverlapped: *mut OVERLAPPED,
         ),
     >;
-    pub type LPPROC_THREAD_ATTRIBUTE_LIST = *mut core::ffi::c_void;
+    pub type LPPROC_THREAD_ATTRIBUTE_LIST = *mut u64;
     pub type LPPROGRESS_ROUTINE = Option<
         unsafe extern "system" fn(
             totalfilesize: i64,
@@ -291,12 +291,12 @@ pub mod misc {
             dwcallbackreason: LPPROGRESS_ROUTINE_CALLBACK_REASON,
             hsourcefile: HANDLE,
             hdestinationfile: HANDLE,
-            lpdata: *const core::ffi::c_void,
+            lpdata: *const u64,
         ) -> COPYPROGRESSROUTINE_PROGRESS,
     >;
     pub type LPPROGRESS_ROUTINE_CALLBACK_REASON = u32;
     pub type LPTHREAD_START_ROUTINE =
-    Option<unsafe extern "system" fn(lpthreadparameter: *mut core::ffi::c_void) -> u32>;
+    Option<unsafe extern "system" fn(lpthreadparameter: *mut u64) -> u32>;
     pub type LPWSAOVERLAPPED_COMPLETION_ROUTINE = Option<
         unsafe extern "system" fn(
             dwerror: u32,
@@ -308,7 +308,7 @@ pub mod misc {
 
     pub type COPYPROGRESSROUTINE_PROGRESS = u32;
 
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct OVERLAPPED {
         pub Internal: usize,
@@ -321,18 +321,18 @@ pub mod misc {
             unsafe { core::mem::zeroed() }
         }
     }
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub union OVERLAPPED_0 {
         pub Anonymous: OVERLAPPED_0_0,
-        pub Pointer: *mut core::ffi::c_void,
+        pub Pointer: *mut u64,
     }
     impl Default for OVERLAPPED_0 {
         fn default() -> Self {
             unsafe { core::mem::zeroed() }
         }
     }
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy, Default)]
     pub struct OVERLAPPED_0_0 {
         pub Offset: u32,
@@ -342,13 +342,13 @@ pub mod misc {
     pub type PCWSTR = *const u16;
     pub type PIO_APC_ROUTINE = Option<
         unsafe extern "system" fn(
-            apccontext: *mut core::ffi::c_void,
+            apccontext: *mut u64,
             iostatusblock: *mut IO_STATUS_BLOCK,
             reserved: u32,
         ),
     >;
 
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct IO_STATUS_BLOCK {
         pub Anonymous: IO_STATUS_BLOCK_0,
@@ -359,11 +359,11 @@ pub mod misc {
             unsafe { core::mem::zeroed() }
         }
     }
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub union IO_STATUS_BLOCK_0 {
         pub Status: STATUS,
-        pub Pointer: *mut core::ffi::c_void,
+        pub Pointer: *mut u64,
     }
     impl Default for IO_STATUS_BLOCK_0 {
         fn default() -> Self {
@@ -386,7 +386,7 @@ pub mod misc {
     pub const PIPE_WAIT: NAMED_PIPE_MODE = 0u32;
     pub type PRIORITY_HINT = i32;
     pub type PROCESSOR_ARCHITECTURE = u16;
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct PROCESS_INFORMATION {
         pub hProcess: HANDLE,
@@ -403,11 +403,11 @@ pub mod misc {
     pub type NAMED_PIPE_MODE = u32;
     pub type FILE_FLAGS_AND_ATTRIBUTES = u32;
 
-    pub type PSID = *mut core::ffi::c_void;
+    pub type PSID = *mut u64;
     pub type PSTR = *mut u8;
     pub type PTIMERAPCROUTINE = Option<
         unsafe extern "system" fn(
-            lpargtocompletionroutine: *const core::ffi::c_void,
+            lpargtocompletionroutine: *const u64,
             dwtimerlowvalue: u32,
             dwtimerhighvalue: u32,
         ),
@@ -416,11 +416,11 @@ pub mod misc {
     Option<unsafe extern "system" fn(exceptioninfo: *mut EXCEPTION_POINTERS) -> i32>;
     pub type PWSTR = *mut u16;
 
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct SECURITY_ATTRIBUTES {
         pub nLength: u32,
-        pub lpSecurityDescriptor: *mut core::ffi::c_void,
+        pub lpSecurityDescriptor: *mut u64,
         pub bInheritHandle: BOOL,
     }
     impl Default for SECURITY_ATTRIBUTES {
@@ -430,7 +430,7 @@ pub mod misc {
     }
     type BOOL = i32;
 
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct SECURITY_DESCRIPTOR {
         pub Revision: u8,
@@ -448,7 +448,7 @@ pub mod misc {
     }
     pub type SECURITY_DESCRIPTOR_CONTROL = u16;
     pub type SECURITY_IMPERSONATION_LEVEL = i32;
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy, Default)]
     pub struct SECURITY_QUALITY_OF_SERVICE {
         pub Length: u32,
@@ -457,7 +457,7 @@ pub mod misc {
         pub EffectiveOnly: bool,
     }
 
-    #[repr(C)]
+    // #[repr(C)]
     #[derive(Clone, Copy, Default)]
     pub struct ACL {
         pub AclRevision: u8,
@@ -468,10 +468,10 @@ pub mod misc {
     }
 }
 
-#[repr(C)]
+// #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SRWLOCK {
-    pub Ptr: *mut core::ffi::c_void,
+    pub Ptr: *mut u64,
 }
 impl Default for SRWLOCK {
     fn default() -> Self {
@@ -479,10 +479,9 @@ impl Default for SRWLOCK {
     }
 }
 
-#[repr(C)]
+// #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct TIMEVAL {
     pub tv_sec: i32,
     pub tv_usec: i32,
 }
-

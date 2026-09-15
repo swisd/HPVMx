@@ -11,7 +11,10 @@ use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
 use uefi::table::system_table_raw;
 use crate::filesystem::FileSystem;
 use embedded_graphics::pixelcolor::{Rgb888, RgbColor};
+pub use crate::ui::qt;
+pub use crate::ui::qt::*;
 
+#[derive(Clone, Debug)]
 pub struct TreeViewNode<'a> {
     pub label: &'a str,
     pub children: &'a [TreeViewNode<'a>],
@@ -34,50 +37,6 @@ pub struct PixelGraphics {
 static mut GOP_CACHE: Option<( *mut u32, usize, usize, usize)> = None;
 
 impl PixelGraphics {
-    pub fn draw_line_graph<T: Into<u64> + Copy>(
-        &mut self,
-        x: usize,
-        y: usize,
-        width: usize,
-        height: usize,
-        data: &[T],
-        max_val: u64,
-        color: u32,
-        len: usize // This is our visible "window" size
-
-    ) {
-        if data.len() < 2 || len < 2 || width == 0 || height == 0 { return; }
-
-        self.draw_rect_outline(x, y, width, height, 0x444444);
-
-        // dx is fixed based on the window 'len', so the spacing never changes
-        let dx = width as f64 / (len - 1) as f64;
-        let scale = if max_val > 0 { height as f64 / max_val as f64 } else { 0.0 };
-
-        // We only care about the last 'len' points in the data slice
-        let start_idx = if data.len() > len { data.len() - len } else { 0 };
-
-        // Iterate through the visible window
-        for i in start_idx..data.len() - 1 {
-            // Normalize the index so the most recent point is at the right edge
-            let x_offset_1 = ((i - start_idx) as f64 * dx) as usize;
-            let x_offset_2 = ((i + 1 - start_idx) as f64 * dx) as usize;
-
-            // Metrics can legitimately exceed the graph's display scale.  Do
-            // not allow that to underflow the unsigned screen coordinate: an
-            // underflowed endpoint makes Bresenham walk an effectively
-            // unbounded line and stalls the whole UI.
-            let val1: u64 = data[i].into().min(max_val);
-            let y1 = y + height - (val1 as f64 * scale) as usize;
-
-            let val2: u64 = data[i+1].into().min(max_val);
-            let y2 = y + height - (val2 as f64 * scale) as usize;
-
-            // Ensure we stay within the horizontal bounds of the graph
-            self.draw_line(x + x_offset_1, y1, x + x_offset_2, y2, color);
-        }
-    }
-
     pub fn new() -> Option<Self> {
         let (fb_ptr, width, height, stride) = unsafe {
             if let Some(cache) = GOP_CACHE {
@@ -177,6 +136,185 @@ impl PixelGraphics {
             for px in x..x + width {
                 self.draw_pixel(px, py, color);
             }
+        }
+    }
+
+    #[inline]
+    pub fn blend_color(c1: u32, c2: u32, alpha: u8) -> u32 {
+        let a = alpha as u32;
+        let inv_a = 255 - a;
+        let r1 = (c1 >> 16) & 0xFF;
+        let g1 = (c1 >> 8) & 0xFF;
+        let b1 = c1 & 0xFF;
+        let r2 = (c2 >> 16) & 0xFF;
+        let g2 = (c2 >> 8) & 0xFF;
+        let b2 = c2 & 0xFF;
+        let r = (r1 * a + r2 * inv_a) / 255;
+        let g = (g1 * a + g2 * inv_a) / 255;
+        let b = (b1 * a + b2 * inv_a) / 255;
+        (r << 16) | (g << 8) | b
+    }
+
+    pub fn draw_pixel_alpha(&mut self, x: usize, y: usize, color: u32, alpha: u8) {
+        if alpha == 0 || x >= self.width || y >= self.height { return; }
+        if alpha == 255 {
+            self.draw_pixel(x, y, color);
+            return;
+        }
+        let current_color = if let Some(ref buffer) = self.backbuffer {
+            buffer[y * self.stride + x]
+        } else {
+            unsafe { *self.framebuffer.add(y * self.stride + x) }
+        };
+        let blended = Self::blend_color(color, current_color, alpha);
+        self.draw_pixel(x, y, blended);
+    }
+
+    pub fn fill_rounded_rect(&mut self, x: usize, y: usize, width: usize, height: usize, radius: usize, color: u32) {
+        if width == 0 || height == 0 { return; }
+        let r = radius.min(width / 2).min(height / 2);
+        if r == 0 {
+            self.fill_rect(x, y, width, height, color);
+            return;
+        }
+
+        // Center body
+        if height > 2 * r {
+            self.fill_rect(x, y + r, width, height - 2 * r, color);
+        }
+        // Top and bottom bands
+        if width > 2 * r {
+            self.fill_rect(x + r, y, width - 2 * r, r, color);
+            self.fill_rect(x + r, y + height - r, width - 2 * r, r, color);
+        }
+
+        // 4 corner quadrants
+        let r_i32 = r as i32;
+        let r_sq = r_i32 * r_i32;
+        for dy in 0..r {
+            let dy_i32 = r_i32 - 1 - dy as i32;
+            let dx_span = (sqrt((r_sq - dy_i32 * dy_i32).max(0) as f64) as usize).min(r);
+            // Top-left
+            self.fill_rect(x + r - dx_span, y + dy, dx_span, 1, color);
+            // Top-right
+            self.fill_rect(x + width - r, y + dy, dx_span, 1, color);
+            // Bottom-left
+            self.fill_rect(x + r - dx_span, y + height - 1 - dy, dx_span, 1, color);
+            // Bottom-right
+            self.fill_rect(x + width - r, y + height - 1 - dy, dx_span, 1, color);
+        }
+    }
+
+    pub fn draw_rounded_rect_outline(&mut self, x: usize, y: usize, width: usize, height: usize, radius: usize, color: u32) {
+        if width == 0 || height == 0 { return; }
+        let r = radius.min(width / 2).min(height / 2);
+        if r == 0 {
+            self.draw_rect_outline(x, y, width, height, color);
+            return;
+        }
+
+        // Straight segments
+        if width > 2 * r {
+            self.draw_line(x + r, y, x + width - r, y, color);
+            self.draw_line(x + r, y + height - 1, x + width - r, y + height - 1, color);
+        }
+        if height > 2 * r {
+            self.draw_line(x, y + r, x, y + height - r, color);
+            self.draw_line(x + width - 1, y + r, x + width - 1, y + height - r, color);
+        }
+
+        // Corner arcs
+        let mut d = 3 - 2 * (r as i32);
+        let mut cx = 0i32;
+        let mut cy = r as i32;
+        let arc_tl_x = x + r;
+        let arc_tl_y = y + r;
+        let arc_tr_x = x + width - 1 - r;
+        let arc_tr_y = y + r;
+        let arc_bl_x = x + r;
+        let arc_bl_y = y + height - 1 - r;
+        let arc_br_x = x + width - 1 - r;
+        let arc_br_y = y + height - 1 - r;
+
+        while cx <= cy {
+            self.draw_pixel((arc_tl_x as i32 - cy) as usize, (arc_tl_y as i32 - cx) as usize, color);
+            self.draw_pixel((arc_tl_x as i32 - cx) as usize, (arc_tl_y as i32 - cy) as usize, color);
+
+            self.draw_pixel((arc_tr_x as i32 + cx) as usize, (arc_tr_y as i32 - cy) as usize, color);
+            self.draw_pixel((arc_tr_x as i32 + cy) as usize, (arc_tr_y as i32 - cx) as usize, color);
+
+            self.draw_pixel((arc_bl_x as i32 - cy) as usize, (arc_bl_y as i32 + cx) as usize, color);
+            self.draw_pixel((arc_bl_x as i32 - cx) as usize, (arc_bl_y as i32 + cy) as usize, color);
+
+            self.draw_pixel((arc_br_x as i32 + cx) as usize, (arc_br_y as i32 + cy) as usize, color);
+            self.draw_pixel((arc_br_x as i32 + cy) as usize, (arc_br_y as i32 + cx) as usize, color);
+
+            if d < 0 {
+                d += 4 * cx + 6;
+            } else {
+                d += 4 * (cx - cy) + 10;
+                cy -= 1;
+            }
+            cx += 1;
+        }
+    }
+
+    pub fn fill_gradient_v(&mut self, x: usize, y: usize, width: usize, height: usize, top_color: u32, bottom_color: u32) {
+        if width == 0 || height == 0 { return; }
+        for row in 0..height {
+            let t = if height > 1 { (row * 255) / (height - 1) } else { 0 };
+            let col = Self::blend_color(bottom_color, top_color, t as u8);
+            self.fill_rect(x, y + row, width, 1, col);
+        }
+    }
+
+    pub fn fill_gradient_h(&mut self, x: usize, y: usize, width: usize, height: usize, left_color: u32, right_color: u32) {
+        if width == 0 || height == 0 { return; }
+        for col_idx in 0..width {
+            let t = if width > 1 { (col_idx * 255) / (width - 1) } else { 0 };
+            let col = Self::blend_color(right_color, left_color, t as u8);
+            self.fill_rect(x + col_idx, y, 1, height, col);
+        }
+    }
+
+    pub fn draw_circle(&mut self, cx: usize, cy: usize, radius: usize, color: u32) {
+        if radius == 0 {
+            self.draw_pixel(cx, cy, color);
+            return;
+        }
+        let mut d = 3 - 2 * (radius as i32);
+        let mut x = 0i32;
+        let mut y = radius as i32;
+
+        while x <= y {
+            self.draw_pixel((cx as i32 + x) as usize, (cy as i32 + y) as usize, color);
+            self.draw_pixel((cx as i32 - x) as usize, (cy as i32 + y) as usize, color);
+            self.draw_pixel((cx as i32 + x) as usize, (cy as i32 - y) as usize, color);
+            self.draw_pixel((cx as i32 - x) as usize, (cy as i32 - y) as usize, color);
+            self.draw_pixel((cx as i32 + y) as usize, (cy as i32 + x) as usize, color);
+            self.draw_pixel((cx as i32 - y) as usize, (cy as i32 + x) as usize, color);
+            self.draw_pixel((cx as i32 + y) as usize, (cy as i32 - x) as usize, color);
+            self.draw_pixel((cx as i32 - y) as usize, (cy as i32 - x) as usize, color);
+
+            if d < 0 {
+                d += 4 * x + 6;
+            } else {
+                d += 4 * (x - y) + 10;
+                y -= 1;
+            }
+            x += 1;
+        }
+    }
+
+    pub fn fill_circle(&mut self, cx: usize, cy: usize, radius: usize, color: u32) {
+        let r = radius as i32;
+        let r_sq = r * r;
+        for dy in -r..=r {
+            let dx = sqrt((r_sq - dy * dy).max(0) as f64) as i32;
+            let py = (cy as i32 + dy) as usize;
+            let px_start = (cx as i32 - dx) as usize;
+            let span = (dx * 2 + 1) as usize;
+            self.fill_rect(px_start, py, span, 1, color);
         }
     }
 
@@ -352,57 +490,32 @@ impl PixelGraphics {
     }
 
     pub fn draw_checkbox(&mut self, x: usize, y: usize, checked: bool, blocked: bool, disabled: bool, text: &str) {
-        let size = 12;
-        let bg = if disabled {0x666666} else { 0x888888 };
-        let fg = if disabled {0x888888} else { 0xFFFFFF };
-        let red = if disabled {0x884444} else { 0x880000 };
-        let green = if disabled {0x448844} else { 0x008800 };
-        let fill = if disabled {0xAAAAAA} else { 0xDDDDDD };
-
-        self.draw_rect_outline(x, y, size, size, bg);
-        self.draw_text(x + size + 4, y, text, fg);
-        self.fill_rect(x + 1, y + 1, size - 1, size - 1, fill);
-
-        if blocked {
-            self.draw_line_adv(x + 1, y + 1, x + (size-1), y + (size-1), red, 3, 0xFFFFFF);
-            self.draw_line_adv(x + (size-1), y + 1, x + 1, y + (size-1), red, 3, 0xFFFFFF);
-        } else if checked {
-            self.draw_line_adv(x + 2, y + 6, x + 5, y + 9, green, 3, 0xFFFFFF);
-            self.draw_line_adv(x + 5, y + 9, x + 10, y + 2, green, 3, 0xFFFFFF);
-        }
+        let cb = QCheckBox::new(text)
+            .setGeometry(x, y)
+            .setChecked(checked)
+            .setBlocked(blocked)
+            .setEnabled(!disabled);
+        cb.render(self);
     }
 
     pub fn draw_tristate_checkbox(&mut self, x: usize, y: usize, text: &str, color: u32, some: bool, checked: bool) {
-        let size = 12;
-        self.draw_rect_outline(x, y, size, size, 0x888888);
-        self.draw_text(x + size + 4, y, text, color);
-        self.fill_rect(x + 1, y + 1, size - 1, size - 1, 0xDDDDDD);
-        if some {
-            self.draw_line_adv(x + 1, y + (size/2), x + (size-1), y + (size/2), 0x008800, 3, 0xFFFFFF);
-
+        let state = if some {
+            QtCheckState::PartiallyChecked
         } else if checked {
-            self.draw_line_adv(x + 2, y + 6, x + 5, y + 9, 0x008800, 3, 0xFFFFFF);
-            self.draw_line_adv(x + 5, y + 9, x + 10, y + 2, 0x008800, 3, 0xFFFFFF);
-        }
-
+            QtCheckState::Checked
+        } else {
+            QtCheckState::Unchecked
+        };
+        let cb = QCheckBox::new(text)
+            .setGeometry(x, y)
+            .setCheckState(state)
+            .setTextColor(QColor::from_hex(color));
+        cb.render(self);
     }
 
     pub fn draw_radio_button(&mut self, x: usize, y: usize, checked: bool) {
-        let _size = 12;
-        // Approximation of a circle for 12x12
-        let circle = [
-            (4, 0, 4), (2, 1, 8), (1, 2, 10), (1, 3, 10),
-            (0, 4, 12), (0, 5, 12), (0, 6, 12), (0, 7, 12),
-            (1, 8, 10), (1, 9, 10), (2, 10, 8), (4, 11, 4)
-        ];
-        for (off_x, off_y, w) in circle {
-            self.fill_rect(x + off_x, y + off_y, w, 1, 0xDDDDDD);
-            self.draw_pixel(x + off_x, y + off_y, 0x888888);
-            self.draw_pixel(x + off_x + w - 1, y + off_y, 0x888888);
-        }
-        if checked {
-            self.fill_rect(x + 4, y + 4, 4, 4, 0x0000FF);
-        }
+        let rb = QRadioButton::new("").setGeometry(x, y).setChecked(checked);
+        rb.render(self);
     }
 
     pub fn draw_rect_outline(&mut self, x: usize, y: usize, width: usize, height: usize, color: u32) {
@@ -477,31 +590,31 @@ impl PixelGraphics {
     }
 
     pub fn draw_progress_bar(&mut self, x: usize, y: usize, width: usize, height: usize, value: usize, max: usize, color: u32) {
-        self.draw_rect_outline(x, y, width, height, 0x888888);
-        let fill_w = (width.saturating_sub(2) * value) / max.max(1);
-        self.fill_rect(x + 1, y + 1, fill_w, height - 1, color);
+        let pb = QProgressBar::new()
+            .setGeometry(x, y, width, height)
+            .setRange(0, max)
+            .setValue(value)
+            .setColor(QColor::from_hex(color));
+        pb.render(self);
     }
 
     pub fn draw_slider(&mut self, x: usize, y: usize, width: usize, value: usize, max: usize, vertical: bool) {
-        if !vertical {
-            self.draw_line(x, y + 6, x + width, y + 6, 0x888888);
-            let handle_x = x + (width * value) / max.max(1);
-            self.fill_rect(handle_x.saturating_sub(4), y, 8, 12, 0xCCCCCC);
-            self.draw_rect_outline(handle_x.saturating_sub(4), y, 8, 12, 0x444444);
-        } else {
-            self.draw_line(x + 6, y, x + 6, y + width, 0x888888);
-            let handle_y = y + (width * value) / max.max(1);
-            self.fill_rect(x, handle_y.saturating_sub(4), 12, 8, 0xCCCCCC);
-            self.draw_rect_outline(x, handle_y.saturating_sub(4), 12, 8, 0x444444);
-        }
+        let orientation = if vertical { QtOrientation::Vertical } else { QtOrientation::Horizontal };
+        let thick = 20;
+        let sl = QSlider::new()
+            .setGeometry(x, y, if vertical { thick } else { width }, if vertical { width } else { thick })
+            .setOrientation(orientation)
+            .setRange(0, max)
+            .setValue(value);
+        sl.render(self);
     }
 
     pub fn draw_lcd_number(&mut self, x: usize, y: usize, value: &str) {
-        // Simple 8x16 font-based LCD look
-        self.fill_rect(x, y, value.len() * 12 + 4, 24, 0x003300);
-        for (i, c) in value.chars().enumerate() {
-            self.draw_text(x + 4 + i * 12, y + 4, &c.to_string(), 0x00FF00);
-        }
+        let w = (value.len() * 16 + 16).max(40);
+        let lcd = QLCDNumber::new()
+            .setGeometry(x, y, w, 28)
+            .display(value);
+        lcd.render(self);
     }
 
     pub fn clear(&mut self, color: u32) {
@@ -556,11 +669,10 @@ impl PixelGraphics {
     }
 
     pub fn draw_button(&mut self, x: usize, y: usize, width: usize, height: usize, text: &str, is_focused: bool) {
-        let color = if is_focused { 0x00AA00 } else { 0x444444 };
-        self.fill_rect(x, y, width, height, color);
-        let xpos = (x + (height/2usize));
-        let ypos = y + 4;
-        self.draw_text(xpos, ypos, text, 0xFFFFFF);
+        let btn = QPushButton::new(text)
+            .setGeometry(x, y, width, height)
+            .setFocus(is_focused);
+        btn.render(self);
     }
 
     pub fn u64_sym_le(&self, value: u64) -> [u8; 16] {
@@ -577,72 +689,47 @@ impl PixelGraphics {
     }
 
     pub fn draw_list_view(&mut self, x: usize, y: usize, width: usize, height: usize, items: &[&str], selected_idx: Option<usize>) {
-        self.draw_rect_outline(x, y, width, height, 0x888888);
-        self.fill_rect(x + 1, y + 1, width - 1, height - 1, 0x222222); // Background
-
-        for (i, item) in items.iter().enumerate() {
-            let item_y = y + 5 + (i * 20);
-            if item_y + 15 > y + height { break; } // Clipping
-
-            if Some(i) == selected_idx {
-                self.fill_rect(x + 2, item_y - 2, width - 4, 18, 0x0055CC); // Selection highlight
-            }
-            self.draw_text(x + 10, item_y, item, 0xFFFFFF);
-        }
+        let lv = QListView::new()
+            .setGeometry(x, y, width, height)
+            .setItems(items)
+            .setCurrentIndex(selected_idx);
+        lv.render(self);
     }
 
     pub fn draw_table_view(&mut self, x: usize, y: usize, width: usize, height: usize, headers: &[&str], rows: Vec<&[&str]>) {
-        self.draw_rect_outline(x, y, width, height, 0x888888);
-        let col_width = width / headers.len().max(1);
-        let row_height = 20;
-
-        // Draw Headers
-        self.fill_rect(x + 1, y + 1, width - 1, row_height, 0x333333);
-        for (i, header) in headers.iter().enumerate() {
-            let h_x = x + (i * col_width);
-            self.draw_text(h_x + 5, y + 2, header, 0xAAAAAA);
-            if i > 0 {
-                self.draw_line(h_x, y, h_x, y + height, 0x888888); // Vertical Divider
-            }
-        }
-        self.draw_line(x, y + row_height, x + width, y + row_height, 0x888888); // Header divider
-
-        // Draw Rows
-        for (r_idx, row) in rows.iter().enumerate() {
-            let r_y = y + row_height + (r_idx * row_height);
-            if r_y + row_height > y + height { break; }
-
-            for (c_idx, &cell) in row.iter().enumerate() {
-                let c_x = x + (c_idx * col_width);
-                self.draw_text(c_x + 5, r_y + 2, cell, 0xFFFFFF);
-            }
-            self.draw_line(x, r_y + row_height, x + width, r_y + row_height, 0x333333); // Subtle row line
-        }
+        let tv = QTableView::new()
+            .setGeometry(x, y, width, height)
+            .setHorizontalHeaderLabels(headers)
+            .setRows(rows);
+        tv.render(self);
     }
 
     pub fn draw_tree_view(&mut self, x: usize, y: usize, width: usize, height: usize, root: &TreeViewNode) {
-        self.draw_rect_outline(x, y, width, height, 0x888888);
-        let mut current_y = y + 5;
-        self.draw_tree_node(x + 5, &mut current_y, root, 0);
+        self.draw_rect_outline(x, y, width, height, 0x333E50);
+        self.fill_rounded_rect(x + 1, y + 1, width - 2, height - 2, 2, 0x141820);
+        let mut current_y = y + 6;
+        self.draw_tree_node(x + 6, &mut current_y, root, 0);
     }
 
     pub fn draw_tree_view_icon(&mut self, x: usize, y: usize, width: usize, height: usize, root: &TreeViewNode, icon: &[u32]) {
-        self.draw_rect_outline(x, y, width, height, 0x888888);
-        let mut current_y = y + 5;
-        self.draw_tree_node_icon(x + 5, &mut current_y, root, 0, icon);
+        self.draw_rect_outline(x, y, width, height, 0x333E50);
+        self.fill_rounded_rect(x + 1, y + 1, width - 2, height - 2, 2, 0x141820);
+        let mut current_y = y + 6;
+        self.draw_tree_node_icon(x + 6, &mut current_y, root, 0, icon);
     }
 
     fn draw_tree_node_icon(&mut self, x: usize, y_pos: &mut usize, node: &TreeViewNode, depth: usize, icon: &[u32]) {
-        let indent = depth * 15;
-        let prefix = if node.children.is_empty() { "  " } else if node.expanded { "- " } else { "+ " };
+        let indent = depth * 16;
+        let prefix = if node.children.is_empty() { "  " } else if node.expanded { "v " } else { "> " };
 
-
-        // Draw the label
         let mut display_text = alloc::string::String::from(prefix);
         display_text.push_str(node.label);
 
-        self.draw_text(x + (indent + 5), *y_pos, &display_text, if depth == 0 { 0xFFFF00 } else { 0xFFFFFF });
-        if node.children.is_empty() { self.draw_icon(x + indent, *y_pos, 16, 16, icon) }
+        let text_color = if depth == 0 { 0x38BDF8 } else { 0xF1F5F9 };
+        self.draw_text(x + indent + 18, *y_pos + 1, &display_text, text_color);
+        if node.children.is_empty() {
+            self.draw_icon(x + indent, *y_pos, 16, 16, icon);
+        }
         *y_pos += 20;
 
         if node.expanded {
@@ -653,14 +740,14 @@ impl PixelGraphics {
     }
 
     fn draw_tree_node(&mut self, x: usize, y_pos: &mut usize, node: &TreeViewNode, depth: usize) {
-        let indent = depth * 15;
-        let prefix = if node.children.is_empty() { "  " } else if node.expanded { "- " } else { "+ " };
+        let indent = depth * 16;
+        let prefix = if node.children.is_empty() { "  " } else if node.expanded { "v " } else { "> " };
 
-        // Draw the label
         let mut display_text = alloc::string::String::from(prefix);
         display_text.push_str(node.label);
 
-        self.draw_text(x + indent, *y_pos, &display_text, if depth == 0 { 0xFFFF00 } else { 0xFFFFFF });
+        let text_color = if depth == 0 { 0x38BDF8 } else { 0xF1F5F9 };
+        self.draw_text(x + indent, *y_pos, &display_text, text_color);
         *y_pos += 20;
 
         if node.expanded {
@@ -671,111 +758,43 @@ impl PixelGraphics {
     }
 
     pub fn draw_spinbox(&mut self, x: usize, y: usize, width: usize, value: i32, label: &str) {
-        let height = 24;
-        let btn_width = 20;
-
-        // Main Box
-        self.draw_rect_outline(x, y, width, height, 0x888888);
-        self.fill_rect(x + 1, y + 1, width - btn_width - 1, height - 2, 0x000000);
-
-        // Value Text
-        let val_str = value.to_string();
-        self.draw_text(x + 5, y + 4, &val_str, 0xFFFFFF);
-
-        // Control Buttons (Stacked ^ and v)
-        let btn_x = x + width - btn_width;
-        self.draw_rect_outline(btn_x, y, btn_width, height, 0x888888);
-        self.draw_line(btn_x, y + height / 2, x + width, y + height / 2, 0x888888);
-
-        self.draw_text(btn_x + 6, y + 2, "^", 0x777777);
-        self.draw_text(btn_x + 6, y + 12, "v", 0x777777);
-
-        // Optional Label
-        self.draw_text(x + width + 5, y + 4, label, 0xAAAAAA);
+        let sb = QSpinBox::new()
+            .setGeometry(x, y, width, 24)
+            .setValue(value)
+            .setSuffix(label);
+        sb.render(self);
     }
 
     pub fn draw_double_spinbox(&mut self, x: usize, y: usize, width: usize, value: f64, precision: usize) {
-        // Simple fixed-point formatting for no_std
-        let mut s = alloc::string::String::new();
-        let int_part = value as i64;
-        s.push_str(&int_part.to_string());
-        s.push('.');
-
-        let mut frac = (value.abs() - floor(value.abs()));
-        for _ in 0..precision {
-            frac *= 10.0;
-            let digit = (frac as i64) % 10;
-            s.push_str(&digit.to_string());
-        }
-
-        self.draw_spinbox(x, y, width, 0, ""); // Draw skeleton
-        self.fill_rect(x + 1, y + 1, width - 21, 22, 0x000000); // Overwrite int with float string
-        self.draw_text(x + 5, y + 4, &s, 0xFFFFFF);
+        let sb = QDoubleSpinBox::new()
+            .setGeometry(x, y, width, 24)
+            .setValue(value)
+            .setDecimals(precision);
+        sb.render(self);
     }
 
     pub fn draw_dial(&mut self, x: usize, y: usize, radius: usize, value: usize, max: usize) {
-            let center_x = x + radius;
-            let center_y = y + radius;
+        let dial = QDial::new()
+            .setGeometry(x, y, radius)
+            .setRange(0, max)
+            .setValue(value);
+        dial.render(self);
+    }
 
-            // 1. Draw the High-Resolution Octagon Bezel
-            // Top-left is dark (shadow), Bottom-right is white (highlight)
-            self.draw_octagon_outline(x, y, radius, 0x888888, 0x555555);
-
-            // 2. Fill the inner face of the knob
-            // We shrink the fill slightly to stay inside the bezel
-            self.fill_rect(x + 4, y + 4, (radius * 2) - 8, (radius * 2) - 8, 0x555555);
-
-            // 3. Calculate Angle using libm
-            // Range: 135 degrees (0.75 * PI) to 405 degrees (2.25 * PI)
-            let fraction = value as f64 / max.max(1) as f64;
-            let start_angle = 0.75 * core::f64::consts::PI;
-            let sweep = 1.5 * core::f64::consts::PI;
-            let angle = start_angle + (fraction * sweep);
-
-            // 4. Calculate Needle-Triangle points
-            // Tip of the needle (near the perimeter)
-            let tip_r = radius as f64 - 4.0;
-            let tx = (center_x as f64 + tip_r * cos(angle)) as usize;
-            let ty = (center_y as f64 + tip_r * sin(angle)) as usize;
-
-            // Base of the needle (at the center)
-            // We create two points perpendicular to the needle angle to give it width
-            let base_w = 3.0;
-            let angle_perp1 = angle + (core::f64::consts::PI / 2.0);
-            let angle_perp2 = angle - (core::f64::consts::PI / 2.0);
-
-            let bx1 = (center_x as f64 + base_w * cos(angle_perp1)) as usize;
-            let by1 = (center_y as f64 + base_w * sin(angle_perp1)) as usize;
-
-            let bx2 = (center_x as f64 + base_w * cos(angle_perp2)) as usize;
-            let by2 = (center_y as f64 + base_w * sin(angle_perp2)) as usize;
-
-            // 5. Draw the Needle (Outline of the long triangle)
-            self.draw_line(bx1, by1, tx, ty, 0xCCCCCC);
-            self.draw_line(bx2, by2, tx, ty, 0xCCCCCC);
-            self.draw_line(bx1, by1, bx2, by2, 0xCCCCCC);
-
-            // 6. Center Hub (The "cap" that holds the needle)
-            // self.fill_rect(center_x - 1, center_y - 1, 3, 3, 0x555555);
-        }
-
-    /// Helper to draw a beveled octagon for the dial's outer edge
     pub fn draw_octagon_outline(&mut self, x: usize, y: usize, r: usize, color_light: u32, color_dark: u32) {
         let side = (r as f64 * 0.707) as usize;
         let offset = r - side;
         let d = r * 2;
 
-        // Flat edges
-        self.draw_line(x + offset, y, x + d - offset, y, color_dark);         // Top
-        self.draw_line(x + offset, y + d, x + d - offset, y + d, color_light); // Bottom
-        self.draw_line(x, y + offset, x, y + d - offset, color_dark);         // Left
-        self.draw_line(x + d, y + offset, x + d, y + d - offset, color_light); // Right
+        self.draw_line(x + offset, y, x + d - offset, y, color_dark);
+        self.draw_line(x + offset, y + d, x + d - offset, y + d, color_light);
+        self.draw_line(x, y + offset, x, y + d - offset, color_dark);
+        self.draw_line(x + d, y + offset, x + d, y + d - offset, color_light);
 
-        // Diagonals
-        self.draw_line(x + offset, y, x, y + offset, color_dark);             // Top-Left
-        self.draw_line(x + d - offset, y, x + d, y + offset, color_dark);     // Top-Right
-        self.draw_line(x, y + d - offset, x + offset, y + d, color_light);     // Bottom-Left
-        self.draw_line(x + d, y + d - offset, x + d - offset, y + d, color_light); // Bottom-Right
+        self.draw_line(x + offset, y, x, y + offset, color_dark);
+        self.draw_line(x + d - offset, y, x + d, y + offset, color_dark);
+        self.draw_line(x, y + d - offset, x + offset, y + d, color_light);
+        self.draw_line(x + d, y + d - offset, x + d - offset, y + d, color_light);
     }
 
     pub fn draw_icon(&mut self, x: usize, y: usize, width: usize, height: usize, data: &[u32],) {
@@ -995,21 +1014,31 @@ impl PixelGraphics {
     }
 
     pub fn draw_heatmap(&mut self, x: usize, y: usize, width: usize, height: usize, rows: usize, cols: usize, data: &[f32]) {
+        if rows == 0 || cols == 0 { return; }
         let cell_w = width / cols;
         let cell_h = height / rows;
 
         for r in 0..rows {
             for c in 0..cols {
                 let val = data[r * cols + c];
-                // Color mapping: Blue (0.0) -> Green (0.5) -> Red (1.0)
-                let color = if val < 0.5 {
-                    let intensity = (val * 2.0 * 255.0) as u32;
-                    ((255 - intensity) << 0) | (intensity << 8) // Blue to Green
+                // Turbo / Jet 5-point thermal palette
+                let color = if val < 0.25 {
+                    let t = (val * 4.0 * 255.0) as u32;
+                    (t << 8) | 255 // Blue to Cyan
+                } else if val < 0.5 {
+                    let t = ((val - 0.25) * 4.0 * 255.0) as u32;
+                    ((255 - t) << 0) | (255 << 8) // Cyan to Green
+                } else if val < 0.75 {
+                    let t = ((val - 0.5) * 4.0 * 255.0) as u32;
+                    (t << 16) | (255 << 8) // Green to Yellow
                 } else {
-                    let intensity = ((val - 0.5) * 2.0 * 255.0) as u32;
-                    ((255 - intensity) << 8) | (intensity << 16) // Green to Red
+                    let t = ((val - 0.75) * 4.0 * 255.0) as u32;
+                    (255 << 16) | ((255 - t) << 8) // Yellow to Red
                 };
-                self.fill_rect(x + c * cell_w, y + r * cell_h, cell_w - 1, cell_h - 1, color);
+
+                let cx = x + c * cell_w;
+                let cy = y + r * cell_h;
+                self.fill_rect(cx, cy, cell_w.saturating_sub(1), cell_h.saturating_sub(1), color);
             }
         }
     }
@@ -1024,22 +1053,22 @@ impl PixelGraphics {
         vertical_offset: usize,
         horizontal_offset: usize,
     ) {
-        self.fill_rect(x, y, width, height, 0x1A1A1A);
-        self.draw_rect_outline(x, y, width, height, 0x444444);
+        self.fill_rounded_rect(x, y, width, height, 2, 0x101218);
+        self.draw_rounded_rect_outline(x, y, width, height, 2, 0x333E50);
 
         let line_h = 16;
-        let max_lines = (height - 10) / line_h;
-        
-        // First, flatten logs into individual lines to handle newlines correctly
+        let max_lines = (height.saturating_sub(10)) / line_h;
+
         let mut display_lines = alloc::vec::Vec::new();
         for (level, tag, msg) in logs {
             let color = match level {
-                uefi::proto::console::text::Color::Red => 0xFF5555,
-                uefi::proto::console::text::Color::Yellow => 0xFFFF55,
-                uefi::proto::console::text::Color::LightCyan => 0x55FFFF,
-                _ => 0xBBBBBB,
+                uefi::proto::console::text::Color::Red => 0xF87171,
+                uefi::proto::console::text::Color::Yellow => 0xFACC15,
+                uefi::proto::console::text::Color::LightCyan => 0x38BDF8,
+                uefi::proto::console::text::Color::Green => 0x4ADE80,
+                _ => 0xE2E8F0,
             };
-            
+
             let full_msg = if tag.is_empty() {
                 msg.clone()
             } else {
@@ -1062,99 +1091,279 @@ impl PixelGraphics {
             .enumerate()
         {
             let rendered = line.chars().skip(horizontal_offset).collect::<String>();
-            self.draw_text(x + 5, y + 5 + i * line_h, &rendered, *color);
+            self.draw_text(x + 6, y + 5 + i * line_h, &rendered, *color);
         }
     }
 
     pub fn draw_toast(&mut self, text: &str, duration_frames: &mut usize, yadj: usize) {
         if *duration_frames > 0 {
-            let x = self.width - 250;
+            let w = 260usize;
+            let h = 42usize;
+            let x = self.width.saturating_sub(w + 20);
             let y = 30 + yadj;
-            self.fill_rect(x, y, 240, 40, 0x333333);
-            self.draw_rect_outline(x, y, 240, 40, 0x00FF00);
-            self.draw_text(x + 10, y + 12, text, 0xFFFFFF);
+
+            self.fill_rounded_rect(x + 2, y + 2, w, h, 4, 0x0A0D14);
+            self.fill_rounded_rect(x, y, w, h, 4, 0x1E2330);
+            self.draw_rounded_rect_outline(x, y, w, h, 4, 0x384152);
+            self.fill_rounded_rect(x + 2, y + 2, 4, h.saturating_sub(4), 2, 0x10B981);
+            self.draw_text(x + 16, y + 13, text, 0xF8FAFC);
+
             *duration_frames -= 1;
         }
     }
 
     pub fn draw_command_palette(&mut self, query: &str, results: &[&str], selected: usize, scroll_offset: usize) {
         let w = if self.width > 700 { 640 } else { self.width.saturating_sub(40).max(320) };
-        let h = 270;
+        let h = 280;
         let x = (self.width - w) / 2;
         let y = 70;
 
-        self.fill_rect(x, y, w, h, 0x181818);
-        self.draw_rect_outline(x, y, w, h, 0x5555FF);
-        self.fill_rect(x, y, w, 34, 0x202038);
+        self.fill_rounded_rect(x + 3, y + 3, w, h, 6, 0x080A10);
+        self.fill_rounded_rect(x, y, w, h, 6, 0x151821);
+        self.draw_rounded_rect_outline(x, y, w, h, 6, 0x3B82F6);
 
-        self.draw_text(x + 10, y + 10, ">", 0x5555FF);
-        self.draw_text(x + 30, y + 10, query, 0xFFFFFF);
-        self.draw_line(x + 10, y + 34, x + w - 10, y + 34, 0x444444);
+        self.fill_rounded_rect(x + 6, y + 6, w - 12, 36, 4, 0x1E2330);
+        self.draw_rounded_rect_outline(x + 6, y + 6, w - 12, 36, 4, 0x475569);
 
-        let visible_count = 10;
+        self.draw_text(x + 16, y + 16, ">", 0x3B82F6);
+        self.draw_text(x + 32, y + 16, query, 0xFFFFFF);
+        let cursor_x = x + 32 + query.len() * 8;
+        self.fill_rect(cursor_x, y + 14, 2, 16, 0x3B82F6);
+
+        let visible_count = 9;
         for i in 0..visible_count {
             let idx = i + scroll_offset;
             if idx >= results.len() { break; }
 
             let res = results[idx];
-            let color = if idx == selected { 0xFFFF00 } else { 0xAAAAAA };
-            if idx == selected {
-                self.fill_rect(x + 5, y + 42 + i * 20, w - 10, 18, 0x303048);
+            let item_y = y + 48 + i * 22;
+            let is_selected = idx == selected;
+
+            if is_selected {
+                self.fill_rounded_rect(x + 6, item_y, w - 12, 20, 3, 0x1D4ED8);
+                self.fill_rect(x + 6, item_y, 3, 20, 0x60A5FA);
             }
-            self.draw_text(x + 15, y + 44 + i * 20, res, color);
+
+            let color = if is_selected { 0xFFFFFF } else { 0xCBD5E1 };
+            self.draw_text(x + 18, item_y + 2, res, color);
         }
 
         if results.is_empty() {
-            self.draw_text(x + 15, y + 60, "No matching commands", 0x777777);
+            self.draw_text(x + 18, y + 60, "No matching commands", 0x64748B);
         }
 
         if results.len() > visible_count {
-            // Draw scroll indicator
-            let scroll_bar_h = visible_count * 20;
-            let bar_y = y + 42;
+            let scroll_bar_h = visible_count * 22;
+            let bar_y = y + 48;
             let thumb_h = (scroll_bar_h as f32 * (visible_count as f32 / results.len() as f32)) as usize;
             let thumb_y = bar_y + (scroll_bar_h - thumb_h) * scroll_offset / (results.len() - visible_count);
-            
-            self.fill_rect(x + w - 8, bar_y, 4, scroll_bar_h, 0x333333);
-            self.fill_rect(x + w - 8, thumb_y, 4, thumb_h, 0x5555FF);
+
+            self.fill_rounded_rect(x + w - 10, bar_y, 4, scroll_bar_h, 2, 0x242A38);
+            self.fill_rounded_rect(x + w - 10, thumb_y, 4, thumb_h, 2, 0x3B82F6);
         }
 
-        self.draw_line(x + 10, y + h - 28, x + w - 10, y + h - 28, 0x333333);
-        self.draw_text(x + 15, y + h - 20, "Enter execute  Esc close  $ terminal mode", 0x777777);
+        self.draw_line(x + 10, y + h - 26, x + w - 10, y + h - 26, 0x2A3342);
+        self.draw_text(x + 16, y + h - 18, "Enter execute  |  Esc close  |  $ terminal", 0x64748B);
     }
 
-    pub fn draw_header(&mut self, x: usize, y: usize, width: usize, height: usize, TSC_PER_US_: usize, modes: [bool; 3], resources: [usize; 4]) {
-        // Draw header
-        self.fill_rect(0, 0, width, 32, 0x608080); // Cyan-ish
-        // pg.draw_text(width / 2 - 160, 16, "HPVMx - Hypervisor Management Console", 0xFFFFFF);
+    pub fn draw_header(&mut self, _x: usize, _y: usize, width: usize, _height: usize, TSC_PER_US_: usize, modes: [bool; 3], resources: [usize; 4]) {
+        self.fill_rect(0, 0, width, 32, 0x608080);
+        // self.draw_line(0, 32, width, 32, 0x334155);
 
-        // Draw clock in top right
+        self.draw_icon(5, 5, 128, 128, &icons::HPVMX_128_CLR_ICON_DATA);
+
+        let mut rx = width.saturating_sub(10);
+
         if let Ok(time) = runtime::get_time() {
-            let time_str = alloc::format!("{:02}:{:02}", time.hour(), time.minute());
-            self.draw_text(width - 50, 12, &time_str, 0xFFFF00); // Yellow clock
+            let time_str = format!("{:02}:{:02}", time.hour(), time.minute());
+            rx = rx.saturating_sub(60);
+            // self.fill_rounded_rect(rx, 6, 55, 20, 3, 0x1E293B);
+            // self.draw_rounded_rect_outline(rx, 6, 55, 20, 3, 0x475569);
+            self.draw_text(rx + 8, 8, &time_str, 0xFACC15);
         }
+
+        rx = rx.saturating_sub(255);
+
+        let mode_labels = ["CTRL", "ALT", "FN"];
+        for i in (0..3).rev() {
+            if modes[i] {
+                rx = rx.saturating_sub(44);
+                self.fill_rounded_rect(rx, 6, 40, 20, 3, 0x2563EB);
+                self.draw_text(rx + 6, 8, mode_labels[i], 0xFFFFFF);
+            }
+        }
+
+        // let fps_str = alloc::format!("{} fps / {} ms", resources[0], resources[1]);
+        // let fps_w = fps_str.len() * 8 + 12;
+        // rx = rx.saturating_sub(fps_w + 4);
+        // self.fill_rounded_rect(rx, 6, fps_w, 20, 3, 0x1E293B);
+        // self.draw_rounded_rect_outline(rx, 6, fps_w, 20, 3, 0x334155);
+        // self.draw_text(rx + 6, 8, &fps_str, 0x38BDF8);
+        //
+        // let res_str = alloc::format!("CPU: {}% | RAM: {} MB", resources[2], resources[3]);
+        // let res_w = res_str.len() * 8 + 12;
+        // rx = rx.saturating_sub(res_w + 4);
+        // self.fill_rounded_rect(rx, 6, res_w, 20, 3, 0x1E293B);
+        // self.draw_rounded_rect_outline(rx, 6, res_w, 20, 3, 0x334155);
+        // self.draw_text(rx + 6, 8, &res_str, 0x4ADE80);
+        // Draw clock in top right
+        // if let Ok(time) = runtime::get_time() {
+        //     let time_str = alloc::format!("{:02}:{:02}", time.hour(), time.minute());
+        //     self.draw_text(width - 50, 12, &time_str, 0xFFFF00); // Yellow clock
+        // }
 
         self.draw_text(width - 150, 8, &format!("{} fps", resources[0]), 0xFFFFFF);
         self.draw_text(width - 212, 8, &format!("{} ms", resources[1]), 0xFFFFFF);
         self.draw_text(width - 250, 8, &format!("{}%", resources[2]), 0xFFFFFF);
         self.draw_text(width - 165, 19, &format!("{} MHz", TSC_PER_US_), 0xFFFFFF);
         self.draw_text(width - 250, 19, &format!("{} MB", resources[3]), 0xFFFFFF);
+    }
 
-        self.draw_text(width - 100, 2, if modes[0] { "ctrl" } else { "" }, 0xFFFFFF);
-        self.draw_text((width - 100) + 33, 2, if modes[1] { "alt" } else { "" }, 0xFFFFFF);
-        self.draw_text((width - 100) + 60, 2, if modes[2] { "fn" } else { "" }, 0xFFFFFF);
+    pub fn draw_line_graph<T: Into<u64> + Copy>(
+        &mut self,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        data: &[T],
+        max_val: u64,
+        color: u32,
+        len: usize,
+    ) {
+        if data.len() < 2 || len < 2 || width == 0 || height == 0 { return; }
 
-        // pg.draw_text(40, 1, "   __ _____ _   ____  ___", 0xFFFFFF);
-        // pg.draw_text(40, 11, "  / // / _ \\ | / /  |/  /_ __", 0xFFFFFF);
-        // pg.draw_text(40, 21, " / _  / ___/ |/ / /|_/ /\\ \\ /", 0xFFFFFF);
-        // pg.draw_text(40, 31, "/_//_/_/   |___/_/  /_//_\\_\\", 0xFFFFFF);
+        self.fill_rounded_rect(x, y, width, height, 2, 0x0E1218);
+        self.draw_rounded_rect_outline(x, y, width, height, 2, 0x2A3342);
 
-        self.draw_icon(5, 5, 128, 128, &icons::HPVMX_128_CLR_ICON_DATA);
+        for i in 1..4 {
+            let gy = y + (height * i) / 4;
+            self.draw_line(x + 1, gy, x + width - 1, gy, 0x1A2230);
+        }
+        for i in 1..4 {
+            let gx = x + (width * i) / 4;
+            self.draw_line(gx, y + 1, gx, y + height - 1, 0x1A2230);
+        }
 
-        // Draw navigation
-        // self.fill_rect(0, 32, width, 16, 0x444444); // Dark Gray
-        // let nav_text = "O Overview | V VMs | R Resources | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
-        // self.draw_text(10, 36, nav_text, 0xFFFFFF);
+        let dx = width as f64 / (len - 1) as f64;
+        let scale = if max_val > 0 { (height.saturating_sub(4)) as f64 / max_val as f64 } else { 0.0 };
+        let start_idx = if data.len() > len { data.len() - len } else { 0 };
+
+        for i in start_idx..data.len() - 1 {
+            let x_offset_1 = ((i - start_idx) as f64 * dx) as usize;
+            let x_offset_2 = ((i + 1 - start_idx) as f64 * dx) as usize;
+
+            let val1: u64 = data[i].into().min(max_val);
+            let y1 = y + height - 2 - (val1 as f64 * scale) as usize;
+
+            let val2: u64 = data[i + 1].into().min(max_val);
+            let y2 = y + height - 2 - (val2 as f64 * scale) as usize;
+
+            let px1 = (x + x_offset_1).min(x + width - 1);
+            let px2 = (x + x_offset_2).min(x + width - 1);
+
+            let area_col = Self::blend_color(color, 0x0E1218, 50);
+            for col_x in px1..=px2 {
+                let col_top = y1.min(y2);
+                let col_h = (y + height - 1).saturating_sub(col_top);
+                if col_h > 0 {
+                    self.fill_rect(col_x, col_top, 1, col_h, area_col);
+                }
+            }
+
+            self.draw_line_adv(px1, y1, px2, y2, color, 2, 0xFFFFFFFF);
+        }
+    }
+
+    // =========================================================================
+    // Qt6 / PyQt6 Shorthand Convenience Methods
+    // =========================================================================
+
+    pub fn q_button<'a>(&mut self, x: usize, y: usize, width: usize, height: usize, text: &'a str, focused: bool) -> QPushButton<'a> {
+        let btn = QPushButton::new(text).setGeometry(x, y, width, height).setFocus(focused);
+        btn.render(self);
+        btn
+    }
+
+    pub fn q_checkbox<'a>(&mut self, x: usize, y: usize, checked: bool, text: &'a str) -> QCheckBox<'a> {
+        let cb = QCheckBox::new(text).setGeometry(x, y).setChecked(checked);
+        cb.render(self);
+        cb
+    }
+
+    pub fn q_radio_button<'a>(&mut self, x: usize, y: usize, checked: bool, text: &'a str) -> QRadioButton<'a> {
+        let rb = QRadioButton::new(text).setGeometry(x, y).setChecked(checked);
+        rb.render(self);
+        rb
+    }
+
+    pub fn q_progress_bar(&mut self, x: usize, y: usize, width: usize, height: usize, value: usize, max: usize, color: QColor) -> QProgressBar {
+        let pb = QProgressBar::new().setGeometry(x, y, width, height).setRange(0, max).setValue(value).setColor(color);
+        pb.render(self);
+        pb
+    }
+
+    pub fn q_slider(&mut self, x: usize, y: usize, length: usize, value: usize, max: usize, vertical: bool) -> QSlider {
+        let ori = if vertical { QtOrientation::Vertical } else { QtOrientation::Horizontal };
+        let thick = 20;
+        let sl = QSlider::new().setGeometry(x, y, if vertical { thick } else { length }, if vertical { length } else { thick }).setOrientation(ori).setRange(0, max).setValue(value);
+        sl.render(self);
+        sl
+    }
+
+    pub fn q_spinbox<'a>(&mut self, x: usize, y: usize, width: usize, value: i32, suffix: &'a str) -> QSpinBox<'a> {
+        let sb = QSpinBox::new().setGeometry(x, y, width, 24).setValue(value).setSuffix(suffix);
+        sb.render(self);
+        sb
+    }
+
+    pub fn q_double_spinbox<'a>(&mut self, x: usize, y: usize, width: usize, value: f64, decimals: usize, suffix: &'a str) -> QDoubleSpinBox<'a> {
+        let sb = QDoubleSpinBox::new().setGeometry(x, y, width, 24).setValue(value).setDecimals(decimals).setSuffix(suffix);
+        sb.render(self);
+        sb
+    }
+
+    pub fn q_dial(&mut self, x: usize, y: usize, radius: usize, value: usize, max: usize) -> QDial {
+        let d = QDial::new().setGeometry(x, y, radius).setRange(0, max).setValue(value);
+        d.render(self);
+        d
+    }
+
+    pub fn q_lcd_number<'a>(&mut self, x: usize, y: usize, width: usize, height: usize, text: &'a str, color: QColor) -> QLCDNumber<'a> {
+        let lcd = QLCDNumber::new().setGeometry(x, y, width, height).display(text).setColor(color);
+        lcd.render(self);
+        lcd
+    }
+
+    pub fn q_list_view<'a>(&mut self, x: usize, y: usize, width: usize, height: usize, items: &'a [&'a str], selected: Option<usize>) -> QListView<'a> {
+        let lv = QListView::new().setGeometry(x, y, width, height).setItems(items).setCurrentIndex(selected);
+        lv.render(self);
+        lv
+    }
+
+    pub fn q_table_view<'a>(&mut self, x: usize, y: usize, width: usize, height: usize, headers: &'a [&'a str], rows: Vec<&'a [&'a str]>) -> QTableView<'a> {
+        let tv = QTableView::new().setGeometry(x, y, width, height).setHorizontalHeaderLabels(headers).setRows(rows);
+        tv.render(self);
+        tv
+    }
+
+    pub fn q_tree_view<'a>(&mut self, x: usize, y: usize, width: usize, height: usize, root: &'a TreeViewNode<'a>) -> QTreeView<'a> {
+        let tv = QTreeView::new().setGeometry(x, y, width, height).setRoot(root);
+        tv.render(self);
+        tv
+    }
+
+    pub fn q_chart<'a, T: Into<u64> + Copy>(&mut self, x: usize, y: usize, width: usize, height: usize, data: &'a [T], max_val: u64, color: QColor, len: usize) -> QLineSeries<'a, T> {
+        let ch = QLineSeries::new().setGeometry(x, y, width, height).setData(data).setMaxValue(max_val).setColor(color).setWindowSize(len);
+        ch.render(self);
+        ch
+    }
+
+    pub fn q_toast(&mut self, text: &str, duration_frames: &mut usize, yadj: usize) {
+        self.draw_toast(text, duration_frames, yadj);
+    }
+
+    pub fn q_painter(&mut self) -> QPainter<'_> {
+        QPainter::new(self)
     }
 
 

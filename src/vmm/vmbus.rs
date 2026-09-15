@@ -5,6 +5,7 @@
 use alloc::collections::VecDeque;
 use alloc::string::String;
 use alloc::vec::Vec;
+use crate::vdebug_autoprefix;
 
 #[derive(Debug, Clone)]
 pub enum VmBusMessage {
@@ -22,6 +23,7 @@ pub struct VmBus {
 
 impl VmBus {
     pub fn new(vm_id: u32) -> Self {
+        vdebug_autoprefix!("VmBus: initialized for VM {}", vm_id);
         Self {
             vm_id,
             queue: VecDeque::new(),
@@ -30,13 +32,17 @@ impl VmBus {
 
     /// Send a message over the bus. This is the primary communication method.
     pub fn send_message(&mut self, message: VmBusMessage) {
-        // Serialization and inspection would happen here in a real implementation.
+        vdebug_autoprefix!("VmBus: send message to VM {}", self.vm_id);
         self.queue.push_back(message);
     }
 
     /// Receive a message from the bus.
     pub fn receive_message(&mut self) -> Option<VmBusMessage> {
-        self.queue.pop_front()
+        let msg = self.queue.pop_front();
+        if msg.is_some() {
+            vdebug_autoprefix!("VmBus: message received from VM {}", self.vm_id);
+        }
+        msg
     }
 
     /// Return a snapshot of queued messages for security analysis/training.

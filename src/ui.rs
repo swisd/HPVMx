@@ -23,8 +23,10 @@ use uefi_raw::table::runtime::ResetType;
 
 mod graphics;
 pub mod pixel_graphics;
+pub mod qt;
 pub mod graphics3d;
 pub mod tabui;
+pub use qt::*;
 
 use crate::{handle_vm_command, hpvm_warn, message, terminal};
 use crate::pm::{Package, PackageManager, PackageType};

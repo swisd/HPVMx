@@ -310,6 +310,8 @@ pub fn dummy_waker() -> Waker {
 pub use crate::multipar::task::{TaskHandle, TaskId, ExecutorStats};
 use crate::x4::counter::cvt;
 use crate::x4::ops::to_u16s;
+// use crate::x4::counter::cvt;
+// use crate::x4::ops::to_u16s;
 
 /// A background task adapter tracking an asynchronous future offloaded to the multi-core executor.
 ///

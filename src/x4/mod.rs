@@ -3,5 +3,7 @@ pub mod counter;
 pub mod ops;
 pub mod cpu;
 pub mod objects;
-mod multicore;
+pub mod multicore;
+pub mod cookie;
+mod mixstate;
 

@@ -20,6 +20,8 @@ pub static mut LOGGING_SILENCED: bool = false;
 pub static mut VERBOSE_DEBUG_ENABLED: bool = true;
 pub static mut BUSY_TSC: u64 = 0;
 
+pub  static mut LOCK_AUTOPREFIX: bool = true;
+
 pub fn set_verbose_debug(enabled: bool) {
     unsafe {
         VERBOSE_DEBUG_ENABLED = enabled;
@@ -94,9 +96,32 @@ impl Persistable for Vec<LogEntry> {
         {
             unsafe {
             let msg = alloc::format!($($arg)*);
-            $crate::hpvmlog::push_log($color, $prefix, &msg);
+            if crate::hpvmlog::LOCK_AUTOPREFIX {
+                let tag = module_path!().strip_prefix("HPVMx::").unwrap_or(module_path!()).replace("::", ".");
+                $crate::hpvmlog::push_log($color, &tag, &msg);
+            } else {
+                $crate::hpvmlog::push_log($color, $prefix, &msg);
+            }
 
             if !crate::hpvmlog::LOGGING_SILENCED {
+                if crate::hpvmlog::LOCK_AUTOPREFIX {
+                    uefi::system::with_stdout(|stdout| {
+                use core::fmt::Write;
+                let _ = stdout.set_color($color, uefi::proto::console::text::Color::Black);
+                let tag = module_path!().strip_prefix("HPVMx::").unwrap_or(module_path!()).replace("::", ".");
+                let _ = write!(stdout, "[{}] ", tag);
+                match $color {
+                    uefi::proto::console::text::Color::Yellow => {}
+                    uefi::proto::console::text::Color::Red => {}
+                    _ => {let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);}
+                }
+                let _ = write!(stdout, "{}", msg);
+                let _ = write!(stdout, "\n");
+                // let _ = write!(stdout, "{}MB", $crate::hpvmlog::getmem());
+                // let _ = write!(stdout, "\n\n");
+                let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
+            })
+                } else {
             uefi::system::with_stdout(|stdout| {
                 use core::fmt::Write;
                 let _ = stdout.set_color($color, uefi::proto::console::text::Color::Black);
@@ -112,6 +137,7 @@ impl Persistable for Vec<LogEntry> {
                 // let _ = write!(stdout, "\n\n");
                 let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
             })
+                    }
                 }
         }
             }
@@ -156,12 +182,56 @@ impl Persistable for Vec<LogEntry> {
     ($tag:expr, $($arg:tt)*) => {
         {
             unsafe {
+                let msg = alloc::format!($($arg)*);
+                if crate::hpvmlog::LOCK_AUTOPREFIX {
+                    let tag = module_path!().strip_prefix("HPVMx::").unwrap_or(module_path!()).replace("::", ".");
+                    $crate::hpvmlog::push_log(uefi::proto::console::text::Color::White, &tag, &msg);
+                } else {
+                    $crate::hpvmlog::push_log(uefi::proto::console::text::Color::White, $tag, &msg);
+                }
                 if crate::hpvmlog::VERBOSE_DEBUG_ENABLED && !crate::hpvmlog::LOGGING_SILENCED {
+                    if crate::hpvmlog::LOCK_AUTOPREFIX {
+                        let msg = alloc::format!($($arg)*);
+                    uefi::system::with_stdout(|stdout| {
+                        use core::fmt::Write;
+                        let _ = stdout.set_color(uefi::proto::console::text::Color::LightBlue, uefi::proto::console::text::Color::Black);
+                        let tag = module_path!().strip_prefix("HPVMx::").unwrap_or(module_path!()).replace("::", ".");
+                        let _ = write!(stdout, "[{}] ", tag);
+                        let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
+                        let _ = write!(stdout, "{}", msg);
+                        let _ = write!(stdout, "\n");
+                    });
+                    } else {
                     let msg = alloc::format!($($arg)*);
                     uefi::system::with_stdout(|stdout| {
                         use core::fmt::Write;
                         let _ = stdout.set_color(uefi::proto::console::text::Color::LightBlue, uefi::proto::console::text::Color::Black);
                         let _ = write!(stdout, "[{}] ", $tag);
+                        let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
+                        let _ = write!(stdout, "{}", msg);
+                        let _ = write!(stdout, "\n");
+                    });
+                        }
+                }
+            }
+        }
+    };
+}
+
+
+#[macro_export] macro_rules! vdebug_autoprefix {
+    ($($arg:tt)*) => {
+        {
+            unsafe {
+                let msg = alloc::format!($($arg)*);
+                let tag = module_path!().strip_prefix("HPVMx::").unwrap_or(module_path!()).replace("::", ".");
+                $crate::hpvmlog::push_log(uefi::proto::console::text::Color::White, &tag, &msg);
+                if crate::hpvmlog::VERBOSE_DEBUG_ENABLED && !crate::hpvmlog::LOGGING_SILENCED {
+                    let msg = alloc::format!($($arg)*);
+                    uefi::system::with_stdout(|stdout| {
+                        use core::fmt::Write;
+                        let _ = stdout.set_color(uefi::proto::console::text::Color::LightBlue, uefi::proto::console::text::Color::Black);
+                        let _ = write!(stdout, "[{}] ", tag);
                         let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
                         let _ = write!(stdout, "{}", msg);
                         let _ = write!(stdout, "\n");

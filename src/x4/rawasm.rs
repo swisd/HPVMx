@@ -19,7 +19,7 @@ macro_rules! define_api {
             pub type $name = extern "system" fn($($arg_name: $arg_ty),*) -> $ret_ty;
 
             // 2. Generate a dedicated helper function for safe, type-inferred casting
-            #[inline(always)]
+            // #[inline(always)]
             pub unsafe fn $name(addr: FARPROC) -> Option<$name> {
                 if addr.is_none() {
                     None
@@ -40,7 +40,7 @@ macro_rules! far_fn {
             pub type $name = extern $abi fn($($arg_name: $arg_ty),*) -> $ret_ty;
 
             // 2. Generate a dedicated helper function for safe, type-inferred casting
-            #[inline(always)]
+            // #[inline(always)]
             pub unsafe fn $name(addr: Option<$name>) -> Option<$name> {
                 if addr.is_none() {
                     None
@@ -61,7 +61,7 @@ macro_rules! far_fn_addr {
             pub type $name = extern $abi fn($($arg_name: $arg_ty),*) -> $ret_ty;
 
             // 2. Generate a dedicated helper function for safe, type-inferred casting
-            #[inline(always)]
+            // #[inline(always)]
             pub unsafe fn $name(addr: u64) -> Option<$name> {
                 if addr/*.is_zero()*/ == 0 {
                     None
@@ -81,7 +81,7 @@ macro_rules! close_fn {
                 pub type $name = fn($($arg_name: $arg_ty),*) -> $ret_ty;
 
             // 2. Generate a dedicated helper function for safe, type-inferred casting
-            #[inline(always)]
+            // #[inline(always)]
             pub unsafe fn $name(addr: Option<$name>) -> Option<$name> {
                 if addr.is_none() {
                     None

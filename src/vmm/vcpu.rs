@@ -1,6 +1,7 @@
 //! Virtual CPU management
 
 use bitflags::bitflags;
+use crate::vdebug_autoprefix;
 
 bitflags! {
     /// vCPU execution flags
@@ -29,6 +30,7 @@ pub struct VirtualCpu {
 impl VirtualCpu {
     /// Create a new virtual CPU
     pub fn new(id: u32) -> Self {
+        vdebug_autoprefix!("VCpu: initialized vCPU {}", id);
         Self {
             id,
             flags: VCpuFlags::empty(),
@@ -51,11 +53,13 @@ impl VirtualCpu {
 
     /// Halt the vCPU
     pub fn halt(&mut self) {
+        vdebug_autoprefix!("VCpu: vCPU {} halted", self.id);
         self.flags.insert(VCpuFlags::HALTED);
     }
 
     /// Resume the vCPU
     pub fn resume(&mut self) {
+        vdebug_autoprefix!("VCpu: vCPU {} resumed", self.id);
         self.flags.remove(VCpuFlags::HALTED);
     }
 
@@ -66,6 +70,7 @@ impl VirtualCpu {
 
     /// Inject an interrupt
     pub fn inject_interrupt(&mut self) {
+        vdebug_autoprefix!("VCpu: vCPU {} interrupt injected", self.id);
         self.interrupt_pending = true;
         self.flags.insert(VCpuFlags::INTERRUPT_PENDING);
     }

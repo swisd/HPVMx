@@ -2,6 +2,7 @@ use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::arch::x86_64::_rdtsc;
 use core::ffi::c_void;
 use core::ptr::null;
@@ -130,15 +131,16 @@ pub fn set_name(name: String) {
     if let Ok(utf16) = to_u16s(name) {
         unsafe {
             // SAFETY: the vec returned by `to_u16s` ends with a zero value
-            set_name_u16(&utf16)
+            set_name_u16(utf16)
         }
     };
 }
 
+
 /// # Safety
 ///
 /// `name` must end with a zero value
-pub unsafe fn set_name_u16(name: &[u16]) {
+pub unsafe fn set_name_u16(name: Vec<u16>) {
     unsafe { /*far_fn set_thread_description(far_fn get_current_thread(), name.as_ptr())*/ };
 }
 

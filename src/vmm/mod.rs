@@ -16,5 +16,11 @@ pub mod vmbus;
 pub mod hwbus;
 pub mod security;
 pub mod mapper;
+pub mod cvm;
+pub mod container;
+pub mod interface;
+pub mod cvm_kernel;
+pub mod cvmbus;
+pub mod container_engine;
 
 pub use vmm::HypervisorManager;

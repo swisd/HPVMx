@@ -13,7 +13,7 @@ use crate::vmm::partitioner::HardwarePartitioner;
 use crate::vmm::security::{DeepLevelSecurity, AutolyticProtocol};
 use crate::vmm::vmbus::VmBusMessage;
 use crate::dls::{SoftwareAnalysisMemory, SoftwareAnalysisSample};
-use crate::{hpvm_info, hpvm_error, hpvm_log, vdebug};
+use crate::{hpvm_info, hpvm_error, hpvm_log, vdebug, vdebug_autoprefix};
 use crate::filesystem::FileSystem;
 use uefi::proto::console::text::Color;
 use uefi::mem::memory_map::MemoryMap;

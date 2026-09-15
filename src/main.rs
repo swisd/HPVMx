@@ -47,6 +47,8 @@ mod xmlui;
 mod multipar;
 mod x4;
 mod version;
+mod hosting;
+mod testmodules;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -165,7 +167,7 @@ fn main() -> Status {
 
     // 16KB is usually enough for most servers; 32KB is safe for high-end systems.
     let mut map_buffer = [0u8; 32768];
-    crate::vdebug!("page", "set map buffer to [0u8; 32768]");
+    crate::vdebug!("page", "set map buffer to {}", map_buffer.len());
 
 
     let SYSTEM_TABLE: *mut SystemTable = uefi::table::system_table_raw().unwrap().as_ptr();
