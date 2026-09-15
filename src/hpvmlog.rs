@@ -219,15 +219,119 @@ impl Persistable for Vec<LogEntry> {
 }
 
 
+pub trait AsColor {
+    fn as_color(&self) -> Color;
+}
+
+impl AsColor for Color {
+    #[inline]
+    fn as_color(&self) -> Color {
+        *self
+    }
+}
+
+impl AsColor for u8 {
+    #[inline]
+    fn as_color(&self) -> Color {
+        color_from_index(*self as usize)
+    }
+}
+
+impl AsColor for u16 {
+    #[inline]
+    fn as_color(&self) -> Color {
+        color_from_index(*self as usize)
+    }
+}
+
+impl AsColor for u32 {
+    #[inline]
+    fn as_color(&self) -> Color {
+        color_from_index(*self as usize)
+    }
+}
+
+impl AsColor for usize {
+    #[inline]
+    fn as_color(&self) -> Color {
+        color_from_index(*self)
+    }
+}
+
+impl AsColor for i32 {
+    #[inline]
+    fn as_color(&self) -> Color {
+        if *self < 0 {
+            Color::White
+        } else {
+            color_from_index(*self as usize)
+        }
+    }
+}
+
+pub const fn color_from_index(index: usize) -> Color {
+    match index {
+        0 => Color::Black,
+        1 => Color::Blue,
+        2 => Color::Green,
+        3 => Color::Cyan,
+        4 => Color::Red,
+        5 => Color::Magenta,
+        6 => Color::Brown,
+        7 => Color::LightGray,
+        8 => Color::DarkGray,
+        9 => Color::LightBlue,
+        10 => Color::LightGreen,
+        11 => Color::LightCyan,
+        12 => Color::LightRed,
+        13 => Color::LightMagenta,
+        14 => Color::Yellow,
+        15 => Color::White,
+        _ => Color::White,
+    }
+}
+
 #[macro_export] macro_rules! vdebug_autoprefix {
-    ($($arg:tt)*) => {
+    ($color_idx:literal, $fmt:literal $(, $($arg:tt)*)?) => {
         {
             unsafe {
-                let msg = alloc::format!($($arg)*);
+                use $crate::hpvmlog::AsColor;
+                let color = ($color_idx).as_color();
+                let msg = alloc::format!($fmt $(, $($arg)*)?);
+                let tag = module_path!().strip_prefix("HPVMx::").unwrap_or(module_path!()).replace("::", ".");
+                $crate::hpvmlog::push_log(color, &tag, &msg);
+                if crate::hpvmlog::VERBOSE_DEBUG_ENABLED && !crate::hpvmlog::LOGGING_SILENCED {
+                    let msg = alloc::format!($fmt $(, $($arg)*)?);
+                    uefi::system::with_stdout(|stdout| {
+                        use core::fmt::Write;
+                        let _ = stdout.set_color(color, uefi::proto::console::text::Color::Black);
+                        let _ = write!(stdout, "[{}] ", tag);
+                        match color {
+                            uefi::proto::console::text::Color::Yellow
+                            | uefi::proto::console::text::Color::Red
+                            | uefi::proto::console::text::Color::LightRed
+                            | uefi::proto::console::text::Color::LightGreen
+                            | uefi::proto::console::text::Color::Green => {}
+                            _ => {
+                                let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
+                            }
+                        }
+                        let _ = write!(stdout, "{}", msg);
+                        let _ = write!(stdout, "\n");
+                        let _ = stdout.set_color(uefi::proto::console::text::Color::White, uefi::proto::console::text::Color::Black);
+                    });
+                }
+            }
+        }
+    };
+    ($fmt:literal $(, $($arg:tt)*)?) => {
+        {
+            unsafe {
+                let msg = alloc::format!($fmt $(, $($arg)*)?);
                 let tag = module_path!().strip_prefix("HPVMx::").unwrap_or(module_path!()).replace("::", ".");
                 $crate::hpvmlog::push_log(uefi::proto::console::text::Color::White, &tag, &msg);
                 if crate::hpvmlog::VERBOSE_DEBUG_ENABLED && !crate::hpvmlog::LOGGING_SILENCED {
-                    let msg = alloc::format!($($arg)*);
+                    let msg = alloc::format!($fmt $(, $($arg)*)?);
                     uefi::system::with_stdout(|stdout| {
                         use core::fmt::Write;
                         let _ = stdout.set_color(uefi::proto::console::text::Color::LightBlue, uefi::proto::console::text::Color::Black);

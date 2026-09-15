@@ -7686,77 +7686,45 @@
     },
     "src/hpvmlog.rs": {
       "path": "src/hpvmlog.rs",
-      "purpose": "Kernel and hypervisor logging facility with severity levels and ring buffer output.",
+      "purpose": "Logging subsystem, buffer management, color index conversion and colored vdebug_autoprefix macro definitions.",
       "key_regions": [
         {
-          "lines": "1-162",
-          "description": "Module imports, extern crates, and prelude dependencies"
+          "lines": "1-93",
+          "description": "LogEntry struct, buffer lifecycle, persistence and push_log"
         },
         {
-          "lines": "10-10",
-          "description": "Core data structures, enums, state definitions, and types"
+          "lines": "94-221",
+          "description": "hpvm_log, hpvm_info, hpvm_warn, hpvm_error and vdebug macros"
         },
         {
-          "lines": "23-185",
-          "description": "Functional implementation, logic routines, and public API interfaces"
+          "lines": "222-293",
+          "description": "AsColor trait and color_from_index mapping helper"
+        },
+        {
+          "lines": "294-350",
+          "description": "vdebug_autoprefix macro with color index support and memory helper"
         }
       ],
       "objects": {
-        "LogEntry": {
-          "type": "pub struct",
-          "args": {
-            "level": "Color",
-            "tag": "String",
-            "message": "String"
-          },
-          "returns": "Self"
-        },
-        "set_verbose_debug": {
-          "type": "pub fn",
-          "args": {
-            "enabled": "bool"
-          },
-          "returns": "()"
-        },
-        "verbose_debug_enabled": {
-          "type": "pub fn",
+        "AsColor": {
+          "type": "pub trait",
           "args": {},
-          "returns": "bool"
+          "returns": "Color"
         },
-        "init_log_buffer": {
-          "type": "pub fn",
+        "color_from_index": {
+          "type": "pub const fn",
+          "args": {
+            "index": "usize"
+          },
+          "returns": "Color"
+        },
+        "vdebug_autoprefix": {
+          "type": "macro_rules",
           "args": {},
           "returns": "()"
-        },
-        "push_log": {
-          "type": "pub fn",
-          "args": {
-            "level": "Color",
-            "tag": "&str",
-            "msg": "&str"
-          },
-          "returns": "()"
-        },
-        "get_logs": {
-          "type": "pub fn",
-          "args": {},
-          "returns": "Vec<(Color, String, String)>"
-        },
-        "get_log_buffer": {
-          "type": "pub fn",
-          "args": {},
-          "returns": "&'static Option<Vec<LogEntry>>"
-        },
-        "getmem": {
-          "type": "pub fn",
-          "args": {},
-          "returns": "u32"
         }
       },
-      "dependencies": [
-        "src/filesystem.rs",
-        "src/state.rs"
-      ]
+      "dependencies": []
     },
     "src/hpvmx_image.png": {
       "path": "src/hpvmx_image.png",
@@ -8281,112 +8249,40 @@
     },
     "src/main.rs": {
       "path": "src/main.rs",
-      "purpose": "UEFI Entry point for HPVMx kernel, environment initialization, boot splash, and main dispatch loop.",
+      "purpose": "UEFI OS entry point, initialization sequence, memory/paging setup, self-tests startup runner, and shell main loop.",
       "key_regions": [
         {
-          "lines": "10-104",
-          "description": "Module imports, extern crates, and prelude dependencies"
+          "lines": "140-270",
+          "description": "UEFI initialization, heap, memory map, GDT, IDT, paging, devices, package manager"
         },
         {
-          "lines": "63-1059",
-          "description": "Functional implementation, logic routines, and public API interfaces"
+          "lines": "275-305",
+          "description": "Startup self-tests (async, multipar, MP topology, boot/VMM/hosting self-tests)"
+        },
+        {
+          "lines": "306-380",
+          "description": "Shell banner, dashboard autostart check, and interactive shell loop"
         }
       ],
       "objects": {
-        "get_total_physical_memory_mb": {
-          "type": "pub fn",
-          "args": {},
-          "returns": "u32"
-        },
         "main": {
           "type": "fn",
           "args": {},
           "returns": "Status"
         },
-        "handle_vm_command": {
-          "type": "fn",
-          "args": {
-            "command": "&[&str]"
-          },
-          "returns": "()"
-        },
-        "run_asm_application": {
-          "type": "fn",
-          "args": {
-            "asm_path": "&str"
-          },
-          "returns": "()"
-        },
-        "handle_vmm_command": {
-          "type": "fn",
-          "args": {
-            "command": "&[&str]"
-          },
-          "returns": "()"
-        },
-        "run_efi_application": {
-          "type": "fn",
-          "args": {
-            "efi_path": "&str",
-            "args": "&[&str]"
-          },
-          "returns": "()"
-        },
-        "init_mouse": {
+        "get_total_physical_memory_mb": {
           "type": "pub fn",
           "args": {},
-          "returns": "()"
-        },
-        "init_mouse_deep_scan": {
-          "type": "pub fn",
-          "args": {},
-          "returns": "()"
-        },
-        "calibrate_tsc": {
-          "type": "pub fn",
-          "args": {},
-          "returns": "()"
+          "returns": "u32"
         }
       },
       "dependencies": [
-        "src/apps/mod.rs",
-        "src/backgrounds/mod.rs",
-        "src/binary_loader.rs",
-        "src/c_stems.rs",
-        "src/consts.rs",
-        "src/cpucheck.rs",
-        "src/devices/mod.rs",
-        "src/dls/mod.rs",
+        "src/testmodules/boot.rs",
+        "src/testmodules/mod.rs",
         "src/env.rs",
-        "src/filesystem.rs",
-        "src/gdt.rs",
-        "src/graphics.rs",
-        "src/hardware/mod.rs",
-        "src/hpvmlog.rs",
-        "src/imx.rs",
-        "src/input.rs",
-        "src/interrupts.rs",
-        "src/kernel.rs",
-        "src/loader.rs",
-        "src/logiclang_int.rs",
-        "src/micro_c/mod.rs",
-        "src/modules/mod.rs",
         "src/multipar/mod.rs",
-        "src/page.rs",
-        "src/paging.rs",
-        "src/pe.rs",
-        "src/pm/mod.rs",
-        "src/registry.rs",
-        "src/rng.rs",
-        "src/state.rs",
-        "src/terminal.rs",
-        "src/tools.rs",
-        "src/types.rs",
-        "src/ui.rs",
-        "src/version.rs",
-        "src/vmm/mod.rs",
-        "src/x4/mod.rs",
-        "src/xmlui/mod.rs"
+        "src/hardware/cpu/mp.rs",
+        "src/terminal.rs"
       ]
     },
     "src/micro_c/arch/arm64.rs": {
@@ -11098,571 +10994,68 @@
     },
     "src/ui.rs": {
       "path": "src/ui.rs",
-      "purpose": "UI root subsystem module aggregator and windowing coordinator.",
+      "purpose": "Dashboard UI system, drawing engine, input handling, window manager, and state definitions for Virtualization, VMs, Containers, CVMs, and hardware.",
       "key_regions": [
         {
-          "lines": "8-3877",
-          "description": "Module imports, extern crates, and prelude dependencies"
+          "lines": "1-50",
+          "description": "Enums, constants, DashboardTab, VirtSubTab, ContainerDisplayInfo, CvmDisplayInfo"
         },
         {
-          "lines": "39-2220",
-          "description": "Core data structures, enums, state definitions, and types"
+          "lines": "500-650",
+          "description": "DashboardUI struct definition, state fields, and constructors"
         },
         {
-          "lines": "201-5070",
-          "description": "Functional implementation, logic routines, and public API interfaces"
+          "lines": "800-1100",
+          "description": "DashboardUI drawing routine and tab rendering delegation"
+        },
+        {
+          "lines": "4350-4550",
+          "description": "DashboardUI input handling and tab routing"
         }
       ],
       "objects": {
-        "FileEntry": {
+        "VirtSubTab": {
+          "type": "pub enum",
+          "args": {},
+          "returns": "()"
+        },
+        "ContainerDisplayInfo": {
           "type": "pub struct",
           "args": {
+            "id": "u64",
             "name": "String",
-            "size": "u64",
-            "is_dir": "bool"
+            "image": "String",
+            "state": "String",
+            "cpu_shares": "u32",
+            "memory_mb": "u32",
+            "port_count": "usize"
           },
-          "returns": "Self"
+          "returns": "()"
         },
-        "DeviceEntry": {
-          "type": "pub struct",
-          "args": {
-            "name": "String",
-            "path": "String"
-          },
-          "returns": "Self"
-        },
-        "DeviceCategory": {
-          "type": "pub struct",
-          "args": {
-            "name": "String",
-            "devices": "Vec<DeviceEntry>",
-            "expanded": "bool",
-            "icon": "String"
-          },
-          "returns": "Self"
-        },
-        "DiskTabInfo": {
-          "type": "pub struct",
-          "args": {
-            "alias": "String",
-            "volume_label": "String",
-            "total_bytes": "u64",
-            "free_bytes": "u64",
-            "block_size": "u32",
-            "media_type": "String",
-            "handle": "Option<uefi::Handle>"
-          },
-          "returns": "Self"
-        },
-        "FilePendingAction": {
-          "type": "pub enum",
-          "args": {
-            "Rename": "Unit",
-            "Copy": "Unit",
-            "Move": "Unit",
-            "Delete": "Unit"
-          },
-          "returns": "Self"
-        },
-        "DashboardUI": {
-          "type": "pub struct",
-          "args": {
-            "selected_tab": "DashboardTab",
-            "vms": "Vec<VmDisplayInfo>",
-            "resources": "SystemResources",
-            "scroll_offset": "usize",
-            "console_scroll_offset": "usize",
-            "console_h_scroll_offset": "usize",
-            "cursor": "crate::graphics::Cursor",
-            "current_path": "String",
-            "files": "Vec<FileEntry>",
-            "selected_file_idx": "usize",
-            "storage_disks": "Vec<DiskTabInfo>",
-            "selected_disk_idx": "usize",
-            "categories": "Vec<DeviceCategory>",
-            "selected_device_idx": "usize",
-            "device_action_idx": "usize",
-            "exit_requested": "bool",
-            "new_vm_name": "String",
-            "new_vm_memory_mb": "u32",
-            "new_vm_vcpus": "u32",
-            "create_vm_focus_idx": "usize",
-            "vm_action_idx": "usize",
-            "selected_vm_idx": "usize",
-            "filesys_action_idx": "usize",
-            "filesys_pending_action": "Option<FilePendingAction>",
-            "filesys_new_counter": "usize",
-            "filesys_rename_buffer": "String",
-            "term_selected": "bool",
-            "term_buf": "String",
-            "editor": "Option<TextEditor>",
-            "package_manager": "PackageManager",
-            "iter": "u64",
-            "active_apps": "Vec<crate::env::SteppedApplicationContext>",
-            "focused_process_idx": "Option<usize>",
-            "selected_app_idx": "usize",
-            "app_window_position": "(usize",
-            "ctrl_mode": "bool",
-            "alt_mode": "bool",
-            "fn_mode": "bool",
-            "selected_package_idx": "usize",
-            "package_action_idx": "usize",
-            "selected_network_action_idx": "usize",
-            "network_target": "String",
-            "selected_settings_category_idx": "usize",
-            "selected_settings_idx": "usize",
-            "settings": "UiSettings",
-            "status_line": "String",
-            "command_history": "Vec<String>",
-            "history_idx": "Option<usize>",
-            "notifications": "Vec<(String",
-            "command_palette_active": "bool",
-            "command_palette_query": "String",
-            "command_palette_selected": "usize",
-            "command_palette_scroll_offset": "usize",
-            "startup_menu_active": "bool",
-            "selected_startup_app": "usize",
-            "glitch_y": "usize",
-            "pci_devices": "Vec<crate::hardware::pci::PciDeviceInfo>",
-            "tab_apps": "BTreeMap<DashboardTab",
-            "resmon_tab": "ResourceMonitorTab",
-            "cycles": "usize",
-            "selected_process_idx": "usize",
-            "dragging_window": "Option<(usize"
-          },
-          "returns": "Self"
-        },
-        "UiSettings": {
-          "type": "pub struct",
-          "args": {
-            "extra_debug_info": "bool",
-            "folder_absolute_sizes": "bool",
-            "state_save_restore": "bool",
-            "extended_symbol_library": "bool",
-            "ring0_udmi_udxi": "bool",
-            "controllang_support": "bool",
-            "pg_vshaders": "bool",
-            "experimental_mem_comp": "bool",
-            "auto_refresh_storage": "bool",
-            "show_hidden_files": "bool",
-            "general_profile": "usize",
-            "boot_target": "usize",
-            "interface_density": "usize",
-            "vm_safety_policy": "usize",
-            "network_profile": "usize",
-            "storage_policy": "usize",
-            "package_policy": "usize",
-            "developer_level": "usize",
-            "security_policy": "usize",
-            "ui_scaling": "usize",
-            "terminal_font": "usize",
-            "pg_scanlines": "bool",
-            "pg_dither": "bool",
-            "pg_glitch": "bool",
-            "pg_aberration": "usize"
-          },
-          "returns": "Self"
-        },
-        "DashboardTab": {
-          "type": "pub enum",
-          "args": {
-            "Overview": "Unit",
-            "VirtualMachines": "Unit",
-            "Resources": "Unit",
-            "Storage": "Unit",
-            "Network": "Unit",
-            "Console": "Unit",
-            "Devices": "Unit",
-            "Test": "Unit",
-            "CreateVM": "Unit",
-            "Editor": "Unit",
-            "Settings": "Unit",
-            "Packages": "Unit",
-            "Apps": "Unit",
-            "SystemInfo": "Unit"
-          },
-          "returns": "Self"
-        },
-        "from_u8": {
-          "type": "pub fn",
-          "args": {
-            "val": "u8"
-          },
-          "returns": "Self"
-        },
-        "EditorMode": {
-          "type": "pub enum",
-          "args": {
-            "Normal": "Unit",
-            "Insert": "Unit",
-            "Command": "Unit"
-          },
-          "returns": "Self"
-        },
-        "ResourceMonitorTab": {
-          "type": "pub enum",
-          "args": {
-            "Resources": "Unit",
-            "Processes": "Unit",
-            "SystemInfo": "Unit"
-          },
-          "returns": "Self"
-        },
-        "TextEditor": {
-          "type": "pub struct",
-          "args": {
-            "file_path": "String",
-            "buffer": "Vec<u8>",
-            "cursor_pos": "(usize",
-            "scroll_offset": "usize",
-            "mode": "EditorMode",
-            "is_hex": "bool",
-            "command_buffer": "String"
-          },
-          "returns": "Self"
-        },
-        "new": {
-          "type": "pub fn",
-          "args": {
-            "path": "String",
-            "data": "Vec<u8>"
-          },
-          "returns": "Self"
-        },
-        "VmDisplayInfo": {
+        "CvmDisplayInfo": {
           "type": "pub struct",
           "args": {
             "id": "u32",
             "name": "String",
+            "kernel": "String",
             "state": "String",
-            "cpu_usage": "u32",
-            "memory_usage_mb": "u32",
-            "disk_usage_mb": "u32",
-            "uptime_seconds": "u64"
+            "memory_mb": "u32",
+            "vcpus": "u32",
+            "container_count": "usize",
+            "bus_channels": "usize"
           },
-          "returns": "Self"
+          "returns": "()"
         },
-        "SystemResources": {
+        "DashboardUI": {
           "type": "pub struct",
-          "args": {
-            "total_memory_mb": "u32",
-            "used_memory_mb": "u32",
-            "cpu_count": "u32",
-            "cpu_usage": "u32",
-            "cpu_core_usage": "Vec<u32>",
-            "disk_read_kbps": "u64",
-            "disk_write_kbps": "u64",
-            "net_rx_kbps": "u64",
-            "net_tx_kbps": "u64",
-            "gpu_usage": "u32",
-            "cpu_history": "Vec<u32>",
-            "cpu_core_history": "Vec<Vec<u32>>",
-            "mem_history": "Vec<u32>",
-            "disk_read_history": "Vec<u64>",
-            "disk_write_history": "Vec<u64>",
-            "net_rx_history": "Vec<u64>",
-            "net_tx_history": "Vec<u64>",
-            "gpu_history": "Vec<u32>",
-            "fps_history": "Vec<u32>",
-            "ft_ms_history": "Vec<u32>",
-            "fps": "usize",
-            "frame_ms": "usize"
-          },
-          "returns": "Self"
-        },
-        "add_vm": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self",
-            "vm": "VmDisplayInfo"
-          },
-          "returns": "()"
-        },
-        "refresh_vms": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "run_terminal_command_string": {
-          "type": "fn",
-          "args": {
-            "&mut self": "self",
-            "command": "&str"
-          },
-          "returns": "()"
-        },
-        "set_resources": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self",
-            "resources": "SystemResources"
-          },
-          "returns": "()"
-        },
-        "draw": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "select_disk_tab": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self",
-            "idx": "usize"
-          },
-          "returns": "()"
-        },
-        "refresh_devices": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "refresh_storage": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "TempDisk": {
-          "type": "struct",
-          "args": {
-            "handle": "uefi::Handle",
-            "volume_label": "String",
-            "total_bytes": "u64",
-            "free_bytes": "u64",
-            "block_size": "u32",
-            "media_type": "String"
-          },
-          "returns": "Self"
-        },
-        "navigate_up_path": {
-          "type": "pub fn",
-          "args": {
-            "current_path": "&str"
-          },
-          "returns": "String"
-        },
-        "get_create_vm_data": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "(String, u32, u32)"
-        },
-        "reset_create_vm_data": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "settings_rows": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "Vec<(String, String, bool, bool)>"
-        },
-        "package_names": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "Vec<String>"
-        },
-        "selected_package_name": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "Option<String>"
-        },
-        "execute_package_action": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "execute_network_action": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "toggle_selected_setting": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "publish_selected_setting": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "get_selected_vm_id": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "Option<u32>"
-        },
-        "get_selected_action": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "usize"
-        },
-        "is_create_vm_requested": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "bool"
-        },
-        "set_tab": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self",
-            "tab": "DashboardTab"
-          },
-          "returns": "()"
-        },
-        "get_tab": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "DashboardTab"
-        },
-        "handle_startup_menu_input": {
-          "type": "fn",
-          "args": {
-            "&mut self": "self",
-            "key": "Key"
-          },
-          "returns": "bool"
-        },
-        "add_vm_console_window": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self",
-            "vm_id": "u32",
-            "media_path": "&str",
-            "media_kind": "&str"
-          },
-          "returns": "()"
-        },
-        "handle_window_keybind": {
-          "type": "fn",
-          "args": {
-            "&mut self": "self",
-            "key": "Key"
-          },
-          "returns": "bool"
-        },
-        "handle_dashboard_chrome_input": {
-          "type": "fn",
-          "args": {
-            "&mut self": "self",
-            "key": "Key"
-          },
-          "returns": "()"
-        },
-        "total_process_count": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "usize"
-        },
-        "kill_selected_process": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "focus_selected_process": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "toggle_min_selected_process": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "handle_mouse": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self",
-            "width": "usize",
-            "height": "usize"
-          },
-          "returns": "()"
-        },
-        "handle_input": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self",
-            "key": "Key"
-          },
-          "returns": "()"
-        },
-        "exit_requested": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "bool"
-        },
-        "ui_error": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self",
-            "typ": "usize"
-          },
-          "returns": "()"
-        },
-        "ui_error_with_detail": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self",
-            "typ": "usize",
-            "detail": "Option<&str>"
-          },
+          "args": {},
           "returns": "()"
         }
       },
       "dependencies": [
+        "src/ui/tabui.rs",
         "src/env.rs",
-        "src/graphics.rs",
-        "src/input.rs",
-        "src/pm/mod.rs",
-        "src/terminal.rs",
-        "src/ui/graphics.rs",
-        "src/ui/graphics3d.rs",
-        "src/ui/pixel_graphics.rs",
-        "src/ui/qt.rs",
-        "src/ui/tabui.rs"
+        "src/pm.rs"
       ]
     },
     "src/ui/graphics.rs": {
@@ -13752,22 +13145,31 @@
     },
     "src/ui/tabui.rs": {
       "path": "src/ui/tabui.rs",
-      "purpose": "Tabbed dashboard UI container, navigation bar, and tab switching controller.",
+      "purpose": "Tab implementations for Dashboard UI including Virtualization (VMs, Containers, CVMs, Architecture topology), Resources, Apps, and settings.",
       "key_regions": [
         {
-          "lines": "1-4770",
-          "description": "Module imports, extern crates, and prelude dependencies"
+          "lines": "1-85",
+          "description": "Unified tab dispatchers: draw_tab, handle_tab_input, update_tab_logic"
         },
         {
-          "lines": "46-4790",
-          "description": "Functional implementation, logic routines, and public API interfaces"
-        },
-        {
-          "lines": "150-4589",
-          "description": "Core data structures, enums, state definitions, and types"
+          "lines": "430-800",
+          "description": "virtualization module: draw_vms, draw_containers, draw_cvms, draw_architecture, input, logic, and X_Virtualization"
         }
       ],
       "objects": {
+        "draw_tab": {
+          "type": "pub fn",
+          "args": {
+            "tab": "DashboardTab",
+            "ui": "&mut DashboardUI",
+            "pg": "&mut PixelGraphics",
+            "origin_x": "usize",
+            "origin_y": "usize",
+            "width": "usize",
+            "height": "usize"
+          },
+          "returns": "()"
+        },
         "handle_tab_input": {
           "type": "pub fn",
           "args": {
@@ -13777,252 +13179,22 @@
           },
           "returns": "bool"
         },
-        "update_tab_logic": {
-          "type": "pub fn",
-          "args": {
-            "tab": "DashboardTab",
-            "ui": "&mut DashboardUI"
-          },
-          "returns": "()"
-        },
-        "draw": {
-          "type": "pub fn",
-          "args": {
-            "ui": "&DashboardUI",
-            "pg": "&mut PixelGraphics",
-            "_x": "usize",
-            "_y": "usize",
-            "_width": "usize",
-            "_height": "usize"
-          },
-          "returns": "()"
-        },
-        "logic": {
-          "type": "pub fn",
-          "args": {
-            "_ui": "&mut DashboardUI"
-          },
-          "returns": "()"
-        },
-        "input": {
-          "type": "pub fn",
-          "args": {
-            "ui": "&mut DashboardUI",
-            "key": "Key"
-          },
-          "returns": "bool"
-        },
-        "X_Overview": {
-          "type": "pub struct",
-          "args": {
-            "cpu_count": "u32",
-            "cpu_usage": "u32",
-            "used_memory_mb": "u32",
-            "total_memory_mb": "u32",
-            "disk_read_kbps": "u32",
-            "disk_write_kbps": "u32",
-            "net_rx_kbps": "u32",
-            "net_tx_kbps": "u32",
-            "running_vms": "usize",
-            "total_vms": "usize",
-            "files_count": "usize",
-            "categories_count": "usize"
-          },
-          "returns": "Self"
-        },
-        "new": {
-          "type": "pub fn",
+        "virtualization": {
+          "type": "pub mod",
           "args": {},
-          "returns": "Self"
-        },
-        "X_Apps": {
-          "type": "pub struct",
-          "args": {
-            "selected_app_idx": "usize"
-          },
-          "returns": "Self"
-        },
-        "X_VMs": {
-          "type": "pub struct",
-          "args": {
-            "selected_vm_idx": "usize",
-            "vm_action_idx": "usize",
-            "vms": "Vec<VmDisplayInfo>"
-          },
-          "returns": "Self"
-        },
-        "X_CreateVM": {
-          "type": "pub struct",
-          "args": {
-            "new_vm_name": "String",
-            "new_vm_memory_mb": "u32",
-            "new_vm_vcpus": "u32",
-            "create_vm_focus_idx": "usize"
-          },
-          "returns": "Self"
-        },
-        "ProcessItem": {
-          "type": "pub struct",
-          "args": {
-            "pid": "usize",
-            "name": "String",
-            "state": "String",
-            "is_minimized": "bool",
-            "is_focused": "bool",
-            "cpu_time": "usize",
-            "ui_time": "usize",
-            "win_w": "usize",
-            "win_h": "usize",
-            "win_x": "usize",
-            "win_y": "usize",
-            "is_maximized": "bool"
-          },
-          "returns": "Self"
-        },
-        "X_Resources": {
-          "type": "pub struct",
-          "args": {
-            "resources": "SystemResources",
-            "resmon_tab": "ResourceMonitorTab",
-            "procs": "Vec<ProcessItem>",
-            "vms": "Vec<VmDisplayInfo>",
-            "cycles": "usize",
-            "selected_process_idx": "usize"
-          },
-          "returns": "Self"
-        },
-        "total_process_count": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "usize"
-        },
-        "X_Network": {
-          "type": "pub struct",
-          "args": {
-            "selected_network_action_idx": "usize",
-            "network_target": "String"
-          },
-          "returns": "Self"
-        },
-        "X_Console": {
-          "type": "pub struct",
-          "args": {
-            "term_buf": "String",
-            "term_selected": "bool",
-            "command_history": "Vec<String>",
-            "history_idx": "Option<usize>"
-          },
-          "returns": "Self"
-        },
-        "X_Devices": {
-          "type": "pub struct",
-          "args": {
-            "categories": "Vec<DeviceCategory>",
-            "selected_device_idx": "usize"
-          },
-          "returns": "Self"
-        },
-        "X_Storage": {
-          "type": "pub struct",
-          "args": {
-            "current_path": "String",
-            "files": "Vec<FileEntry>",
-            "selected_file_idx": "usize",
-            "storage_disks": "Vec<DiskTabInfo>",
-            "selected_disk_idx": "usize",
-            "filesys_action_idx": "usize",
-            "filesys_pending_action": "Option<FilePendingAction>",
-            "status_line": "String",
-            "filesys_new_counter": "usize"
-          },
-          "returns": "Self"
-        },
-        "select_disk_tab": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self",
-            "idx": "usize"
-          },
           "returns": "()"
         },
-        "refresh_storage": {
-          "type": "pub fn",
-          "args": {
-            "&mut self": "self"
-          },
-          "returns": "()"
-        },
-        "TempDisk": {
-          "type": "struct",
-          "args": {
-            "handle": "uefi::Handle",
-            "volume_label": "String",
-            "total_bytes": "u64",
-            "free_bytes": "u64",
-            "block_size": "u32",
-            "media_type": "String"
-          },
-          "returns": "Self"
-        },
-        "X_Test": {
-          "type": "pub struct",
-          "args": {
-            "iter": "usize"
-          },
-          "returns": "Self"
-        },
-        "X_Editor": {
+        "X_Virtualization": {
           "type": "pub struct",
           "args": {},
-          "returns": "Self"
-        },
-        "X_Settings": {
-          "type": "pub struct",
-          "args": {
-            "settings": "UiSettings",
-            "selected_settings_idx": "usize",
-            "selected_settings_category_idx": "usize"
-          },
-          "returns": "Self"
-        },
-        "settings_rows": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "Vec<(String, String, bool, bool)>"
-        },
-        "X_Packages": {
-          "type": "pub struct",
-          "args": {
-            "selected_package_idx": "usize",
-            "package_action_idx": "usize",
-            "registry": "BTreeMap<String",
-            "status_line": "String"
-          },
-          "returns": "Self"
-        },
-        "package_names": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "Vec<String>"
-        },
-        "selected_package_name": {
-          "type": "pub fn",
-          "args": {
-            "&self": "self"
-          },
-          "returns": "Option<String>"
+          "returns": "()"
         }
       },
       "dependencies": [
+        "src/ui.rs",
         "src/env.rs",
-        "src/pm/mod.rs",
-        "src/terminal.rs"
+        "src/vmm/container.rs",
+        "src/vmm/cvm.rs"
       ]
     },
     "src/ui_old.rs": {
@@ -17288,11 +16460,11 @@
     },
     "src/testmodules/terminal/test.rs": {
       "path": "src/testmodules/terminal/test.rs",
-      "purpose": "Unit test module for terminal subsystem and command verification.",
+      "purpose": "Terminal subsystem self-testing routines.",
       "key_regions": [
         {
-          "lines": "1-7",
-          "description": "test_terminal test runner function"
+          "lines": "1-8",
+          "description": "test_terminal routine"
         }
       ],
       "objects": {
@@ -17302,7 +16474,9 @@
           "returns": "()"
         }
       },
-      "dependencies": []
+      "dependencies": [
+        "src/hpvmlog.rs"
+      ]
     },
     "src/testmodules/mod.rs": {
       "path": "src/testmodules/mod.rs",
@@ -17321,40 +16495,19 @@
     },
     "src/testmodules/boot.rs": {
       "path": "src/testmodules/boot.rs",
-      "purpose": "Startup and Boot OS test suite validating environment, VMM/CVM, LUTs, VM Guard, and VmPort gateway.",
+      "purpose": "Startup and boot OS test suite covering CVM, Container Engine, Hosting LUTs, VM Guard, VmPort, Port IO, and Virtualization UI.",
       "key_regions": [
         {
-          "lines": "1-410",
-          "description": "Boot test functions and master test runner"
+          "lines": "1-375",
+          "description": "Self-tests for environment, CVM/containers, LUTs, VM Guard, VmPort, Port IO"
+        },
+        {
+          "lines": "376-460",
+          "description": "test_boot_virtualization_ui and master test runner run_all_boot_tests"
         }
       ],
       "objects": {
-        "test_boot_environment": {
-          "type": "pub fn",
-          "args": {},
-          "returns": "bool"
-        },
-        "test_boot_cvm_and_containers": {
-          "type": "pub fn",
-          "args": {},
-          "returns": "bool"
-        },
-        "test_boot_hosting_luts": {
-          "type": "pub fn",
-          "args": {},
-          "returns": "bool"
-        },
-        "test_boot_vmguard_lifecycle": {
-          "type": "pub fn",
-          "args": {},
-          "returns": "bool"
-        },
-        "test_boot_vmport_gateway": {
-          "type": "pub fn",
-          "args": {},
-          "returns": "bool"
-        },
-        "test_boot_port_io_interface": {
+        "test_boot_virtualization_ui": {
           "type": "pub fn",
           "args": {},
           "returns": "bool"
@@ -17366,16 +16519,29 @@
         }
       },
       "dependencies": [
-        "src/env.rs",
-        "src/hosting/lut.rs",
-        "src/hosting/rqproc.rs",
-        "src/hosting/types.rs",
-        "src/hosting/vmdispatch.rs",
-        "src/hosting/interface.rs",
-        "src/vmm/container.rs",
-        "src/vmm/cvm.rs",
-        "src/vmm/cvmbus.rs",
-        "src/vmm/interface.rs"
+        "src/ui.rs",
+        "src/ui/tabui.rs",
+        "src/hosting/types.rs"
+      ]
+    },
+    "src/apps/x_virtualization.rs": {
+      "path": "src/apps/x_virtualization.rs",
+      "purpose": "Application export wrapper for X_Virtualization and X_VMs.",
+      "key_regions": [
+        {
+          "lines": "1-2",
+          "description": "Re-exports X_Virtualization and X_VMs from crate::ui::tabui::virtualization"
+        }
+      ],
+      "objects": {
+        "X_Virtualization": {
+          "type": "pub use",
+          "args": {},
+          "returns": "()"
+        }
+      },
+      "dependencies": [
+        "src/ui/tabui.rs"
       ]
     }
   }

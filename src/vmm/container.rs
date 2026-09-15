@@ -36,7 +36,7 @@ impl Container {
         if spec.resources.cpu_shares == 0 || spec.resources.memory_mb == 0 {
             return Err("container resources must be non-zero");
         }
-        vdebug_autoprefix!("Container: initialized container {} (name='{}', image='{}')", id, spec.name, spec.image);
+        vdebug_autoprefix!(0, "Container: initialized container {} (name='{}', image='{}')", id, spec.name, spec.image);
         Ok(Self {
             id,
             spec,

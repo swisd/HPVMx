@@ -38,7 +38,7 @@ use crate::apps::x_createvm::X_CreateVM;
 use crate::apps::x_editor::X_Editor;
 use crate::pm::PackageManager;
 use crate::rng::XorShiftRng;
-use crate::ui::{DashboardTab, DashboardUI, DeviceCategory, FileEntry, FilePendingAction, ResourceMonitorTab, SystemResources, TextEditor, UiSettings, VmDisplayInfo};
+use crate::ui::{DashboardTab, DashboardUI, DeviceCategory, FileEntry, FilePendingAction, ResourceMonitorTab, SystemResources, TextEditor, UiSettings, VmDisplayInfo, ContainerDisplayInfo, CvmDisplayInfo, VirtSubTab};
 
 pub type EnvironmentVariable = (String, String);
 
@@ -799,6 +799,16 @@ pub struct GlobalEnvironmentData {
     pub resmon_tab: ResourceMonitorTab,
     pub cycles: usize,
     pub selected_process_idx: usize,
+
+    // Virtualization management fields
+    pub virt_subtab: VirtSubTab,
+    pub containers: Vec<ContainerDisplayInfo>,
+    pub cvms: Vec<CvmDisplayInfo>,
+    pub selected_container_idx: usize,
+    pub container_action_idx: usize,
+    pub selected_cvm_idx: usize,
+    pub cvm_action_idx: usize,
+    pub selected_arch_node: usize,
 }
 
 impl GlobalEnvironmentData {
@@ -910,6 +920,14 @@ impl GlobalEnvironmentData {
         resmon_tab: ResourceMonitorTab::Resources,
         cycles: 0,
         selected_process_idx: 0,
+        virt_subtab: VirtSubTab::VMs,
+        containers: Vec::new(),
+        cvms: Vec::new(),
+        selected_container_idx: 0,
+        container_action_idx: 0,
+        selected_cvm_idx: 0,
+        cvm_action_idx: 0,
+        selected_arch_node: 0,
         }
     }
 
@@ -966,7 +984,14 @@ impl GlobalEnvironmentData {
         self.resmon_tab = ui.resmon_tab;
         self.cycles = ui.cycles;
         self.selected_process_idx = ui.selected_process_idx;
-
+        self.virt_subtab = ui.virt_subtab;
+        self.containers = ui.containers;
+        self.cvms = ui.cvms;
+        self.selected_container_idx = ui.selected_container_idx;
+        self.container_action_idx = ui.container_action_idx;
+        self.selected_cvm_idx = ui.selected_cvm_idx;
+        self.cvm_action_idx = ui.cvm_action_idx;
+        self.selected_arch_node = ui.selected_arch_node;
     }
 
     pub fn pull_from_ui_thru(&mut self, ui: DashboardUI) -> DashboardUI {
@@ -1022,8 +1047,15 @@ impl GlobalEnvironmentData {
         self.resmon_tab = ui.resmon_tab.clone();
         self.cycles = ui.cycles.clone();
         self.selected_process_idx = ui.selected_process_idx.clone();
+        self.virt_subtab = ui.virt_subtab;
+        self.containers = ui.containers.clone();
+        self.cvms = ui.cvms.clone();
+        self.selected_container_idx = ui.selected_container_idx;
+        self.container_action_idx = ui.container_action_idx;
+        self.selected_cvm_idx = ui.selected_cvm_idx;
+        self.cvm_action_idx = ui.cvm_action_idx;
+        self.selected_arch_node = ui.selected_arch_node;
         ui
-
     }
 }
 
@@ -1582,6 +1614,12 @@ impl XSteppedApplicationContext {
                 if let Some(vms_app) = self.application.inner.as_any().downcast_ref::<X_VMs>() {
                     ui.selected_vm_idx = vms_app.selected_vm_idx;
                     ui.vm_action_idx = vms_app.vm_action_idx;
+                    ui.virt_subtab = vms_app.virt_subtab;
+                    ui.selected_container_idx = vms_app.selected_container_idx;
+                    ui.container_action_idx = vms_app.container_action_idx;
+                    ui.selected_cvm_idx = vms_app.selected_cvm_idx;
+                    ui.cvm_action_idx = vms_app.cvm_action_idx;
+                    ui.selected_arch_node = vms_app.selected_arch_node;
                 }
             }
             crate::ui::DashboardTab::Storage => {
@@ -1706,8 +1744,16 @@ impl XSteppedApplicationContext {
             crate::ui::DashboardTab::VirtualMachines => {
                 if let Some(vms_app) = ctx.application.inner.as_any_mut().downcast_mut::<X_VMs>() {
                     vms_app.vms = ui.vms.clone();
+                    vms_app.containers = ui.containers.clone();
+                    vms_app.cvms = ui.cvms.clone();
                     vms_app.selected_vm_idx = ui.selected_vm_idx;
                     vms_app.vm_action_idx = ui.vm_action_idx;
+                    vms_app.virt_subtab = ui.virt_subtab;
+                    vms_app.selected_container_idx = ui.selected_container_idx;
+                    vms_app.container_action_idx = ui.container_action_idx;
+                    vms_app.selected_cvm_idx = ui.selected_cvm_idx;
+                    vms_app.cvm_action_idx = ui.cvm_action_idx;
+                    vms_app.selected_arch_node = ui.selected_arch_node;
                 }
             }
             crate::ui::DashboardTab::Storage => {

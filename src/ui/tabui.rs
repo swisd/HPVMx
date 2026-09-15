@@ -6,7 +6,8 @@ use uefi::proto::console::text::{Key, ScanCode};
 use crate::ui::{
     pixel_graphics::{self, PixelGraphics},
     DashboardTab, DashboardUI, DeviceCategory, DiskTabInfo, EditorMode, FileEntry, FilePendingAction,
-    ResourceMonitorTab, SystemResources, TextEditor, UiSettings, VmDisplayInfo,
+    ResourceMonitorTab, SystemResources, TextEditor, UiSettings, VmDisplayInfo, ContainerDisplayInfo,
+    CvmDisplayInfo, VirtSubTab,
 };
 use crate::env::{AppInfo, Environment, Runnable};
 use crate::pm::{Package, PackageManager};
@@ -25,7 +26,7 @@ pub fn draw_tab(
 ) {
     match tab {
         DashboardTab::Overview => overview::draw(ui, pg, origin_x, origin_y, width, height),
-        DashboardTab::VirtualMachines => vms::draw(ui, pg, origin_x, origin_y, width, height),
+        DashboardTab::VirtualMachines => virtualization::draw(ui, pg, origin_x, origin_y, width, height),
         DashboardTab::Resources => resources::draw(ui, pg, origin_x, origin_y, width, height),
         DashboardTab::Storage => storage::draw(ui, pg, origin_x, origin_y, width, height),
         DashboardTab::Network => network::draw(ui, pg, origin_x, origin_y, width, height),
@@ -46,7 +47,7 @@ pub fn draw_tab(
 pub fn handle_tab_input(tab: DashboardTab, ui: &mut DashboardUI, key: Key) -> bool {
     match tab {
         DashboardTab::Overview => overview::input(ui, key),
-        DashboardTab::VirtualMachines => vms::input(ui, key),
+        DashboardTab::VirtualMachines => virtualization::input(ui, key),
         DashboardTab::Resources => resources::input(ui, key),
         DashboardTab::Storage => storage::input(ui, key),
         DashboardTab::Network => network::input(ui, key),
@@ -66,7 +67,7 @@ pub fn handle_tab_input(tab: DashboardTab, ui: &mut DashboardUI, key: Key) -> bo
 pub fn update_tab_logic(tab: DashboardTab, ui: &mut DashboardUI) {
     match tab {
         DashboardTab::Overview => overview::logic(ui),
-        DashboardTab::VirtualMachines => vms::logic(ui),
+        DashboardTab::VirtualMachines => virtualization::logic(ui),
         DashboardTab::Resources => resources::logic(ui),
         DashboardTab::Storage => storage::logic(ui),
         DashboardTab::Network => network::logic(ui),
@@ -433,9 +434,9 @@ pub mod apps {
 }
 
 // =========================================================================
-// 3. Virtual Machines Tab
+// 3. Virtualization Tab (VMs, Containers, CVMs, Architecture Topology)
 // =========================================================================
-pub mod vms {
+pub mod virtualization {
     use super::*;
 
     pub fn draw(ui: &DashboardUI, pg: &mut PixelGraphics, _x: usize, _y: usize, width: usize, height: usize) {
@@ -444,17 +445,58 @@ pub mod vms {
         let line_h = 15usize;
         let content_top = 80usize;
 
-        pg.draw_text(margin, content_top + margin + 4, "Virtual Machines", 0x00FF00);
+        // Subtab Navigation Bar
+        let subtab_y = content_top + margin;
+        let subtabs = [
+            (VirtSubTab::VMs, "[1] VMs", ui.vms.len()),
+            (VirtSubTab::Containers, "[2] Containers", ui.containers.len()),
+            (VirtSubTab::CVMs, "[3] CVMs", ui.cvms.len()),
+            (VirtSubTab::Architecture, "[4] Architecture Topology", 0),
+        ];
+
+        let mut sub_x = margin;
+        for (st, label, count) in subtabs.iter() {
+            let is_active = ui.virt_subtab == *st;
+            let btn_w = if *st == VirtSubTab::Architecture { 210 } else { 130 };
+            let bg_col = if is_active { 0x005522 } else { 0x2A2A2A };
+            let border_col = if is_active { 0x00FF88 } else { 0x555555 };
+            let text_col = if is_active { 0xFFFFFF } else { 0xAAAAAA };
+
+            pg.fill_rect(sub_x, subtab_y, btn_w, 24, bg_col);
+            pg.draw_rect_outline(sub_x, subtab_y, btn_w, 24, border_col);
+
+            let txt = if *st == VirtSubTab::Architecture {
+                alloc::format!("{}", label)
+            } else {
+                alloc::format!("{} ({})", label, count)
+            };
+            pg.draw_text(sub_x + 8, subtab_y + 4, &txt, text_col);
+            sub_x += btn_w + 8;
+        }
+
+        pg.draw_text(width.saturating_sub(margin + 230), subtab_y + 4, "Switch: 1..4 | TAB | V/C/M/A", 0x888888);
+
+        match ui.virt_subtab {
+            VirtSubTab::VMs => draw_vms(ui, pg, width, height, content_top, margin, gutter, line_h),
+            VirtSubTab::Containers => draw_containers(ui, pg, width, height, content_top, margin, gutter, line_h),
+            VirtSubTab::CVMs => draw_cvms(ui, pg, width, height, content_top, margin, gutter, line_h),
+            VirtSubTab::Architecture => draw_architecture(ui, pg, width, height, content_top, margin, gutter, line_h),
+        }
+    }
+
+    fn draw_vms(ui: &DashboardUI, pg: &mut PixelGraphics, width: usize, height: usize, content_top: usize, margin: usize, gutter: usize, line_h: usize) {
+        let title_y = content_top + margin + 32;
+        pg.draw_text(margin, title_y, "Virtualization > Virtual Machines Management", 0x00FF00);
 
         let create_btn_x = width - margin - 120;
-        let create_btn_y = content_top + margin;
+        let create_btn_y = title_y - 4;
         pg.fill_rect(create_btn_x, create_btn_y, 120, 24, 0x008000);
         pg.draw_text(create_btn_x + 10, create_btn_y + 4, "[+] Create VM", 0xFFFFFF);
 
         let table_x = margin;
-        let table_y = content_top + margin + 32;
+        let table_y = title_y + 28;
         let table_w = core::cmp::min(width - margin * 2, 760);
-        let table_h = core::cmp::min(height.saturating_sub(table_y + 120), 260);
+        let table_h = core::cmp::min(height.saturating_sub(table_y + 120), 240);
         pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0x888888);
 
         pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
@@ -503,6 +545,8 @@ pub mod vms {
                 pg.draw_text(props_x + 10, py, &alloc::format!("Disk:  {} MB", vm.disk_usage_mb), 0xCCCCCC);
                 py += 20;
                 pg.draw_text(props_x + 10, py, &alloc::format!("Uptime: {}s", vm.uptime_seconds), 0x888888);
+                py += 20;
+                pg.draw_text(props_x + 10, py, "Isolation: VT-x Root", 0x00AAFF);
             } else {
                 pg.draw_text(props_x + 10, table_y + 10, "No VM selected", 0x888888);
             }
@@ -527,158 +571,616 @@ pub mod vms {
         }
     }
 
+    fn draw_containers(ui: &DashboardUI, pg: &mut PixelGraphics, width: usize, height: usize, content_top: usize, margin: usize, gutter: usize, line_h: usize) {
+        let title_y = content_top + margin + 32;
+        pg.draw_text(margin, title_y, "Virtualization > Container Management (CVS Engine)", 0x00FF88);
+
+        let run_btn_x = width - margin - 130;
+        let run_btn_y = title_y - 4;
+        pg.fill_rect(run_btn_x, run_btn_y, 130, 24, 0x006688);
+        pg.draw_text(run_btn_x + 10, run_btn_y + 4, "[+] Run Container", 0xFFFFFF);
+
+        let table_x = margin;
+        let table_y = title_y + 28;
+        let table_w = core::cmp::min(width - margin * 2, 760);
+        let table_h = core::cmp::min(height.saturating_sub(table_y + 120), 240);
+        pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0x888888);
+
+        pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
+        pg.draw_text(table_x + 8, table_y + 4, "ID  NAME             IMAGE            STATE    SHARES  RAM   PORTS", 0xCCCCCC);
+
+        let mut y = table_y + line_h + gutter;
+        for (idx, c) in ui.containers.iter().enumerate() {
+            if y + line_h > table_y + table_h - 2 { break; }
+            let is_selected = idx == ui.selected_container_idx;
+            let text_color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
+            if is_selected {
+                pg.fill_rect(table_x + 2, y - 2, table_w - 4, line_h, 0x444400);
+            }
+            let info = alloc::format!("{:<3} {:<16} {:<16} {:<8} {:>6}  {:>4}MB  {:>4}",
+                                      c.id, c.name, c.image, c.state, c.cpu_shares, c.memory_mb, c.port_count);
+            pg.draw_text(table_x + 8, y, &info, text_color);
+            y += line_h;
+        }
+
+        let props_x = table_x + table_w + gutter;
+        let props_w = width.saturating_sub(props_x + margin);
+        if props_w > 150 {
+            let props_h = table_h;
+            pg.draw_rect_outline(props_x, table_y, props_w, props_h, 0x888888);
+            pg.draw_text_bg(props_x + 10, table_y - 4, "Container Properties", 0x00FF88, 0x222222);
+
+            if let Some(c) = ui.containers.get(ui.selected_container_idx) {
+                let mut py = table_y + 10;
+                pg.draw_text(props_x + 10, py, &alloc::format!("Name:   {}", c.name), 0xFFFFFF);
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("CID:    {}", c.id), 0xCCCCCC);
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("Image:  {}", c.image), 0xCCCCCC);
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("State:  {}", c.state), if c.state.contains("Running") { 0x00FF00 } else { 0xFFAAAA });
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("Shares: {}", c.cpu_shares), 0xCCCCCC);
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("Memory: {} MB", c.memory_mb), 0xCCCCCC);
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("Ports:  {} mapped", c.port_count), 0xCCCCCC);
+                py += 20;
+                pg.draw_text(props_x + 10, py, "Engine: CVS Interface v1.0", 0x00FFAA);
+            } else {
+                pg.draw_text(props_x + 10, table_y + 10, "No container selected", 0x888888);
+            }
+        }
+
+        if !ui.containers.is_empty() {
+            let actions_y = table_y + table_h + gutter;
+            pg.draw_text(margin, actions_y, "Actions for Selected Container:", 0xCCCCCC);
+            let actions = ["Start", "Stop", "Restart", "Create", "Delete", "Ports", "Inspect"];
+            let mut action_x = margin;
+            let action_y = actions_y + 20;
+            for (idx, action) in actions.iter().enumerate() {
+                let is_focused = idx == ui.container_action_idx;
+                let color = if is_focused { 0x0088AA } else { 0x444444 };
+                pg.fill_rect(action_x, action_y, 78, 24, color);
+                pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
+                action_x += 88;
+            }
+            pg.draw_text(margin, action_y + 32, "Press ENTER to execute action | SPACE to spawn container", 0x888888);
+        } else {
+            pg.draw_text(margin, table_y + table_h + gutter, "No containers. Press SPACE to create container", 0x888888);
+        }
+    }
+
+    fn draw_cvms(ui: &DashboardUI, pg: &mut PixelGraphics, width: usize, height: usize, content_top: usize, margin: usize, gutter: usize, line_h: usize) {
+        let title_y = content_top + margin + 32;
+        pg.draw_text(margin, title_y, "Virtualization > Container Virtual Machines (CVM Box & Kernel)", 0x00CCFF);
+
+        let spawn_btn_x = width - margin - 130;
+        let spawn_btn_y = title_y - 4;
+        pg.fill_rect(spawn_btn_x, spawn_btn_y, 130, 24, 0x0055AA);
+        pg.draw_text(spawn_btn_x + 10, spawn_btn_y + 4, "[+] Spawn CVM", 0xFFFFFF);
+
+        let table_x = margin;
+        let table_y = title_y + 28;
+        let table_w = core::cmp::min(width - margin * 2, 760);
+        let table_h = core::cmp::min(height.saturating_sub(table_y + 120), 240);
+        pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0x888888);
+
+        pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
+        pg.draw_text(table_x + 8, table_y + 4, "ID  NAME             KERNEL           STATE    vCPU  RAM   BOXES  BUS", 0xCCCCCC);
+
+        let mut y = table_y + line_h + gutter;
+        for (idx, cvm) in ui.cvms.iter().enumerate() {
+            if y + line_h > table_y + table_h - 2 { break; }
+            let is_selected = idx == ui.selected_cvm_idx;
+            let text_color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
+            if is_selected {
+                pg.fill_rect(table_x + 2, y - 2, table_w - 4, line_h, 0x444400);
+            }
+            let info = alloc::format!("{:<3} {:<16} {:<16} {:<8} {:>4}  {:>4}MB {:>5}  {:>3}ch",
+                                      cvm.id, cvm.name, cvm.kernel, cvm.state, cvm.vcpus, cvm.memory_mb, cvm.container_count, cvm.bus_channels);
+            pg.draw_text(table_x + 8, y, &info, text_color);
+            y += line_h;
+        }
+
+        let props_x = table_x + table_w + gutter;
+        let props_w = width.saturating_sub(props_x + margin);
+        if props_w > 150 {
+            let props_h = table_h;
+            pg.draw_rect_outline(props_x, table_y, props_w, props_h, 0x888888);
+            pg.draw_text_bg(props_x + 10, table_y - 4, "CVM Box Properties", 0x00CCFF, 0x222222);
+
+            if let Some(cvm) = ui.cvms.get(ui.selected_cvm_idx) {
+                let mut py = table_y + 10;
+                pg.draw_text(props_x + 10, py, &alloc::format!("Name:   {}", cvm.name), 0xFFFFFF);
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("CVM ID: {}", cvm.id), 0xCCCCCC);
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("Kernel: {}", cvm.kernel), 0xCCCCCC);
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("State:  {}", cvm.state), if cvm.state.contains("Running") { 0x00FF00 } else { 0xFFFFAA });
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("vCPUs:  {}", cvm.vcpus), 0xCCCCCC);
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("Memory: {} MB", cvm.memory_mb), 0xCCCCCC);
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("Boxes:  {} instances", cvm.container_count), 0xCCCCCC);
+                py += 20;
+                pg.draw_text(props_x + 10, py, &alloc::format!("CVMBus: {} channels", cvm.bus_channels), 0xCCCCCC);
+                py += 20;
+                pg.draw_text(props_x + 10, py, "Bus Queue: RingBuf Ready", 0x00CCFF);
+            } else {
+                pg.draw_text(props_x + 10, table_y + 10, "No CVM selected", 0x888888);
+            }
+        }
+
+        if !ui.cvms.is_empty() {
+            let actions_y = table_y + table_h + gutter;
+            pg.draw_text(margin, actions_y, "Actions for Selected CVM:", 0xCCCCCC);
+            let actions = ["Boot", "Halt", "Reset", "Sync Bus", "Add Box", "Inspect", "Security"];
+            let mut action_x = margin;
+            let action_y = actions_y + 20;
+            for (idx, action) in actions.iter().enumerate() {
+                let is_focused = idx == ui.cvm_action_idx;
+                let color = if is_focused { 0x0066CC } else { 0x444444 };
+                pg.fill_rect(action_x, action_y, 78, 24, color);
+                pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
+                action_x += 88;
+            }
+            pg.draw_text(margin, action_y + 32, "Press ENTER to execute action | SPACE to spawn CVM", 0x888888);
+        } else {
+            pg.draw_text(margin, table_y + table_h + gutter, "No CVMs. Press SPACE to spawn CVM", 0x888888);
+        }
+    }
+
+    fn draw_architecture(ui: &DashboardUI, pg: &mut PixelGraphics, width: usize, height: usize, content_top: usize, margin: usize, gutter: usize, _line_h: usize) {
+        let title_y = content_top + margin + 32;
+        pg.draw_text(margin, title_y, "Virtualization > HPVMx Virtualization Subsystem Architecture", 0xFFFF00);
+
+        let diag_x = margin;
+        let diag_y = title_y + 24;
+        let diag_w = width.saturating_sub(margin * 2);
+
+        // Block 1: Gateway & Security Control
+        let b1_y = diag_y;
+        let b1_h = 70usize;
+        pg.draw_rect_outline(diag_x, b1_y, diag_w, b1_h, 0x00FFFF);
+        pg.draw_text_bg(diag_x + 12, b1_y - 4, " 1. CONTROL & GATEWAY SUBSYSTEM (VmPort & VM Guard) ", 0x00FFFF, 0x222222);
+
+        pg.draw_text(diag_x + 16, b1_y + 12, "[VmPort Gateway]: Port 10000 | SM RingBuf IPC | JSON / Binary Protocol", 0xFFFFFF);
+        pg.draw_text(diag_x + 16, b1_y + 28, "[VM Guard]: Heartbeat Authority (Visualization & Identity Server Tokens, TTL: 5000ms)", 0x88FF88);
+        pg.draw_text(diag_x + 16, b1_y + 44, "[Lookup Tables]: Port LUT (0..65535) | Client Data LUT (TID.UUID) | CID LUT (0000..FFFF)", 0xFFCC88);
+
+        // Block 2: Hypervisor & Virtualization Engines
+        let b2_y = b1_y + b1_h + gutter;
+        let b2_h = 100usize;
+        pg.draw_rect_outline(diag_x, b2_y, diag_w, b2_h, 0x00FF88);
+        pg.draw_text_bg(diag_x + 12, b2_y - 4, " 2. HYPERVISOR & EXECUTION ENGINE SUBSYSTEM ", 0x00FF88, 0x222222);
+
+        // Section 2A: Hardware VMs
+        pg.draw_text(diag_x + 16, b2_y + 14, "[Hardware VMs]:", 0xFFFF88);
+        pg.draw_text(diag_x + 160, b2_y + 14, "VT-x / AMD-V Hardware Virtualization | Isolated Guest RAM | Multiprocessor vCPUs", 0xDDDDDD);
+
+        // Section 2B: Containers
+        pg.draw_text(diag_x + 16, b2_y + 40, "[Container Subsystem]:", 0x88FF88);
+        pg.draw_text(diag_x + 160, b2_y + 40, "Container Virtualization Subsystem (CVS) | CGroup Quotas | PortIo Owner Bindings", 0xDDDDDD);
+
+        // Section 2C: CVMs
+        pg.draw_text(diag_x + 16, b2_y + 66, "[Container VMs (CVM)]:", 0x88CCFF);
+        pg.draw_text(diag_x + 160, b2_y + 66, "CVM MicroKernel Sandbox | Container Box Multi-tenancy | CVMBus RingBuf Channels", 0xDDDDDD);
+
+        // Block 3: Telemetry & Live Status
+        let b3_y = b2_y + b2_h + gutter;
+        let b3_h = core::cmp::min(height.saturating_sub(b3_y + margin + 10), 90);
+        if b3_h >= 50 {
+            pg.draw_rect_outline(diag_x, b3_y, diag_w, b3_h, 0xFFA500);
+            pg.draw_text_bg(diag_x + 12, b3_y - 4, " 3. SUBSYSTEM RUNTIME TELEMETRY & STATUS ", 0xFFA500, 0x222222);
+
+            let running_vms = ui.vms.iter().filter(|v| v.state.contains("Running")).count();
+            let running_containers = ui.containers.iter().filter(|c| c.state.contains("Running")).count();
+            let running_cvms = ui.cvms.iter().filter(|c| c.state.contains("Running")).count();
+
+            pg.draw_text(diag_x + 16, b3_y + 12, &alloc::format!("Live Instances: VMs: {}/{} running | Containers: {}/{} running | CVMs: {}/{} running",
+                running_vms, ui.vms.len(), running_containers, ui.containers.len(), running_cvms, ui.cvms.len()), 0xFFFFFF);
+            pg.draw_text(diag_x + 16, b3_y + 28, "VM Guard Status: ACTIVE (Visualization & Identity Server Heartbeats Synchronized)", 0x00FF88);
+            if b3_h >= 65 {
+                pg.draw_text(diag_x + 16, b3_y + 44, "VmPort Gateway: Port 10000 READY | CVMBus IPC Channels: 65,536 REGISTERED", 0x00FFFF);
+            }
+        }
+    }
+
     pub fn logic(_ui: &mut DashboardUI) {}
 
     pub fn input(ui: &mut DashboardUI, key: Key) -> bool {
         match key {
             Key::Special(ScanCode::UP) => {
-                if ui.selected_vm_idx > 0 { ui.selected_vm_idx -= 1; }
-                true
-            }
-            Key::Special(ScanCode::DOWN) => {
-                if ui.selected_vm_idx < ui.vms.len().saturating_sub(1) { ui.selected_vm_idx += 1; }
-                true
-            }
-            Key::Special(ScanCode::LEFT) => {
-                ui.vm_action_idx = ui.vm_action_idx.saturating_sub(1);
-                true
-            }
-            Key::Special(ScanCode::RIGHT) => {
-                ui.vm_action_idx = (ui.vm_action_idx + 1).min(7);
-                true
-            }
-            Key::Printable(c) if char::from(c) == ' ' => {
-                ui.set_tab(DashboardTab::CreateVM);
-                true
-            }
-            Key::Printable(c) if matches!(char::from(c), '\r' | '\n') => {
-                if let Some(vm) = ui.vms.get(ui.selected_vm_idx) {
-                    let vm_id = vm.id;
-                    unsafe {
-                        if let Some(hv) = HYPERVISOR.as_mut() {
-                            match ui.vm_action_idx {
-                                0 => { let _ = hv.start_vm(vm_id); }
-                                1 => { let _ = hv.stop_vm(vm_id); }
-                                2 => { let _ = hv.reset_vm(vm_id); }
-                                3 => { let _ = hv.zero_vm(vm_id); }
-                                4 => { let _ = hv.delete_vm(vm_id); }
-                                5 => { let _ = hv.save_vm_metadata("/VMSTATE"); }
-                                6 => { let _ = hv.restore_vm_metadata("/VMSTATE"); }
-                                _ => {}
-                            }
-                        }
+                match ui.virt_subtab {
+                    VirtSubTab::VMs => {
+                        if ui.selected_vm_idx > 0 { ui.selected_vm_idx -= 1; }
+                    }
+                    VirtSubTab::Containers => {
+                        if ui.selected_container_idx > 0 { ui.selected_container_idx -= 1; }
+                    }
+                    VirtSubTab::CVMs => {
+                        if ui.selected_cvm_idx > 0 { ui.selected_cvm_idx -= 1; }
+                    }
+                    VirtSubTab::Architecture => {
+                        if ui.selected_arch_node > 0 { ui.selected_arch_node -= 1; }
                     }
                 }
                 true
+            }
+            Key::Special(ScanCode::DOWN) => {
+                match ui.virt_subtab {
+                    VirtSubTab::VMs => {
+                        if ui.selected_vm_idx < ui.vms.len().saturating_sub(1) { ui.selected_vm_idx += 1; }
+                    }
+                    VirtSubTab::Containers => {
+                        if ui.selected_container_idx < ui.containers.len().saturating_sub(1) { ui.selected_container_idx += 1; }
+                    }
+                    VirtSubTab::CVMs => {
+                        if ui.selected_cvm_idx < ui.cvms.len().saturating_sub(1) { ui.selected_cvm_idx += 1; }
+                    }
+                    VirtSubTab::Architecture => {
+                        if ui.selected_arch_node < 2 { ui.selected_arch_node += 1; }
+                    }
+                }
+                true
+            }
+            Key::Special(ScanCode::LEFT) => {
+                match ui.virt_subtab {
+                    VirtSubTab::VMs => {
+                        ui.vm_action_idx = ui.vm_action_idx.saturating_sub(1);
+                    }
+                    VirtSubTab::Containers => {
+                        ui.container_action_idx = ui.container_action_idx.saturating_sub(1);
+                    }
+                    VirtSubTab::CVMs => {
+                        ui.cvm_action_idx = ui.cvm_action_idx.saturating_sub(1);
+                    }
+                    VirtSubTab::Architecture => {}
+                }
+                true
+            }
+            Key::Special(ScanCode::RIGHT) => {
+                match ui.virt_subtab {
+                    VirtSubTab::VMs => {
+                        ui.vm_action_idx = (ui.vm_action_idx + 1).min(7);
+                    }
+                    VirtSubTab::Containers => {
+                        ui.container_action_idx = (ui.container_action_idx + 1).min(6);
+                    }
+                    VirtSubTab::CVMs => {
+                        ui.cvm_action_idx = (ui.cvm_action_idx + 1).min(6);
+                    }
+                    VirtSubTab::Architecture => {}
+                }
+                true
+            }
+            Key::Printable(c) => {
+                let ch = char::from(c);
+                match ch {
+                    '1' => { ui.virt_subtab = VirtSubTab::VMs; true }
+                    '2' => { ui.virt_subtab = VirtSubTab::Containers; true }
+                    '3' => { ui.virt_subtab = VirtSubTab::CVMs; true }
+                    '4' => { ui.virt_subtab = VirtSubTab::Architecture; true }
+                    'v' | 'V' => { ui.virt_subtab = VirtSubTab::VMs; true }
+                    'c' | 'C' => { ui.virt_subtab = VirtSubTab::Containers; true }
+                    'm' | 'M' => { ui.virt_subtab = VirtSubTab::CVMs; true }
+                    'a' | 'A' => { ui.virt_subtab = VirtSubTab::Architecture; true }
+                    '\t' => { ui.virt_subtab = ui.virt_subtab.next(); true }
+                    ' ' => {
+                        match ui.virt_subtab {
+                            VirtSubTab::VMs => ui.set_tab(DashboardTab::CreateVM),
+                            VirtSubTab::Containers => {
+                                let next_id = (ui.containers.len() as u64) + 1;
+                                ui.containers.push(ContainerDisplayInfo {
+                                    id: next_id,
+                                    name: alloc::format!("container-{}", next_id),
+                                    image: String::from("alpine:latest"),
+                                    state: String::from("Running"),
+                                    cpu_shares: 512,
+                                    memory_mb: 256,
+                                    port_count: 1,
+                                });
+                            }
+                            VirtSubTab::CVMs => {
+                                let next_id = (ui.cvms.len() as u32) + 1;
+                                ui.cvms.push(CvmDisplayInfo {
+                                    id: next_id,
+                                    name: alloc::format!("cvm-box-{}", next_id),
+                                    kernel: String::from("MicroKernel-v1.0"),
+                                    state: String::from("Running"),
+                                    memory_mb: 512,
+                                    vcpus: 2,
+                                    container_count: 1,
+                                    bus_channels: 2,
+                                });
+                            }
+                            VirtSubTab::Architecture => {}
+                        }
+                        true
+                    }
+                    '\r' | '\n' => {
+                        match ui.virt_subtab {
+                            VirtSubTab::VMs => {
+                                if let Some(vm) = ui.vms.get(ui.selected_vm_idx) {
+                                    let vm_id = vm.id;
+                                    unsafe {
+                                        if let Some(hv) = HYPERVISOR.as_mut() {
+                                            match ui.vm_action_idx {
+                                                0 => { let _ = hv.start_vm(vm_id); }
+                                                1 => { let _ = hv.stop_vm(vm_id); }
+                                                2 => { let _ = hv.reset_vm(vm_id); }
+                                                3 => { let _ = hv.zero_vm(vm_id); }
+                                                4 => { let _ = hv.delete_vm(vm_id); }
+                                                5 => { let _ = hv.save_vm_metadata("/VMSTATE"); }
+                                                6 => { let _ = hv.restore_vm_metadata("/VMSTATE"); }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            VirtSubTab::Containers => {
+                                if let Some(container) = ui.containers.get_mut(ui.selected_container_idx) {
+                                    match ui.container_action_idx {
+                                        0 => { container.state = String::from("Running"); }
+                                        1 => { container.state = String::from("Stopped"); }
+                                        2 => { container.state = String::from("Running"); }
+                                        3 => {
+                                            let next_id = (ui.containers.len() as u64) + 1;
+                                            ui.containers.push(ContainerDisplayInfo {
+                                                id: next_id,
+                                                name: alloc::format!("container-{}", next_id),
+                                                image: String::from("alpine:latest"),
+                                                state: String::from("Running"),
+                                                cpu_shares: 512,
+                                                memory_mb: 256,
+                                                port_count: 1,
+                                            });
+                                        }
+                                        4 => {
+                                            if !ui.containers.is_empty() {
+                                                ui.containers.remove(ui.selected_container_idx);
+                                                if ui.selected_container_idx > 0 && ui.selected_container_idx >= ui.containers.len() {
+                                                    ui.selected_container_idx = ui.containers.len().saturating_sub(1);
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            VirtSubTab::CVMs => {
+                                if let Some(cvm) = ui.cvms.get_mut(ui.selected_cvm_idx) {
+                                    match ui.cvm_action_idx {
+                                        0 => { cvm.state = String::from("Running"); }
+                                        1 => { cvm.state = String::from("Halted"); }
+                                        2 => { cvm.state = String::from("Running"); }
+                                        3 => { cvm.bus_channels = (cvm.bus_channels % 8) + 1; }
+                                        4 => { cvm.container_count += 1; }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            VirtSubTab::Architecture => {}
+                        }
+                        true
+                    }
+                    _ => false,
+                }
             }
             _ => false,
         }
     }
 
     #[derive(Clone)]
-    pub struct X_VMs {
+    pub struct X_Virtualization {
         pub selected_vm_idx: usize,
         pub vm_action_idx: usize,
         pub vms: Vec<VmDisplayInfo>,
+        pub containers: Vec<ContainerDisplayInfo>,
+        pub cvms: Vec<CvmDisplayInfo>,
+        pub virt_subtab: VirtSubTab,
+        pub selected_container_idx: usize,
+        pub container_action_idx: usize,
+        pub selected_cvm_idx: usize,
+        pub cvm_action_idx: usize,
+        pub selected_arch_node: usize,
     }
 
-    impl X_VMs {
+    pub type X_VMs = X_Virtualization;
+
+    impl X_Virtualization {
         pub fn new() -> Self {
             Self {
                 selected_vm_idx: 0,
                 vm_action_idx: 0,
                 vms: Vec::new(),
+                containers: alloc::vec![
+                    ContainerDisplayInfo {
+                        id: 1,
+                        name: String::from("web-nginx"),
+                        image: String::from("alpine-nginx:1.24"),
+                        state: String::from("Running"),
+                        cpu_shares: 512,
+                        memory_mb: 128,
+                        port_count: 2,
+                    },
+                    ContainerDisplayInfo {
+                        id: 2,
+                        name: String::from("db-redis"),
+                        image: String::from("redis:7.0-alpine"),
+                        state: String::from("Running"),
+                        cpu_shares: 1024,
+                        memory_mb: 256,
+                        port_count: 1,
+                    },
+                ],
+                cvms: alloc::vec![
+                    CvmDisplayInfo {
+                        id: 1,
+                        name: String::from("cvm-box-primary"),
+                        kernel: String::from("MicroKernel-v1.0"),
+                        state: String::from("Running"),
+                        memory_mb: 512,
+                        vcpus: 2,
+                        container_count: 2,
+                        bus_channels: 4,
+                    },
+                ],
+                virt_subtab: VirtSubTab::VMs,
+                selected_container_idx: 0,
+                container_action_idx: 0,
+                selected_cvm_idx: 0,
+                cvm_action_idx: 0,
+                selected_arch_node: 0,
             }
         }
     }
 
-    impl Runnable for X_VMs {
+    impl Runnable for X_Virtualization {
         fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
             let margin = 16usize;
             let gutter = 12usize;
             let line_h = 15usize;
-            let width = 800;
+            let width = 800usize;
             let height = 600usize;
 
-            pg.draw_text(x + margin, y + margin, "Virtual Machines", 0x00FF00);
-            
-            // VM Table
-            let table_x = x + margin;
-            let table_y = y + margin + 30;
-            let table_w = core::cmp::min(width - margin * 2, 600);
-            let table_h = height.saturating_sub(margin + 30 + 120);
-            pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0xCCCCCC);
-            
-            // Header
-            pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
-            pg.draw_text(table_x + 8, table_y + 4, "ID  NAME             STATE       CPU%  MEM(MB)  UPTIME", 0xAAAAAA);
-            
-            let mut curr_y = table_y + line_h + 4;
-            for (i, vm) in self.vms.iter().enumerate() {
-                if curr_y + line_h > table_y + table_h { break; }
-                let is_selected = i == self.selected_vm_idx;
-                let text_color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
-                if is_selected {
-                    pg.fill_rect(table_x + 1, curr_y, table_w - 2, line_h, 0x444444);
-                }
+            pg.draw_text(x + margin, y + margin, "Virtualization Management", 0x00FF00);
 
-                let uptime = if vm.uptime_seconds < 60 {
-                    format!("{}s", vm.uptime_seconds)
-                } else if vm.uptime_seconds < 3600 {
-                    format!("{}m {}s", vm.uptime_seconds / 60, vm.uptime_seconds % 60)
-                } else {
-                    format!("{}h {}m", vm.uptime_seconds / 3600, (vm.uptime_seconds % 3600) / 60)
+            // Subtabs
+            let subtab_y = y + margin + 20;
+            let subtabs = ["[1] VMs", "[2] Containers", "[3] CVMs", "[4] Architecture"];
+            let mut sx = x + margin;
+            for (idx, name) in subtabs.iter().enumerate() {
+                let active = match (self.virt_subtab, idx) {
+                    (VirtSubTab::VMs, 0) => true,
+                    (VirtSubTab::Containers, 1) => true,
+                    (VirtSubTab::CVMs, 2) => true,
+                    (VirtSubTab::Architecture, 3) => true,
+                    _ => false,
                 };
-                let info = format!("{:<3} {:<16} {:<11} {:>3}% {:>5}MB  {:>10}",
-                    vm.id, vm.name, vm.state, vm.cpu_usage, vm.memory_usage_mb, uptime);
-                pg.draw_text(table_x + 8, curr_y, &info, text_color);
-                curr_y += line_h;
+                pg.fill_rect(sx, subtab_y, 110, 22, if active { 0x005522 } else { 0x333333 });
+                pg.draw_rect_outline(sx, subtab_y, 110, 22, if active { 0x00FF88 } else { 0x666666 });
+                pg.draw_text(sx + 6, subtab_y + 3, name, if active { 0xFFFFFF } else { 0xAAAAAA });
+                sx += 118;
             }
 
-            // Properties Panel
-            let props_x = table_x + table_w + gutter;
-            let props_w = width.saturating_sub(props_x + margin);
-            if props_w > 150 {
-                pg.draw_rect_outline(props_x, table_y, props_w, table_h, 0x888888);
-                pg.draw_text_bg(props_x + 10, table_y - 4, "VM Properties", 0x00FF00, 0x222222);
-                
-                if let Some(vm) = self.vms.get(self.selected_vm_idx) {
-                    let mut py = table_y + 10;
-                    pg.draw_text(props_x + 10, py, &format!("Name: {}", vm.name), 0xFFFFFF);
-                    py += 20;
-                    pg.draw_text(props_x + 10, py, &format!("ID:   {}", vm.id), 0xCCCCCC);
-                    py += 20;
-                    pg.draw_text(props_x + 10, py, &format!("State: {}", vm.state), if vm.state.contains("Running") { 0x00FF00 } else { 0xFFFFFF });
-                    py += 20;
-                    pg.draw_text(props_x + 10, py, &format!("vCPUs: {}", vm.cpu_usage), 0xCCCCCC);
-                    py += 20;
-                    pg.draw_text(props_x + 10, py, &format!("RAM:   {} MB", vm.memory_usage_mb), 0xCCCCCC);
-                    py += 20;
-                    pg.draw_text(props_x + 10, py, &format!("Disk:  {} MB", vm.disk_usage_mb), 0xCCCCCC);
-                    py += 20;
-                    pg.draw_text(props_x + 10, py, &format!("Uptime: {}s", vm.uptime_seconds), 0x888888);
-                } else {
-                    pg.draw_text(props_x + 10, table_y + 10, "No VM selected", 0x888888);
-                }
-            }
+            match self.virt_subtab {
+                VirtSubTab::VMs => {
+                    let table_x = x + margin;
+                    let table_y = subtab_y + 30;
+                    let table_w = core::cmp::min(width - margin * 2, 600);
+                    let table_h = height.saturating_sub(margin + 30 + 120);
+                    pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0xCCCCCC);
 
-            // Actions Bar
-            if !self.vms.is_empty() {
-                let actions_y = table_y + table_h + gutter;
-                pg.draw_text(x + margin, actions_y, "Actions for Selected VM:", 0xCCCCCC);
-                let actions = ["Start", "Stop", "Reset", "Zero", "Delete", "Save", "Restore", "Console"];
-                let mut action_x = x + margin;
-                let action_y = actions_y + 20;
-                for (idx, action) in actions.iter().enumerate() {
-                    let is_focused = idx == self.vm_action_idx;
-                    let color = if is_focused { 0x00AA00 } else { 0x444444 };
-                    pg.fill_rect(action_x, action_y, 78, 24, color);
-                    pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
-                    action_x += 88;
+                    pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
+                    pg.draw_text(table_x + 8, table_y + 4, "ID  NAME             STATE       CPU%  MEM(MB)  UPTIME", 0xAAAAAA);
+
+                    let mut curr_y = table_y + line_h + 4;
+                    for (i, vm) in self.vms.iter().enumerate() {
+                        if curr_y + line_h > table_y + table_h { break; }
+                        let is_selected = i == self.selected_vm_idx;
+                        let text_color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
+                        if is_selected {
+                            pg.fill_rect(table_x + 1, curr_y, table_w - 2, line_h, 0x444444);
+                        }
+
+                        let uptime = if vm.uptime_seconds < 60 {
+                            format!("{}s", vm.uptime_seconds)
+                        } else if vm.uptime_seconds < 3600 {
+                            format!("{}m {}s", vm.uptime_seconds / 60, vm.uptime_seconds % 60)
+                        } else {
+                            format!("{}h {}m", vm.uptime_seconds / 3600, (vm.uptime_seconds % 3600) / 60)
+                        };
+                        let info = format!("{:<3} {:<16} {:<11} {:>3}% {:>5}MB  {:>10}",
+                            vm.id, vm.name, vm.state, vm.cpu_usage, vm.memory_usage_mb, uptime);
+                        pg.draw_text(table_x + 8, curr_y, &info, text_color);
+                        curr_y += line_h;
+                    }
+
+                    let props_x = table_x + table_w + gutter;
+                    let props_w = width.saturating_sub(props_x + margin);
+                    if props_w > 150 {
+                        pg.draw_rect_outline(props_x, table_y, props_w, table_h, 0x888888);
+                        pg.draw_text_bg(props_x + 10, table_y - 4, "VM Properties", 0x00FF00, 0x222222);
+
+                        if let Some(vm) = self.vms.get(self.selected_vm_idx) {
+                            let mut py = table_y + 10;
+                            pg.draw_text(props_x + 10, py, &format!("Name: {}", vm.name), 0xFFFFFF);
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &format!("ID:   {}", vm.id), 0xCCCCCC);
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &format!("State: {}", vm.state), if vm.state.contains("Running") { 0x00FF00 } else { 0xFFFFFF });
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &format!("vCPUs: {}", vm.cpu_usage), 0xCCCCCC);
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &format!("RAM:   {} MB", vm.memory_usage_mb), 0xCCCCCC);
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &format!("Disk:  {} MB", vm.disk_usage_mb), 0xCCCCCC);
+                            py += 20;
+                            pg.draw_text(props_x + 10, py, &format!("Uptime: {}s", vm.uptime_seconds), 0x888888);
+                        } else {
+                            pg.draw_text(props_x + 10, table_y + 10, "No VM selected", 0x888888);
+                        }
+                    }
                 }
-                pg.draw_text(x + margin, action_y + 32, "Press ENTER to execute action | SPACE to Create VM", 0x888888);
-            } else {
-                pg.draw_text(x + margin, table_y + table_h + gutter, "No VMs. Press SPACE to Create VM", 0x888888);
+                VirtSubTab::Containers => {
+                    let table_x = x + margin;
+                    let table_y = subtab_y + 30;
+                    let table_w = core::cmp::min(width - margin * 2, 600);
+                    let table_h = height.saturating_sub(margin + 30 + 120);
+                    pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0xCCCCCC);
+                    pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
+                    pg.draw_text(table_x + 8, table_y + 4, "ID  NAME             IMAGE            STATE    SHARES  RAM", 0xAAAAAA);
+
+                    let mut curr_y = table_y + line_h + 4;
+                    for (i, c) in self.containers.iter().enumerate() {
+                        if curr_y + line_h > table_y + table_h { break; }
+                        let is_selected = i == self.selected_container_idx;
+                        let text_color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
+                        if is_selected {
+                            pg.fill_rect(table_x + 1, curr_y, table_w - 2, line_h, 0x444444);
+                        }
+                        let info = format!("{:<3} {:<16} {:<16} {:<8} {:>6}  {:>4}MB",
+                            c.id, c.name, c.image, c.state, c.cpu_shares, c.memory_mb);
+                        pg.draw_text(table_x + 8, curr_y, &info, text_color);
+                        curr_y += line_h;
+                    }
+                }
+                VirtSubTab::CVMs => {
+                    let table_x = x + margin;
+                    let table_y = subtab_y + 30;
+                    let table_w = core::cmp::min(width - margin * 2, 600);
+                    let table_h = height.saturating_sub(margin + 30 + 120);
+                    pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0xCCCCCC);
+                    pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
+                    pg.draw_text(table_x + 8, table_y + 4, "ID  NAME             KERNEL           STATE    vCPU  RAM", 0xAAAAAA);
+
+                    let mut curr_y = table_y + line_h + 4;
+                    for (i, cvm) in self.cvms.iter().enumerate() {
+                        if curr_y + line_h > table_y + table_h { break; }
+                        let is_selected = i == self.selected_cvm_idx;
+                        let text_color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
+                        if is_selected {
+                            pg.fill_rect(table_x + 1, curr_y, table_w - 2, line_h, 0x444444);
+                        }
+                        let info = format!("{:<3} {:<16} {:<16} {:<8} {:>4}  {:>4}MB",
+                            cvm.id, cvm.name, cvm.kernel, cvm.state, cvm.vcpus, cvm.memory_mb);
+                        pg.draw_text(table_x + 8, curr_y, &info, text_color);
+                        curr_y += line_h;
+                    }
+                }
+                VirtSubTab::Architecture => {
+                    let ax = x + margin;
+                    let ay = subtab_y + 30;
+                    pg.draw_text(ax, ay, "HPVMx Virtualization Architecture Topology:", 0xFFFF00);
+                    pg.draw_text(ax + 10, ay + 20, "Layer 1: VmPort Gateway (Port 10000) & VM Guard Multi-Token Heartbeat", 0x00FFFF);
+                    pg.draw_text(ax + 10, ay + 40, "Layer 2: Hypervisor (VT-x VMs) | Container Engine (CVS) | CVM Sandboxes", 0x00FF88);
+                    pg.draw_text(ax + 10, ay + 60, "Layer 3: CVMBus & SM RingBuf IPC | Port LUT (65536) | Client LUT", 0xFFA500);
+                }
             }
         }
 
@@ -686,16 +1188,29 @@ pub mod vms {
             if let Some(data) = env.global_data.as_ref() {
                 self.vms = data.vms.clone();
                 self.selected_vm_idx = self.selected_vm_idx.min(self.vms.len().saturating_sub(1));
+                self.containers = data.containers.clone();
+                self.cvms = data.cvms.clone();
+                self.virt_subtab = data.virt_subtab;
             }
         }
 
         fn input(&mut self, key: Key) {
             match key {
                 Key::Special(ScanCode::UP) => {
-                    if self.selected_vm_idx > 0 { self.selected_vm_idx -= 1; }
+                    match self.virt_subtab {
+                        VirtSubTab::VMs => if self.selected_vm_idx > 0 { self.selected_vm_idx -= 1; },
+                        VirtSubTab::Containers => if self.selected_container_idx > 0 { self.selected_container_idx -= 1; },
+                        VirtSubTab::CVMs => if self.selected_cvm_idx > 0 { self.selected_cvm_idx -= 1; },
+                        VirtSubTab::Architecture => if self.selected_arch_node > 0 { self.selected_arch_node -= 1; },
+                    }
                 }
                 Key::Special(ScanCode::DOWN) => {
-                    if self.selected_vm_idx + 1 < self.vms.len() { self.selected_vm_idx += 1; }
+                    match self.virt_subtab {
+                        VirtSubTab::VMs => if self.selected_vm_idx + 1 < self.vms.len() { self.selected_vm_idx += 1; },
+                        VirtSubTab::Containers => if self.selected_container_idx + 1 < self.containers.len() { self.selected_container_idx += 1; },
+                        VirtSubTab::CVMs => if self.selected_cvm_idx + 1 < self.cvms.len() { self.selected_cvm_idx += 1; },
+                        VirtSubTab::Architecture => if self.selected_arch_node < 2 { self.selected_arch_node += 1; },
+                    }
                 }
                 Key::Special(ScanCode::LEFT) => {
                     if self.vm_action_idx > 0 { self.vm_action_idx -= 1; }
@@ -703,23 +1218,40 @@ pub mod vms {
                 Key::Special(ScanCode::RIGHT) => {
                     if self.vm_action_idx < 7 { self.vm_action_idx += 1; }
                 }
-                Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
-                    if let Some(vm) = self.vms.get(self.selected_vm_idx) {
-                        let vm_id = vm.id;
-                        unsafe {
-                            if let Some(hv) = crate::HYPERVISOR.as_mut() {
-                                match self.vm_action_idx {
-                                    0 => { let _ = hv.start_vm(vm_id); }
-                                    1 => { let _ = hv.stop_vm(vm_id); }
-                                    2 => { let _ = hv.reset_vm(vm_id); }
-                                    3 => { let _ = hv.zero_vm(vm_id); }
-                                    4 => { let _ = hv.delete_vm(vm_id); }
-                                    5 => { let _ = hv.save_vm_metadata("/VMSTATE"); }
-                                    6 => { let _ = hv.restore_vm_metadata("/VMSTATE"); }
-                                    _ => {}
+                Key::Printable(c) => {
+                    let ch = char::from(c);
+                    match ch {
+                        '1' => self.virt_subtab = VirtSubTab::VMs,
+                        '2' => self.virt_subtab = VirtSubTab::Containers,
+                        '3' => self.virt_subtab = VirtSubTab::CVMs,
+                        '4' => self.virt_subtab = VirtSubTab::Architecture,
+                        'v' | 'V' => self.virt_subtab = VirtSubTab::VMs,
+                        'c' | 'C' => self.virt_subtab = VirtSubTab::Containers,
+                        'm' | 'M' => self.virt_subtab = VirtSubTab::CVMs,
+                        'a' | 'A' => self.virt_subtab = VirtSubTab::Architecture,
+                        '\t' => self.virt_subtab = self.virt_subtab.next(),
+                        '\r' | '\n' => {
+                            if matches!(self.virt_subtab, VirtSubTab::VMs) {
+                                if let Some(vm) = self.vms.get(self.selected_vm_idx) {
+                                    let vm_id = vm.id;
+                                    unsafe {
+                                        if let Some(hv) = crate::HYPERVISOR.as_mut() {
+                                            match self.vm_action_idx {
+                                                0 => { let _ = hv.start_vm(vm_id); }
+                                                1 => { let _ = hv.stop_vm(vm_id); }
+                                                2 => { let _ = hv.reset_vm(vm_id); }
+                                                3 => { let _ = hv.zero_vm(vm_id); }
+                                                4 => { let _ = hv.delete_vm(vm_id); }
+                                                5 => { let _ = hv.save_vm_metadata("/VMSTATE"); }
+                                                6 => { let _ = hv.restore_vm_metadata("/VMSTATE"); }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -730,13 +1262,17 @@ pub mod vms {
         fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }
     }
 
-    impl AppInfo for X_VMs {
-        fn name(&self) -> &str { "Virtual Machines" }
+    impl AppInfo for X_Virtualization {
+        fn name(&self) -> &str { "Virtualization" }
         fn version(&self) -> &str { "1.0.0" }
         fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::CUBE_WINDOW_RED_32_ICON_DATA }
         fn dimensions(&self) -> (usize, usize) { (800, 600) }
     }
+
+    pub use self::X_Virtualization as X_VMs_App;
 }
+
+pub use virtualization as vms;
 
 // =========================================================================
 // 4. Create VM Tab

@@ -147,6 +147,16 @@ pub struct DashboardUI {
     pub cycles: usize,
     pub selected_process_idx: usize,
     pub dragging_window: Option<(usize, usize, usize)>,
+
+    // Virtualization management fields
+    pub virt_subtab: VirtSubTab,
+    pub containers: Vec<ContainerDisplayInfo>,
+    pub cvms: Vec<CvmDisplayInfo>,
+    pub selected_container_idx: usize,
+    pub container_action_idx: usize,
+    pub selected_cvm_idx: usize,
+    pub cvm_action_idx: usize,
+    pub selected_arch_node: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -416,6 +426,57 @@ pub struct VmDisplayInfo {
     pub uptime_seconds: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum VirtSubTab {
+    VMs,
+    Containers,
+    CVMs,
+    Architecture,
+}
+
+impl VirtSubTab {
+    pub fn next(&self) -> Self {
+        match self {
+            VirtSubTab::VMs => VirtSubTab::Containers,
+            VirtSubTab::Containers => VirtSubTab::CVMs,
+            VirtSubTab::CVMs => VirtSubTab::Architecture,
+            VirtSubTab::Architecture => VirtSubTab::VMs,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            VirtSubTab::VMs => VirtSubTab::Architecture,
+            VirtSubTab::Containers => VirtSubTab::VMs,
+            VirtSubTab::CVMs => VirtSubTab::Containers,
+            VirtSubTab::Architecture => VirtSubTab::CVMs,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ContainerDisplayInfo {
+    pub id: u64,
+    pub name: String,
+    pub image: String,
+    pub state: String,
+    pub cpu_shares: u32,
+    pub memory_mb: u32,
+    pub port_count: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct CvmDisplayInfo {
+    pub id: u32,
+    pub name: String,
+    pub kernel: String,
+    pub state: String,
+    pub memory_mb: u32,
+    pub vcpus: u32,
+    pub container_count: usize,
+    pub bus_channels: usize,
+}
+
 #[derive(Clone)]
 pub struct SystemResources {
     pub total_memory_mb: u32,
@@ -562,6 +623,63 @@ impl DashboardUI {
             cycles: 0,
             selected_process_idx: 0,
             dragging_window: None,
+            virt_subtab: VirtSubTab::VMs,
+            containers: alloc::vec![
+                ContainerDisplayInfo {
+                    id: 1,
+                    name: String::from("web-nginx"),
+                    image: String::from("alpine-nginx:1.24"),
+                    state: String::from("Running"),
+                    cpu_shares: 512,
+                    memory_mb: 128,
+                    port_count: 2,
+                },
+                ContainerDisplayInfo {
+                    id: 2,
+                    name: String::from("db-redis"),
+                    image: String::from("redis:7.0-alpine"),
+                    state: String::from("Running"),
+                    cpu_shares: 1024,
+                    memory_mb: 256,
+                    port_count: 1,
+                },
+                ContainerDisplayInfo {
+                    id: 3,
+                    name: String::from("worker-async"),
+                    image: String::from("node:18-slim"),
+                    state: String::from("Stopped"),
+                    cpu_shares: 256,
+                    memory_mb: 128,
+                    port_count: 0,
+                },
+            ],
+            cvms: alloc::vec![
+                CvmDisplayInfo {
+                    id: 1,
+                    name: String::from("cvm-box-primary"),
+                    kernel: String::from("MicroKernel-v1.0"),
+                    state: String::from("Running"),
+                    memory_mb: 512,
+                    vcpus: 2,
+                    container_count: 2,
+                    bus_channels: 4,
+                },
+                CvmDisplayInfo {
+                    id: 2,
+                    name: String::from("cvm-sec-sandbox"),
+                    kernel: String::from("MicroKernel-v1.0"),
+                    state: String::from("Ready"),
+                    memory_mb: 256,
+                    vcpus: 1,
+                    container_count: 1,
+                    bus_channels: 2,
+                },
+            ],
+            selected_container_idx: 0,
+            container_action_idx: 0,
+            selected_cvm_idx: 0,
+            cvm_action_idx: 0,
+            selected_arch_node: 0,
         };
         ui.ensure_tab_app(DashboardTab::Overview);
         ui
@@ -578,6 +696,18 @@ impl DashboardUI {
 
     pub fn add_vm(&mut self, vm: VmDisplayInfo) {
         self.vms.push(vm);
+    }
+
+    pub fn add_container(&mut self, container: ContainerDisplayInfo) {
+        self.containers.push(container);
+    }
+
+    pub fn add_cvm(&mut self, cvm: CvmDisplayInfo) {
+        self.cvms.push(cvm);
+    }
+
+    pub fn refresh_virtualization(&mut self) {
+        self.refresh_vms();
     }
 
     pub fn refresh_vms(&mut self) {
@@ -797,7 +927,7 @@ impl DashboardUI {
                 pg.draw_icon(0, 0, 1440, 1440, &crate::backgrounds::win_snowtree::ICON_DATA);
             } else {
                 pg.fill_rect(0, 32, width, 16, 0x444444); // Dark Gray
-                let nav_text = "O Overview | V VMs | R Resources | I SysInfo | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
+                let nav_text = "O Overview | V Virtualization | R Resources | I SysInfo | S Storage | N Network | D Devices | C Console | T Test | Z Settings | P Packages | A Apps";
                 pg.draw_text(10, 36, nav_text, 0xFFFFFF);
             }
 
@@ -830,96 +960,7 @@ impl DashboardUI {
                     match self.selected_tab {
                         DashboardTab::Overview => crate::ui::tabui::overview::draw(self, &mut pg, 0, 0, width, height),
                         DashboardTab::Apps => crate::ui::tabui::apps::draw(self, &mut pg, 0, 0, width, height),
-                        DashboardTab::VirtualMachines => {
-                            // Title
-                            pg.draw_text(margin, content_top + margin + 4, "Virtual Machines", 0x00FF00);
-
-                            // New VM Button
-                            let create_btn_x = width - margin - 120;
-                            let create_btn_y = content_top + margin;
-                            pg.fill_rect(create_btn_x, create_btn_y, 120, 24, 0x008000);
-                            pg.draw_text(create_btn_x + 10, create_btn_y + 4, "[+] Create VM", 0xFFFFFF);
-
-                            // Table frame
-                            let table_x = margin;
-                            let table_y = content_top + margin + 32;
-                            let table_w = core::cmp::min(width - margin * 2, 760);
-                            let table_h = core::cmp::min(height - table_y - 120, 260);
-                            pg.draw_rect_outline(table_x, table_y, table_w, table_h, 0x888888);
-
-                            // Header background
-                            pg.fill_rect(table_x + 1, table_y + 1, table_w - 2, line_h, 0x333333);
-                            pg.draw_text(table_x + 8, table_y + 4, "ID  NAME             STATE       CPU  MEM    UPTIME", 0xCCCCCC);
-
-                            // Rows
-                            let mut y = table_y + line_h + gutter;
-                            for (idx, vm) in self.vms.iter().enumerate() {
-                                if y + line_h > table_y + table_h - 2 { break; }
-                                let is_selected = idx == self.selected_vm_idx;
-                                let text_color = if is_selected { 0xFFFF00 } else { 0xFFFFFF };
-                                if is_selected {
-                                    pg.fill_rect(table_x + 2, y - 2, table_w - 4, line_h, 0x444400);
-                                }
-                                let uptime = if vm.uptime_seconds < 60 {
-                                    alloc::format!("{}s", vm.uptime_seconds)
-                                } else if vm.uptime_seconds < 3600 {
-                                    alloc::format!("{}m {}s", vm.uptime_seconds / 60, vm.uptime_seconds % 60)
-                                } else {
-                                    alloc::format!("{}h {}m", vm.uptime_seconds / 3600, (vm.uptime_seconds % 3600) / 60)
-                                };
-                                let info = alloc::format!("{:<3} {:<16} {:<11} {:>3}% {:>5}MB  {:>10}",
-                                                          vm.id, vm.name, vm.state, vm.cpu_usage, vm.memory_usage_mb, uptime);
-                                pg.draw_text(table_x + 8, y, &info, text_color);
-                                y += line_h;
-                            }
-
-                            // VM Details / Properties Panel
-                            let props_x = table_x + table_w + gutter;
-                            let props_w = width.saturating_sub(props_x + margin);
-                            if props_w > 150 {
-                                let props_h = table_h;
-                                pg.draw_rect_outline(props_x, table_y, props_w, props_h, 0x888888);
-                                pg.draw_text_bg(props_x + 10, table_y - 4, "VM Properties", 0x00FF00, 0x222222);
-
-                                if let Some(vm) = self.vms.get(self.selected_vm_idx) {
-                                    let mut py = table_y + 10;
-                                    pg.draw_text(props_x + 10, py, &alloc::format!("Name: {}", vm.name), 0xFFFFFF);
-                                    py += 20;
-                                    pg.draw_text(props_x + 10, py, &alloc::format!("ID:   {}", vm.id), 0xCCCCCC);
-                                    py += 20;
-                                    pg.draw_text(props_x + 10, py, &alloc::format!("State: {}", vm.state), if vm.state.contains("Running") { 0x00FF00 } else { 0xFFFFFF });
-                                    py += 20;
-                                    pg.draw_text(props_x + 10, py, &alloc::format!("vCPUs: {}", vm.cpu_usage), 0xCCCCCC); // Actually usage, but good to show
-                                    py += 20;
-                                    pg.draw_text(props_x + 10, py, &alloc::format!("RAM:   {} MB", vm.memory_usage_mb), 0xCCCCCC);
-                                    py += 20;
-                                    pg.draw_text(props_x + 10, py, &alloc::format!("Disk:  {} MB", vm.disk_usage_mb), 0xCCCCCC);
-                                    py += 20;
-                                    pg.draw_text(props_x + 10, py, &alloc::format!("Uptime: {}s", vm.uptime_seconds), 0x888888);
-                                } else {
-                                    pg.draw_text(props_x + 10, table_y + 10, "No VM selected", 0x888888);
-                                }
-                            }
-
-                            // VM Actions Bar
-                            if !self.vms.is_empty() {
-                                let actions_y = table_y + table_h + gutter;
-                                pg.draw_text(margin, actions_y, "Actions for Selected VM:", 0xCCCCCC);
-                                let actions = ["Start", "Stop", "Reset", "Zero", "Delete", "Save", "Restore", "Console"];
-                                let mut action_x = margin;
-                                let action_y = actions_y + 20;
-                                for (idx, action) in actions.iter().enumerate() {
-                                    let is_focused = idx == self.vm_action_idx;
-                                    let color = if is_focused { 0x00AA00 } else { 0x444444 };
-                                    pg.fill_rect(action_x, action_y, 78, 24, color);
-                                    pg.draw_text(action_x + 8, action_y + 4, action, 0xFFFFFF);
-                                    action_x += 88;
-                                }
-                                pg.draw_text(margin, action_y + 32, "Press ENTER to execute action | SPACE to Create VM", 0x888888);
-                            } else {
-                                pg.draw_text(margin, table_y + table_h + gutter, "No VMs. Press SPACE to Create VM", 0x888888);
-                            }
-                        }
+                        DashboardTab::VirtualMachines => crate::ui::tabui::virtualization::draw(self, &mut pg, 0, 0, width, height),
                         DashboardTab::CreateVM => {
                             pg.draw_text(margin, content_top + margin, "Create New Virtual Machine", 0x00FF00);
 
@@ -4338,6 +4379,11 @@ impl DashboardUI {
                             self.package_action_idx = (self.package_action_idx + 1).min(5);
                         }
                         _ => {}
+                    }
+                }
+                DashboardTab::VirtualMachines => {
+                    if crate::ui::tabui::virtualization::input(self, key) {
+                        return;
                     }
                 }
                 DashboardTab::Settings => {

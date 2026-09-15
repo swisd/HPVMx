@@ -25,6 +25,7 @@ use crate::apps::resource_tester::SysTestApp;
 use crate::apps::x_storage::X_Storage;
 use crate::apps::x_overview::X_Overview;
 use crate::apps::x_vms::X_VMs;
+use crate::apps::x_virtualization::X_Virtualization;
 use crate::apps::x_resources::X_Resources;
 use crate::apps::x_apps::X_Apps;
 use crate::apps::x_network::X_Network;
@@ -61,6 +62,7 @@ pub(crate) mod error;
 pub mod x_overview;
 pub mod x_apps;
 pub mod x_vms;
+pub mod x_virtualization;
 pub mod x_createvm;
 pub mod x_network;
 pub mod x_resources;
@@ -162,6 +164,11 @@ pub(crate) static APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
     }, icons::CUBE_WINDOW_RED_32_ICON_DATA, "1.0.0"),
     ("X_VMs", || {
         let app = X_VMs::new();
+        let dims = crate::env::AppInfo::dimensions(&app);
+        (Box::new(app), dims)
+    }, icons::CUBE_WINDOW_RED_32_ICON_DATA, "1.0.0"),
+    ("X_Virtualization", || {
+        let app = X_Virtualization::new();
         let dims = crate::env::AppInfo::dimensions(&app);
         (Box::new(app), dims)
     }, icons::CUBE_WINDOW_RED_32_ICON_DATA, "1.0.0"),

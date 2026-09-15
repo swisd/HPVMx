@@ -21,6 +21,8 @@ use crate::vmm::container::{ContainerResources, ContainerSpec, ContainerState};
 use crate::vmm::cvm::{ContainerVirtualMachine, CvmState};
 use crate::vmm::cvmbus::CvmBusMessage;
 use crate::vmm::interface::{PortIoInterface, PortOwner};
+use crate::ui::{DashboardTab, DashboardUI, VirtSubTab, ContainerDisplayInfo, CvmDisplayInfo};
+use crate::ui::tabui::virtualization::X_Virtualization;
 
 /// Mock HostVmBackend for testing startup/boot hosting components.
 struct MockBootVmBackend {
@@ -95,9 +97,9 @@ pub fn test_boot_environment() -> bool {
         && uefi.as_deref() == Some("true");
 
     if pass {
-        vdebug_autoprefix!("test_boot_environment: PASSED");
+        vdebug_autoprefix!(10, "test_boot_environment: PASSED");
     } else {
-        vdebug_autoprefix!("test_boot_environment: FAILED");
+        vdebug_autoprefix!(12, "test_boot_environment: FAILED");
     }
     pass
 }
@@ -152,11 +154,11 @@ pub fn test_boot_cvm_and_containers() -> bool {
     }
 
     if cvm.stop().is_err() || cvm.state != CvmState::Stopped {
-        vdebug_autoprefix!("test_boot_cvm_and_containers: CVM stop failed");
+        vdebug_autoprefix!(12, "test_boot_cvm_and_containers: CVM stop failed");
         return false;
     }
 
-    vdebug_autoprefix!("test_boot_cvm_and_containers: PASSED");
+    vdebug_autoprefix!(10, "test_boot_cvm_and_containers: PASSED");
     true
 }
 
@@ -219,7 +221,7 @@ pub fn test_boot_hosting_luts() -> bool {
         return false;
     }
 
-    vdebug_autoprefix!("test_boot_hosting_luts: PASSED");
+    vdebug_autoprefix!(10, "test_boot_hosting_luts: PASSED");
     true
 }
 
@@ -255,7 +257,7 @@ pub fn test_boot_vmguard_lifecycle() -> bool {
         return false;
     }
 
-    vdebug_autoprefix!("test_boot_vmguard_lifecycle: PASSED");
+    vdebug_autoprefix!(10, "test_boot_vmguard_lifecycle: PASSED");
     true
 }
 
@@ -296,12 +298,12 @@ pub fn test_boot_vmport_gateway() -> bool {
     match resp {
         crate::hosting::vmdispatch::VmPortResponse::Accepted(res) => {
             if res.instance_uuid != "0001.a1b2-c3d4-e5f6" || res.vm_id != 1 {
-                vdebug_autoprefix!("test_boot_vmport_gateway: Unexpected RequestResult {:?}", res);
+                vdebug_autoprefix!(12, "test_boot_vmport_gateway: Unexpected RequestResult {:?}", res);
                 return false;
             }
         }
         crate::hosting::vmdispatch::VmPortResponse::Rejected(err) => {
-            vdebug_autoprefix!("test_boot_vmport_gateway: Request was unexpectedly rejected: {:?}", err);
+            vdebug_autoprefix!(12, "test_boot_vmport_gateway: Request was unexpectedly rejected: {:?}", err);
             return false;
         }
     }
@@ -322,17 +324,17 @@ pub fn test_boot_vmport_gateway() -> bool {
     };
 
     if port.enqueue_ipc(queued_msg).is_err() {
-        vdebug_autoprefix!("test_boot_vmport_gateway: Enqueue IPC failed");
+        vdebug_autoprefix!(12, "test_boot_vmport_gateway: Enqueue IPC failed");
         return false;
     }
 
     let queued_resp = port.process_queued_ipc(1600);
     if !matches!(queued_resp, Some(crate::hosting::vmdispatch::VmPortResponse::Accepted(_))) {
-        vdebug_autoprefix!("test_boot_vmport_gateway: Queued IPC processing failed: {:?}", queued_resp);
+        vdebug_autoprefix!(12, "test_boot_vmport_gateway: Queued IPC processing failed: {:?}", queued_resp);
         return false;
     }
 
-    vdebug_autoprefix!("test_boot_vmport_gateway: PASSED");
+    vdebug_autoprefix!(10, "test_boot_vmport_gateway: PASSED");
     true
 }
 
@@ -342,40 +344,121 @@ pub fn test_boot_port_io_interface() -> bool {
 
     let mut port_io = PortIoInterface::new(PortOwner::Vm(1));
     if port_io.register_port(0x3F8, 1, true).is_err() {
-        vdebug_autoprefix!("test_boot_port_io_interface: Failed to register COM1 port");
+        vdebug_autoprefix!(12, "test_boot_port_io_interface: Failed to register COM1 port");
         return false;
     }
     if port_io.register_port(0x60, 1, false).is_err() {
-        vdebug_autoprefix!("test_boot_port_io_interface: Failed to register read-only keyboard port");
+        vdebug_autoprefix!(12, "test_boot_port_io_interface: Failed to register read-only keyboard port");
         return false;
     }
 
     if port_io.write(0x3F8, &[0x41]).is_err() {
-        vdebug_autoprefix!("test_boot_port_io_interface: Failed to write to COM1 port");
+        vdebug_autoprefix!(12, "test_boot_port_io_interface: Failed to write to COM1 port");
         return false;
     }
 
     let com1_val = port_io.read(0x3F8, 1);
     if com1_val != Ok(vec![0x41]) {
-        vdebug_autoprefix!("test_boot_port_io_interface: COM1 read mismatch: {:?}", com1_val);
+        vdebug_autoprefix!(12, "test_boot_port_io_interface: COM1 read mismatch: {:?}", com1_val);
         return false;
     }
 
     // Ensure write to read-only port is rejected
     if port_io.write(0x60, &[0xFF]).is_ok() {
-        vdebug_autoprefix!("test_boot_port_io_interface: Read-only port accepted write unexpectedly");
+        vdebug_autoprefix!(12, "test_boot_port_io_interface: Read-only port accepted write unexpectedly");
         return false;
     }
 
-    vdebug_autoprefix!("test_boot_port_io_interface: PASSED");
+    vdebug_autoprefix!(10, "test_boot_port_io_interface: PASSED");
+    true
+}
+
+/// Test 7: Virtualization Management Tab UI, Subtabs, and Architecture Views
+pub fn test_boot_virtualization_ui() -> bool {
+    vdebug_autoprefix!("Running test_boot_virtualization_ui...");
+
+    // Test subtab cycling
+    let mut tab = VirtSubTab::VMs;
+    tab = tab.next();
+    if tab != VirtSubTab::Containers {
+        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Next after VMs should be Containers");
+        return false;
+    }
+    tab = tab.next();
+    if tab != VirtSubTab::CVMs {
+        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Next after Containers should be CVMs");
+        return false;
+    }
+    tab = tab.next();
+    if tab != VirtSubTab::Architecture {
+        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Next after CVMs should be Architecture");
+        return false;
+    }
+    tab = tab.next();
+    if tab != VirtSubTab::VMs {
+        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Next after Architecture should cycle back to VMs");
+        return false;
+    }
+
+    // Test DashboardUI virtualization state and methods
+    let pm = crate::pm::PackageManager::new();
+    let mut ui = DashboardUI::new(pm);
+    if ui.virt_subtab != VirtSubTab::VMs {
+        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Default subtab should be VMs");
+        return false;
+    }
+    if ui.containers.is_empty() || ui.cvms.is_empty() {
+        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Initial container and CVM catalogs should not be empty");
+        return false;
+    }
+
+    let initial_containers = ui.containers.len();
+    ui.add_container(ContainerDisplayInfo {
+        id: 99,
+        name: String::from("test-container"),
+        image: String::from("test:v1"),
+        state: String::from("Running"),
+        cpu_shares: 512,
+        memory_mb: 256,
+        port_count: 1,
+    });
+    if ui.containers.len() != initial_containers + 1 {
+        vdebug_autoprefix!(12, "test_boot_virtualization_ui: add_container failed");
+        return false;
+    }
+
+    let initial_cvms = ui.cvms.len();
+    ui.add_cvm(CvmDisplayInfo {
+        id: 99,
+        name: String::from("test-cvm"),
+        kernel: String::from("MicroKernel-v1.0"),
+        state: String::from("Running"),
+        memory_mb: 512,
+        vcpus: 2,
+        container_count: 1,
+        bus_channels: 2,
+    });
+    if ui.cvms.len() != initial_cvms + 1 {
+        vdebug_autoprefix!(12, "test_boot_virtualization_ui: add_cvm failed");
+        return false;
+    }
+
+    // Test X_Virtualization App instantiation
+    let x_virt = X_Virtualization::new();
+    if x_virt.virt_subtab != VirtSubTab::VMs {
+        vdebug_autoprefix!(12, "test_boot_virtualization_ui: X_Virtualization default subtab mismatch");
+        return false;
+    }
+
+    vdebug_autoprefix!(10, "test_boot_virtualization_ui: PASSED");
     true
 }
 
 /// Master Runner for all Startup/Boot OS tests.
 pub fn run_all_boot_tests() -> bool {
-    vdebug_autoprefix!("========================================");
-    vdebug_autoprefix!("STARTING HPVMx STARTUP & BOOT OS TESTS");
-    vdebug_autoprefix!("========================================");
+    vdebug_autoprefix!(11, "========================================");
+    vdebug_autoprefix!(11, "STARTING HPVMx STARTUP & BOOT OS TESTS");
+    vdebug_autoprefix!(11, "========================================");
 
     let mut all_passed = true;
 
@@ -397,11 +480,14 @@ pub fn run_all_boot_tests() -> bool {
     if !test_boot_port_io_interface() {
         all_passed = false;
     }
+    if !test_boot_virtualization_ui() {
+        all_passed = false;
+    }
 
     if all_passed {
-        vdebug_autoprefix!(">>> ALL STARTUP & BOOT OS TESTS PASSED <<<");
+        vdebug_autoprefix!(10, ">>> ALL STARTUP & BOOT OS TESTS PASSED <<<");
     } else {
-        vdebug_autoprefix!(">>> SOME STARTUP & BOOT OS TESTS FAILED <<<");
+        vdebug_autoprefix!(12, ">>> SOME STARTUP & BOOT OS TESTS FAILED <<<");
     }
 
     all_passed

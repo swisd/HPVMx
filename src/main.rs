@@ -110,10 +110,10 @@ use crate::page::{Pagefile, PagefileHeader};
 static ALLOCATOR: LockedHeap<32> = LockedHeap::<32>::empty();
 
 #[allow(dead_code, unused)]
-static mut HEAP_STORAGE: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
+static mut HEAP_STORAGE: [u8; 64 * 1024 * 1024] = [0; 64 * 1024 * 1024];
 
 #[allow(dead_code, unused)]
-static mut VIRT_STACK: [u8; 256 * 1024 * 1024] = [0; 256 * 1024 * 1024];
+static mut VIRT_STACK: [u8; 4 * 1024 * 1024] = [0; 4 * 1024 * 1024];
 
 static mut PAGEFILE: Pagefile = Pagefile { header: PagefileHeader::DefaultHeader() };
 
@@ -279,25 +279,31 @@ fn main() -> Status {
     }
 
     if crate::env::run_async_tests() {
-        crate::vdebug!("async", "async/await multitasking verified");
+        crate::vdebug_autoprefix!(10, "async/await multitasking verified");
     } else {
-        crate::hpvm_error!("async", "async multitasking self-test failed");
+        crate::vdebug_autoprefix!(12, "async multitasking self-test failed");
     }
 
     if crate::multipar::run_multipar_tests() {
-        crate::vdebug!("multipar", "multi-core async executor & ArcWaker verified");
+        crate::vdebug_autoprefix!(10, "multi-core async executor & ArcWaker verified");
     } else {
-        crate::hpvm_error!("multipar", "multi-core async executor self-test failed");
+        crate::vdebug_autoprefix!(12, "multi-core async executor self-test failed");
     }
 
     if crate::hardware::cpu::mp::run_mp_tests() {
-        crate::vdebug!("cpu:mp", "MP topology verification passed");
+        crate::vdebug_autoprefix!(10, "MP topology verification passed");
     } else {
-        crate::hpvm_error!("cpu:mp", "MP topology verification failed");
+        crate::vdebug_autoprefix!(12, "MP topology verification failed");
+    }
+
+    if crate::testmodules::boot::run_all_boot_tests() {
+        crate::vdebug_autoprefix!(10, "startup, VMM/CVM and hosting self-tests passed");
+    } else {
+        crate::vdebug_autoprefix!(12, "startup, VMM/CVM and hosting self-tests failed");
     }
 
     crate::multipar::init_global_executor();
-    crate::vdebug!("multipar", "global async executor initialized");
+    crate::vdebug_autoprefix!(11, "global async executor initialized");
 
 
 
