@@ -25,7 +25,7 @@ pub struct PortIoEvent {
 pub enum PortIoError { InvalidWidth, UnmappedPort, ReadOnlyPort }
 
 #[derive(Debug, Clone)]
-struct PortRegister { value: Vec<u8>, writable: bool }
+pub(crate) struct PortRegister { value: Vec<u8>, writable: bool }
 
 /// In-memory port model used by virtual device implementations.
 pub struct PortIoInterface {

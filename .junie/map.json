@@ -17303,6 +17303,80 @@
         }
       },
       "dependencies": []
+    },
+    "src/testmodules/mod.rs": {
+      "path": "src/testmodules/mod.rs",
+      "purpose": "Subsystem module declarations for test runners and validation suites.",
+      "key_regions": [
+        {
+          "lines": "1-3",
+          "description": "Module exports for terminal and boot test suites"
+        }
+      ],
+      "objects": {},
+      "dependencies": [
+        "src/testmodules/terminal/mod.rs",
+        "src/testmodules/boot.rs"
+      ]
+    },
+    "src/testmodules/boot.rs": {
+      "path": "src/testmodules/boot.rs",
+      "purpose": "Startup and Boot OS test suite validating environment, VMM/CVM, LUTs, VM Guard, and VmPort gateway.",
+      "key_regions": [
+        {
+          "lines": "1-410",
+          "description": "Boot test functions and master test runner"
+        }
+      ],
+      "objects": {
+        "test_boot_environment": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "bool"
+        },
+        "test_boot_cvm_and_containers": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "bool"
+        },
+        "test_boot_hosting_luts": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "bool"
+        },
+        "test_boot_vmguard_lifecycle": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "bool"
+        },
+        "test_boot_vmport_gateway": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "bool"
+        },
+        "test_boot_port_io_interface": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "bool"
+        },
+        "run_all_boot_tests": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "bool"
+        }
+      },
+      "dependencies": [
+        "src/env.rs",
+        "src/hosting/lut.rs",
+        "src/hosting/rqproc.rs",
+        "src/hosting/types.rs",
+        "src/hosting/vmdispatch.rs",
+        "src/hosting/interface.rs",
+        "src/vmm/container.rs",
+        "src/vmm/cvm.rs",
+        "src/vmm/cvmbus.rs",
+        "src/vmm/interface.rs"
+      ]
     }
   }
 }

@@ -424,7 +424,22 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
         "dbgtest" => {
             crate::vdebug_autoprefix!("Running autoprefix debug test...");
             crate::testmodules::terminal::test::test_terminal();
-            // Add your debug test code here
+            let boot_ok = crate::testmodules::boot::run_all_boot_tests();
+            if boot_ok {
+                message!("\n", "All debug & boot tests PASSED successfully");
+            } else {
+                message!("\n", "Some debug & boot tests FAILED");
+            }
+        }
+
+        "boottest" => {
+            message!("\n", "Executing Startup & Boot OS Test Suite...");
+            let res = crate::testmodules::boot::run_all_boot_tests();
+            if res {
+                message!("\n", "[+] Startup & Boot OS Tests: ALL TESTS PASSED");
+            } else {
+                message!("\n", "[-] Startup & Boot OS Tests: FAILURE DETECTED");
+            }
         }
 
 
