@@ -1,12 +1,12 @@
-use crate::{hpvm_info, hpvm_log};
-use core::fmt::Write;
+use crate::{hpvm_info, hpvm_log, MOUSE, vdebug_autoprefix};
+use core::fmt::{Debug, Write};
 use core::time::Duration;
 use uefi::proto::console::text::Color;
-use uefi::{StatusExt, Identify};
-use uefi::boot::OpenProtocolAttributes;
-use uefi::proto::console::pointer::Pointer;
+use uefi::{StatusExt, Identify, Guid, boot, Event};
+use uefi::boot::{OpenProtocolAttributes, ScopedProtocol};
 pub use uefi_raw::protocol::console::AbsolutePointerProtocol;
 use crate::{hpvm_warn, message, vdebug};
+use uefi::proto::console::pointer::{Pointer as SimplePointer, Pointer};
 
 #[repr(transparent)]
 pub struct AbsolutePointer(pub AbsolutePointerProtocol);
@@ -44,8 +44,41 @@ impl AbsolutePointer {
     }
 }
 
+// unsafe impl Identify for AbsolutePointerProtocol { const GUID: Guid = Default::default(); }
+//
+// impl uefi::proto::Protocol for AbsolutePointerProtocol {}
+//
+// #[allow(dead_code)]
+// impl AbsolutePointerProtocol {
+//     pub fn read_state(&mut self) -> uefi::Result<Option<uefi_raw::protocol::console::AbsolutePointerState>> {
+//         let mut state = uefi_raw::protocol::console::AbsolutePointerState {
+//             current_x: 0,
+//             current_y: 0,
+//             current_z: 0,
+//             active_buttons: 0,
+//         };
+//         match unsafe { (self.0.get_state)(&mut self.0, &mut state) } {
+//             uefi::Status::SUCCESS => Ok(Some(state)),
+//             uefi::Status::NOT_READY => Ok(None),
+//             status => Err(status.into()),
+//         }
+//     }
+//
+//     pub fn mode(&self) -> Option<&uefi_raw::protocol::console::AbsolutePointerMode> {
+//         if self.0.mode.is_null() {
+//             None
+//         } else {
+//             Some(unsafe { &*self.0.mode })
+//         }
+//     }
+//
+//     pub fn reset(&mut self, extended: bool) -> uefi::Result {
+//         unsafe { (self.0.reset)(&mut self.0, extended.into()) }.to_result()
+//     }
+// }
+
 #[allow(dead_code)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct Cursor {
     pub x: i32,
     pub y: i32,
@@ -55,6 +88,9 @@ pub struct Cursor {
     pub prev_left_button: bool,
     pub prev_right_button: bool,
     pub poll_count: usize,
+    pub mouse_object: Option<ScopedProtocol<Pointer>>,
+    last_raw_abs_x: Option<f32>,
+    last_raw_abs_y: Option<f32>,
 }
 
 #[allow(dead_code)]
@@ -69,6 +105,9 @@ impl Cursor {
             prev_left_button: false,
             prev_right_button: false,
             poll_count: 0,
+            mouse_object: None,
+            last_raw_abs_x: None,
+            last_raw_abs_y: None,
         }
     }
 
@@ -101,10 +140,10 @@ impl Cursor {
         self.prev_right_button = self.right_button;
         self.poll_count = self.poll_count.wrapping_add(1);
 
-        let abs_res = self.try_update_absolute(screen_width, screen_height);
+        // let abs_res = self.try_update_absolute(screen_width, screen_height);
         let rel_res = self.try_update_relative(screen_width, screen_height);
 
-        abs_res || rel_res
+        /*abs_res ||*/ rel_res
     }
 
     unsafe fn try_update_absolute(&mut self, screen_width: usize, screen_height: usize) -> bool {
@@ -183,51 +222,180 @@ impl Cursor {
 
     unsafe fn try_update_relative(&mut self, screen_width: usize, screen_height: usize) -> bool {
         let mut any_updated = false;
-        let mut handles_to_try = alloc::vec::Vec::new();
-        if let Ok(handles) = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::ByProtocol(&Pointer::GUID)) {
-            for handle in handles.iter() {
-                handles_to_try.push(*handle);
+        // let mut handles_to_try = alloc::vec::Vec::new();
+        // if let Ok(handles) = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::ByProtocol(&Pointer::GUID)) {
+        //     for handle in handles.iter() {
+        //         handles_to_try.push(*handle);
+        //     }
+        // }
+        // if let Ok(stdin_h) = uefi::boot::get_handle_for_protocol::<Pointer>() {
+        //     if !handles_to_try.contains(&stdin_h) {
+        //         handles_to_try.push(stdin_h);
+        //     }
+        // }
+        //
+        // for handle in handles_to_try {
+        //     if let Ok(mut mouse) = uefi::boot::open_protocol::<Pointer>(
+        //         uefi::boot::OpenProtocolParams {
+        //             handle,
+        //             agent: uefi::boot::image_handle(),
+        //             controller: None,
+        //         },
+        //         OpenProtocolAttributes::GetProtocol,
+        //     ) {
+        //         if let Ok(Some(state)) = mouse.read_state() {
+        //             let dx = state.relative_movement[0] as f32;
+        //             let dy = state.relative_movement[1] as f32;
+        //
+        //             if dx != 0.0 || dy != 0.0 {
+        //                 // In UEFI SimplePointer spec:
+        //                 // dx > 0 is Right, dx < 0 is Left.
+        //                 // dy > 0 is Forward/Up, dy < 0 is Backward/Down.
+        //                 // On screen: Y=0 is top, Y=height is bottom.
+        //                 self.x = (self.x + dx as i32).clamp(0, screen_width.saturating_sub(1) as i32);
+        //                 self.y = (self.y - dy as i32).clamp(0, screen_height.saturating_sub(1) as i32);
+        //                 any_updated = true;
+        //             }
+        //
+        //             if state.button[0] || state.button[1] || any_updated {
+        //                 self.left_button = state.button[0];
+        //                 self.right_button = state.button[1];
+        //                 any_updated = true;
+        //             }
+        //         }
+        //     }
+        // }
+        // any_updated
+        if let Some(mouse) = &mut self.mouse_object {
+            if let Ok(Some(state)) = mouse.read_state() {
+                let dx = state.relative_movement[0] as f32;
+                let dy = state.relative_movement[1] as f32;
+
+                if dx != 0.0 || dy != 0.0 {
+                    // In UEFI SimplePointer spec:
+                    // dx > 0 is Right, dx < 0 is Left.
+                    // dy > 0 is Forward/Up, dy < 0 is Backward/Down.
+                    // On screen: Y=0 is top, Y=height is bottom.
+                    self.x = (self.x + dx as i32).clamp(0, screen_width.saturating_sub(1) as i32);
+                    self.y = (self.y - dy as i32).clamp(0, screen_height.saturating_sub(1) as i32);
+                    any_updated = true;
+                }
+
+                if state.button[0] || state.button[1] || any_updated {
+                    self.left_button = state.button[0];
+                    self.right_button = state.button[1];
+                    any_updated = true;
+                }
             }
         }
-        if let Ok(stdin_h) = uefi::boot::get_handle_for_protocol::<Pointer>() {
-            if !handles_to_try.contains(&stdin_h) {
-                handles_to_try.push(stdin_h);
-            }
-        }
 
-        for handle in handles_to_try {
-            if let Ok(mut mouse) = uefi::boot::open_protocol::<Pointer>(
-                uefi::boot::OpenProtocolParams {
-                    handle,
-                    agent: uefi::boot::image_handle(),
-                    controller: None,
-                },
-                OpenProtocolAttributes::GetProtocol,
-            ) {
-                if let Ok(Some(state)) = mouse.read_state() {
-                    let dx = state.relative_movement[0] as f32;
-                    let dy = state.relative_movement[1] as f32;
+        // if let Some(mut mouse) = scan_mouse_handles() {
+        //     vdebug_autoprefix!("mouse exists");
+        //     if let Ok(Some(state)) = mouse.read_state() {
+        //         let dx = state.relative_movement[0] as f32;
+        //         let dy = state.relative_movement[1] as f32;
+        //         vdebug_autoprefix!("mouse state ok");
+        //
+        //         if dx != 0.0 || dy != 0.0 {
+        //             // In UEFI SimplePointer spec:
+        //             // dx > 0 is Right, dx < 0 is Left.
+        //             // dy > 0 is Forward/Up, dy < 0 is Backward/Down.
+        //             // On screen: Y=0 is top, Y=height is bottom.
+        //             self.x = (self.x + dx as i32).clamp(0, screen_width.saturating_sub(1) as i32);
+        //             self.y = (self.y - dy as i32).clamp(0, screen_height.saturating_sub(1) as i32);
+        //             any_updated = true;
+        //             vdebug_autoprefix!("mouse moved: dx={}, dy={}, new_x={}, new_y={}", dx, dy, self.x, self.y);
+        //         }
+        //
+        //         if state.button[0] || state.button[1] || any_updated {
+        //             self.left_button = state.button[0];
+        //             self.right_button = state.button[1];
+        //             any_updated = true;
+        //             vdebug_autoprefix!("mouse buttons: left={}, right={}", self.left_button, self.right_button);
+        //         }
+        //     }
+        // }
+        // any_updated
 
-                    if dx != 0.0 || dy != 0.0 {
-                        // In UEFI SimplePointer spec:
-                        // dx > 0 is Right, dx < 0 is Left.
-                        // dy > 0 is Forward/Up, dy < 0 is Backward/Down.
-                        // On screen: Y=0 is top, Y=height is bottom.
-                        self.x = (self.x + dx as i32).clamp(0, screen_width.saturating_sub(1) as i32);
-                        self.y = (self.y - dy as i32).clamp(0, screen_height.saturating_sub(1) as i32);
-                        any_updated = true;
-                    }
+        if let Some(mut mouse) = scan_mouse_handles() {
+            // Grab the input event token non-destructively
+            if let Ok(input_event) = mouse.wait_for_input_event() {
 
-                    if state.button[0] || state.button[1] || any_updated {
-                        self.left_button = state.button[0];
-                        self.right_button = state.button[1];
-                        any_updated = true;
+                // CRITICAL: Check if a hardware event packet is actually waiting.
+                // This prevents rapid frame polling from emptying the state queue.
+                if boot::check_event(&input_event) == Ok(true) {
+
+                    if let Ok(Some(state)) = mouse.read_state() {
+                        let mode = mouse.mode();
+                        let resolution_x = mode.resolution[0] as f32;
+                        let resolution_y = mode.resolution[1] as f32;
+
+                        let raw_x = state.relative_movement[0] as f32;
+                        let raw_y = state.relative_movement[1] as f32;
+
+                        // DYNAMIC RESOLUTION ENGINE
+                        // If dimensions match 65536, VirtualBox/QEMU are feeding absolute metrics
+                        // hidden inside the relative data array.
+                        let (delta_x, delta_y) = if resolution_x == 65536.0 && resolution_y == 65536.0 {
+                            // Compute scaled absolute positions on your real screen layout matrix
+                            let target_abs_x = ((raw_x / resolution_x) * screen_width as f32);
+                            let target_abs_y = ((raw_y / resolution_y) * screen_height as f32);
+
+                            // If this is the very first frame initialization, establish a baseline
+                            let prev_x = self.last_raw_abs_x.unwrap_or(target_abs_x);
+                            let prev_y = self.last_raw_abs_y.unwrap_or(target_abs_y);
+
+                            // Extract relative movement vector yourself out of the raw stream
+                            let dx = target_abs_x - prev_x;
+                            let dy = target_abs_y - prev_y;
+
+                            // Save current values for next frame frame comparison
+                            self.last_raw_abs_x = Some(target_abs_x);
+                            self.last_raw_abs_y = Some(target_abs_y);
+
+                            (dx as i32, dy as i32)
+                        } else {
+                            // Standard true hardware relative mouse behavior (QEMU natively with mouse device)
+                            // Clear the tracking buffers so a device swap wouldn't lock up
+                            self.last_raw_abs_x = None;
+                            self.last_raw_abs_y = None;
+
+                            (raw_x as i32, raw_y as i32)
+                        };
+
+                        // APPLY MOVEMENT DELTAS Safely
+                        if delta_x != 0 || delta_y != 0 {
+                            let new_x = self.x + delta_x;
+                            let new_y = self.y + delta_y;
+
+                            let clamped_x = new_x.clamp(0, screen_width.saturating_sub(1) as i32);
+                            let clamped_y = new_y.clamp(0, screen_height.saturating_sub(1) as i32);
+
+                            if self.x != clamped_x || self.y != clamped_y {
+                                self.x = clamped_x;
+                                self.y = clamped_y;
+                                any_updated = true;
+                                //vdebug_autoprefix!("mouse moved: x={}, y={}", self.x, self.y);
+                            }
+                        }
+
+                        // PROCESS BUTTON STATES
+                        if state.button[0] != self.left_button || state.button[1] != self.right_button {
+                            self.left_button = state.button[0];
+                            self.right_button = state.button[1];
+                            any_updated = true;
+                            //vdebug_autoprefix!("mouse buttons: left={}, right={}", self.left_button, self.right_button);
+                        }
                     }
                 }
             }
         }
+
         any_updated
+
     }
+
+
 
     pub fn render(&self, stdout: &mut uefi::proto::console::text::Output) {
         let _cursor_char = if self.left_button { "+" } else { "*" };
@@ -326,7 +494,7 @@ impl Cursor {
             }
 
             // Check for keypress to exit
-            let key = system::with_stdin(|i| i.read_key());
+            let key = uefi::system::with_stdin(|i| i.read_key());
             if let Ok(Some(_)) = key {
                 break;
             }
@@ -336,6 +504,39 @@ impl Cursor {
     }
 }
 
+unsafe fn scan_mouse_handles() -> Option<ScopedProtocol<SimplePointer>> {
+    if let Ok(handles) = boot::locate_handle_buffer(boot::SearchType::ByProtocol(&SimplePointer::GUID)) {
+        // vdebug!("usbhid", "Found {} SimplePointer handles", handles.len());
+
+        for (i, handle) in handles.iter().enumerate() {
+            if let Ok(mut mouse) = boot::open_protocol::<SimplePointer>(
+                boot::OpenProtocolParams {
+                    handle: *handle,
+                    agent: boot::image_handle(),
+                    controller: None,
+                },
+                OpenProtocolAttributes::Exclusive,
+            ) {
+                if mouse.reset(false).is_ok() {
+                    let mode = mouse.mode();
+                    //vdebug!("usbhid", "Handle [{}]: Res X={}, Y={}, Z={}",
+                    //    i, mode.resolution[0], mode.resolution[1], mode.resolution[2]);
+
+                    // DO NOT skip purely on 65536, as EDK2 applies this to genuine USB mice.
+                    // Instead, look for scroll wheel attributes (ResolutionZ > 0)
+                    // or accept the handle if it's the only one active.
+                    //vdebug!("usbhid", "Handle [{}]: Successfully bound to pointer interface.", i);
+                    return Some(mouse);
+                }
+            }
+        }
+    }
+    None
+}
+
+
+
+/*
 #[allow(dead_code)]
 use uefi::system;
 
@@ -651,3 +852,4 @@ impl Graphics {
     // }
 
 }
+*/

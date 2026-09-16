@@ -13,7 +13,7 @@ use crate::vmm::partitioner::HardwarePartitioner;
 use crate::vmm::security::{DeepLevelSecurity, AutolyticProtocol};
 use crate::vmm::vmbus::VmBusMessage;
 use crate::dls::{SoftwareAnalysisMemory, SoftwareAnalysisSample};
-use crate::{hpvm_info, hpvm_error, hpvm_log, vdebug, vdebug_autoprefix};
+use crate::{hpvm_info, hpvm_error, hpvm_log, vdebug, vdebug_autoprefix, hardware};
 use crate::filesystem::FileSystem;
 use uefi::proto::console::text::Color;
 use uefi::mem::memory_map::MemoryMap;
@@ -213,6 +213,10 @@ impl HypervisorManager {
             partitioner: HardwarePartitioner::new(),
             security: DeepLevelSecurity::new(),
         }
+    }
+
+    pub fn cpu_props_from_info(&mut self, cpu_info: &hardware::cpu::CpuInfo) {
+        self.ghm.set_cpu_props(cpu_info);
     }
 
     /// Initialize the hypervisor

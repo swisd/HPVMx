@@ -87,49 +87,75 @@ pub fn update_tab_logic(tab: DashboardTab, ui: &mut DashboardUI) {
 // 1. Overview Tab
 // =========================================================================
 pub mod overview {
+    use crate::version::VersionGroup;
+    use crate::VERSION_DATA;
     use super::*;
 
-    pub fn draw(ui: &DashboardUI, pg: &mut PixelGraphics, _x: usize, _y: usize, _width: usize, _height: usize) {
-        pg.draw_text(20, 100, "System Overview", 0x00FF00);
+    pub fn draw(ui: &DashboardUI, pg: &mut PixelGraphics, _x: usize, mut _y: usize, _width: usize, _height: usize) {
 
-        let mut y = 130;
-        pg.draw_text(20, y, "System Health: OK", 0x00FF00);
-        y += 30;
-        pg.draw_text(20, y, &alloc::format!("CPU:   {} Cores, {}% Usage", ui.resources.cpu_count, ui.resources.cpu_usage), 0xFFFFFF);
+        let menu_w = 200;
+        let content_x = _x + menu_w;
+        pg.fill_rect(_x, _y+80, menu_w, 600, 0x333333);
+        _y = _y + 80;
+
+        let categories = ["Overview", "Hardware", "Virtualization", "Storage", "Network", "Security", "Logs", "Tools", "Help"];
+        let mut menu_y = _y + 20;
+        for (idx, cat) in categories.iter().enumerate() {
+            let color = if idx == 0 { 0x00FF00 } else { 0xCCCCCC };
+            pg.draw_text(_x + 20, menu_y, cat, color);
+            menu_y += 30;
+        }
+
+        pg.draw_text(content_x + 15, _y + 100, "us-east-hypervisor-01", 0x0088CC);
+
+        let mut y = _y + 130;
+        pg.draw_text(content_x + 20, y, "Resource Usage", 0x00FF00);
+        y += 60;
+        pg.draw_ring_graph(content_x + 42, y, 24, 6, ui.resources.cpu_usage as f64, None, 0x00CC88);
+        pg.draw_text(content_x + 30, y - 4, "CPU", 0xFFFFFF);
+
+        pg.draw_ring_graph(content_x + 132, y, 24, 6, ui.resources.gpu_usage as f64, None, 0xCC8800);
+        pg.draw_text(content_x + 120, y - 4, "GPU", 0xFFFFFF);
+
+        y += 80;
+        pg.draw_ring_graph(content_x + 42, y, 24, 6, ((ui.resources.used_memory_mb as f64 / ui.resources.total_memory_mb as f64)*100f64), None, 0x00CCCC);
+        pg.draw_text(content_x + 30, y - 4, "MEM", 0xFFFFFF);
+
+        pg.draw_ring_graph(content_x + 132, y, 24, 6, (ui.resources.net_tx_kbps as f64 + ui.resources.net_rx_kbps as f64) / 2048f64, None, 0xCCCC00);
+        pg.draw_text(content_x + 120, y - 4, "NET", 0xFFFFFF);
+        y += 60;
+
+        pg.draw_text(content_x + 20, y, "I/O Performance:", 0xAAAAAA);
         y += 20;
-        pg.draw_text(20, y, &alloc::format!("Memory: {} / {} MB", ui.resources.used_memory_mb, ui.resources.total_memory_mb), 0xFFFFFF);
+        pg.draw_text(content_x + 40, y, &format!("Disk:   Read {} KB/s, Write {} KB/s", ui.resources.disk_read_kbps, ui.resources.disk_write_kbps), 0xCCCCCC);
+        y += 20;
+        pg.draw_text(content_x + 40, y, &format!("Network: RX {} KB/s, TX {} KB/s", ui.resources.net_rx_kbps, ui.resources.net_tx_kbps), 0xCCCCCC);
         y += 30;
 
-        pg.draw_text(20, y, "I/O Performance:", 0xAAAAAA);
+        pg.draw_text(content_x + 20, y, &format!("Virtualization: {} VMs Running", ui.vms.iter().filter(|v| v.state.contains("Running")).count()), 0xFFFFFF);
         y += 20;
-        pg.draw_text(40, y, &alloc::format!("Disk:   Read {} KB/s, Write {} KB/s", ui.resources.disk_read_kbps, ui.resources.disk_write_kbps), 0xCCCCCC);
+        pg.draw_text(content_x + 20, y, &format!("Total VMs: {}", ui.vms.len()), 0xCCCCCC);
         y += 20;
-        pg.draw_text(40, y, &alloc::format!("Network: RX {} KB/s, TX {} KB/s", ui.resources.net_rx_kbps, ui.resources.net_tx_kbps), 0xCCCCCC);
-        y += 30;
+        pg.draw_text(content_x + 20, y, &format!("Total Containers: {}", ui.containers.len()), 0xCCCCCC);
+        y += 20;
+        pg.draw_text(content_x + 20, y, &format!("Total CVMs: {}", ui.cvms.len()), 0xCCCCCC);
+        y += 50;
+        unsafe {
+            pg.draw_text(content_x + 20, y, &(VERSION_DATA.as_mut().unwrap().format_to_string()), 0xCCCCCC);
+        }
 
-        pg.draw_text(20, y, &alloc::format!("Virtualization: {} VMs Running", ui.vms.iter().filter(|v| v.state.contains("Running")).count()), 0xFFFFFF);
-        y += 20;
-        pg.draw_text(20, y, &alloc::format!("Total VMs: {}", ui.vms.len()), 0xCCCCCC);
-        y += 30;
-
-        pg.draw_text(20, y, "Hardware Categories:", 0xAAAAAA);
-        y += 20;
-        pg.draw_text(40, y, &alloc::format!("Storage: {} Files in current path", ui.files.len()), 0xCCCCCC);
-        y += 20;
-        pg.draw_text(40, y, &alloc::format!("Devices: {} Categories detected", ui.categories.len()), 0xCCCCCC);
         y += 60;
         pg.draw_text_bg(40, y, "STATE BACKUP", 0xFF7700, 0x444444);
         y += 20;
         pg.fill_rect(40, y, 70, 30, 0x553333);
         pg.draw_text(42, y + 2, "SAVE [/]", 0xBBBBAA);
 
-        y = 100;
+        y = _y + 100;
         if let Ok((time, caps)) = runtime::get_time_and_caps() {
             let time_data_0 = format!("{:?}", time);
             let time_data_1 = format!("{:?}", caps);
-            pg.draw_text(420, y, &time_data_0, 0xFFFFFF);
-            y += 10;
-            pg.draw_text(420, y, &time_data_1, 0xFFFFFF);
+            pg.draw_text(420, y, &time_data_0.replace(" ", "\n"), 0xFFFFFF);
+            //pg.draw_text(620, y, &time_data_1.replace(" ", "\n"), 0xFFFFFF);
         }
     }
 

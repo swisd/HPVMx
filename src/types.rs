@@ -467,7 +467,7 @@ pub fn defs() -> (i32, i32, i32, Vec<u8>, usize, usize, &'static [u8], char, boo
 
 // General Types
 
-pub type Pointer = *mut u8;
+pub type PtrPointer = *mut u8;
 pub type Size = usize;
 pub type Index = isize;
 pub type Char = char;

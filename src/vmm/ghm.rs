@@ -1,8 +1,9 @@
 //! Global Hardware Manager (GHM) - A "Push-Only" allocator that assigns physical resources to VM Units.
 //! Zero-Request Model: The GHM accepts zero incoming requests from VMs, eliminating hypercall-based privilege escalation.
 
+use alloc::vec;
 use alloc::vec::Vec;
-use crate::vdebug_autoprefix;
+use crate::{hardware, vdebug_autoprefix};
 
 #[derive(Debug, Clone, Copy)]
 pub enum PhysicalResourceId {
@@ -19,13 +20,15 @@ pub struct GlobalHardwareManager {
     assignments: Vec<ResourceAssignment>,
     available_cores: Vec<u32>,
     available_memory: Vec<(u64, usize)>,
+    reserved_cores: Vec<u32>, // Reserved cores for system use
+    threads: Vec<u32>, // Track threads for each core (simplified)
 }
 
 impl GlobalHardwareManager {
     pub fn new(total_cores: u32, total_memory_mb: usize) -> Self {
         vdebug_autoprefix!("GHM: initializing with {} cores, {} MB memory", total_cores, total_memory_mb);
         let mut available_cores = Vec::new();
-        for i in 0..total_cores {
+        for i in 0..total_cores-1 {
             available_cores.push(i);
         }
 
@@ -37,6 +40,8 @@ impl GlobalHardwareManager {
             assignments: Vec::new(),
             available_cores,
             available_memory,
+            reserved_cores: vec![0], // Reserve core 0 for system use
+            threads: vec![1],
         }
     }
 
@@ -94,5 +99,11 @@ impl GlobalHardwareManager {
         });
         // Coalesce memory fragments (simplified)
         self.available_memory.sort_by_key(|&(base, _)| base);
+    }
+
+    pub fn set_cpu_props(&mut self, cpu_info: &hardware::cpu::CpuInfo) {
+        self.available_cores = (0..=cpu_info.cores-1).collect();
+        self.reserved_cores = vec![0,1]; // Reserve core 0 and 1 for system use (1xBSP, 1xAP)
+        self.threads = (1..cpu_info.threads).collect();
     }
 }

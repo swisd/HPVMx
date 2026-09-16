@@ -5,12 +5,12 @@ use uefi::{boot, runtime};
 use core::ptr;
 use alloc::string::{String, ToString};
 use embedded_graphics::Pixel;
-use libm::{cos, floor, sin, sqrt, sqrtf};
 use tinybmp::Bmp;
 use uefi::boot::{OpenProtocolAttributes, OpenProtocolParams};
 use uefi::table::system_table_raw;
 use crate::filesystem::FileSystem;
 use embedded_graphics::pixelcolor::{Rgb888, RgbColor};
+use crate::localmodules::math::{ceil, round, sqrt};
 pub use crate::ui::qt;
 pub use crate::ui::qt::*;
 
@@ -305,6 +305,76 @@ impl PixelGraphics {
             x += 1;
         }
     }
+
+    pub fn draw_ring_graph(
+        &mut self,
+        cx: usize,
+        cy: usize,
+        radius: usize,
+        thickness: usize,
+        value: f64,
+        start_value: Option<f64>,
+        color: u32,
+    ) {
+        if thickness == 0 || value <= 0.0 {
+            return;
+        }
+
+        const SEGMENTS: usize = 100;
+        const MAX_VALUE: f64 = 100.0;
+        const TAU: f64 = core::f64::consts::TAU;
+        const FRAC_PI_2: f64 = core::f64::consts::FRAC_PI_2;
+
+        let value = value.clamp(0.0, MAX_VALUE);
+        let start = start_value.unwrap_or(0.0).clamp(0.0, MAX_VALUE);
+
+        // Number of radial segments to draw.
+        let segment_count =
+            ceil((value / MAX_VALUE) * SEGMENTS as f64) as usize;
+
+        if segment_count == 0 {
+            return;
+        }
+
+        let start_segment =
+            round((start / MAX_VALUE) * SEGMENTS as f64) as usize;
+
+        let inner_radius =
+            radius.saturating_sub(thickness / 2);
+
+        let outer_radius =
+            radius + (thickness + 1) / 2;
+
+        let cx_i = cx as f64;
+        let cy_i = cy as f64;
+
+        let step = TAU / SEGMENTS as f64;
+
+        for i in 0..segment_count {
+            let segment = (start_segment + i) % SEGMENTS;
+
+            let angle =
+                -FRAC_PI_2 + segment as f64 * step;
+
+            let sin = crate::localmodules::math::sin(angle);
+            let cos = crate::localmodules::math::cos(angle);
+
+            let x1 = round(cx_i + cos * inner_radius as f64);
+            let y1 = round(cy_i + sin * inner_radius as f64);
+
+            let x2 = round(cx_i + cos * outer_radius as f64);
+            let y2 = round(cy_i + sin * outer_radius as f64);
+
+            self.draw_line(
+                x1.max(0.0) as usize,
+                y1.max(0.0) as usize,
+                x2.max(0.0) as usize,
+                y2.max(0.0) as usize,
+                color,
+            );
+        }
+    }
+
 
     pub fn fill_circle(&mut self, cx: usize, cy: usize, radius: usize, color: u32) {
         let r = radius as i32;
@@ -913,7 +983,7 @@ impl PixelGraphics {
         let center_x = width as f32 * 0.5;
         let center_y = height as f32 * 0.5;
         let max_dist_sq = center_x * center_x + center_y * center_y;
-        let max_dist = sqrtf(max_dist_sq);
+        let max_dist = sqrt(max_dist_sq as f64) as f32;
         let k = max_strength / max_dist;
 
         // Threshold for offset >= 1: dist * k >= 1.0 => dist >= 1.0/k => dist^2 >= (1.0/k)^2
@@ -932,7 +1002,7 @@ impl PixelGraphics {
                 // (x - center_x)^2 >= threshold_sq - dy2
                 // |x - center_x| >= sqrt(threshold_sq - dy2)
                 let skip_half_width = if dy2 < threshold_sq {
-                    sqrtf(threshold_sq - dy2)
+                    sqrt((threshold_sq - dy2) as f64) as f32
                 } else {
                     0.0
                 };
@@ -948,7 +1018,7 @@ impl PixelGraphics {
                     let dx = x as f32 - center_x;
                     let dist_sq = dx * dx + dy2;
                     // dist_sq is always >= threshold_sq here, so offset >= 1
-                    let dist = sqrtf(dist_sq);
+                    let dist = sqrt(dist_sq as f64) as f32;
                     let offset = (dist * k) as usize;
 
                     let left_x = x.saturating_sub(offset);
@@ -963,7 +1033,7 @@ impl PixelGraphics {
                     let dx = x as f32 - center_x;
                     let dist_sq = dx * dx + dy2;
                     // dist_sq is always >= threshold_sq here, so offset >= 1
-                    let dist = sqrtf(dist_sq);
+                    let dist = sqrt(dist_sq as f64) as f32;
                     let offset = (dist * k) as usize;
 
                     let left_x = x.saturating_sub(offset);

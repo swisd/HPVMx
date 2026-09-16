@@ -49,6 +49,7 @@ mod x4;
 mod version;
 mod hosting;
 mod testmodules;
+mod localmodules;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -80,14 +81,14 @@ use uefi::Char16;
 use log::error;
 use uefi::boot;
 use buddy_system_allocator::LockedHeap;
-use uefi::boot::{MemoryType};
+use uefi::boot::{MemoryType, ScopedProtocol};
 use uefi::mem::memory_map::MemoryMap;
 use uefi::proto::console::text::{Key, ScanCode};
 use uefi::proto::console::text::Color;
 use uefi::runtime::ResetType;
 //use uefi::system::with_stdout;
 use uefi_raw::table::system::SystemTable;
-use uefi::proto::console::pointer::Pointer as SimplePointer;
+use uefi::proto::console::pointer::{Pointer as SimplePointer, Pointer};
 use uefi::proto::device_path::DevicePath;
 use uefi::proto::unsafe_protocol;
 //use ui::UI;
@@ -104,6 +105,7 @@ use crate::ui::DashboardTab;
 use pm::PackageManager;
 use crate::env::{GlobalEnvironment, GlobalEnvironmentData};
 use crate::page::{Pagefile, PagefileHeader};
+use crate::version::VersionGroup;
 
 //#[global_allocator]
 #[allow(dead_code, unused)]
@@ -117,13 +119,15 @@ static mut VIRT_STACK: [u8; 4 * 1024 * 1024] = [0; 4 * 1024 * 1024];
 
 static mut PAGEFILE: Pagefile = Pagefile { header: PagefileHeader::DefaultHeader() };
 
+static mut MOUSE: Option<ScopedProtocol<Pointer>> = None;
+
 //use crate::graphics::Cursor;
 
 pub static mut GLOBALENV: Option<GlobalEnvironment> = None;
 
 pub static mut HYPERVISOR: Option<HypervisorManager> = None;
 static mut TOTAL_PHYSICAL_MEMORY_MB: u32 = 0;
-
+static mut VERSION_DATA: Option<VersionGroup> = None;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wcslen(mut s: *const u16) -> usize {
@@ -156,18 +160,21 @@ fn main() -> Status {
         let _ = stdout.enable_cursor(true);
     });
 
-    crate::vdebug!("HPVMx", "HPVMx version is {}", env!("CARGO_PKG_VERSION"));
-    crate::vdebug!("malloc", "heap initialized. retrieving memory map...");
+    vdebug!("HPVMx", "HPVMx version is {}", env!("CARGO_PKG_VERSION"));
+    unsafe {
+        VERSION_DATA = Some(VersionGroup::from_env());
+    }
+    vdebug!("malloc", "heap initialized. retrieving memory map...");
 
     // 2. In uefi 0.36.1 with 'alloc' feature, use boot::memory_map()
     // This returns a MemoryMapOwned object automatically using the heap.
     //let size = uefi::boot::memory_map_size().map_size;
     let size = boot::PAGE_SIZE;
-    crate::vdebug!("page", "system required buffer of {} bytes", size);
+    vdebug!("page", "system required buffer of {} bytes", size);
 
     // 16KB is usually enough for most servers; 32KB is safe for high-end systems.
     let mut map_buffer = [0u8; 32768];
-    crate::vdebug!("page", "set map buffer to {}", map_buffer.len());
+    vdebug!("page", "set map buffer to {}", map_buffer.len());
 
 
     let SYSTEM_TABLE: *mut SystemTable = uefi::table::system_table_raw().unwrap().as_ptr();
@@ -184,7 +191,7 @@ fn main() -> Status {
 
     match boot::memory_map(MemoryType::LOADER_DATA) {
         Ok(map) => {
-            crate::vdebug!("malloc", "retrieved memory map with {} entries.  OMT (bsc/bsd)", map.entries().count());
+            vdebug!("malloc", "retrieved memory map with {} entries.  OMT (bsc/bsd)", map.entries().count());
 
             let mut total_mb = 0;
             // Iterate and filter for free RAM
@@ -196,7 +203,7 @@ fn main() -> Status {
                     MemoryType::BOOT_SERVICES_CODE => {}
                     MemoryType::BOOT_SERVICES_DATA => {}
 
-                    _ => crate::vdebug!("malloc",
+                    _ => vdebug!("malloc",
                          "AREA {:#?}  START {:#x}  PAGE {}  ATT: {:?}  VS: {:?}",
                          entry.ty,
                          entry.phys_start,
@@ -207,7 +214,7 @@ fn main() -> Status {
                 }
             }
             unsafe { TOTAL_PHYSICAL_MEMORY_MB = total_mb as u32; }
-            crate::vdebug!("malloc", "Total physical memory: {} MB", total_mb);
+            vdebug!("malloc", "Total physical memory: {} MB", total_mb);
         }
         Err(e) => {
             error!("Failed to retrieve memory map: {:?}", e.status());
@@ -216,10 +223,10 @@ fn main() -> Status {
 
     vdebug!("GDT", "initializing gdt");
     gdt::init();
-    crate::vdebug!("IDT", "initializing idt");
+    vdebug!("IDT", "initializing idt");
     interrupts::init_idt();
 
-    crate::vdebug!("page", "setting active paging mapper");
+    vdebug!("page", "setting active paging mapper");
     let mut mapper = unsafe { PagingManager::get_active_mapper(x86_64::VirtAddr::new(16384)) };
 
 
@@ -244,15 +251,7 @@ fn main() -> Status {
         PAGEFILE.create_pagefile(268435456, 8);
     }
 
-    unsafe {
-        HYPERVISOR = Some(HypervisorManager::new());
-        if let Some(ref mut hv) = HYPERVISOR {
-            match hv.initialize() {
-                Ok(_) => vdebug!("VMM", "hypervisor initialized"),
-                Err(e) => hpvm_warn!("VMM", "hypervisor init failed: {}", e),
-            }
-        }
-    }
+
 
 
     unsafe {
@@ -271,6 +270,20 @@ fn main() -> Status {
     calibrate_tsc();
     vdebug!("CPU", "tsc cyc/us {}", TSC_PER_US);
     let _cpu_info = hardware::cpu::CpuInfo::detect();
+
+    unsafe {
+        HYPERVISOR = Some(HypervisorManager::new());
+        if let Some(ref mut hv) = HYPERVISOR {
+            match hv.initialize() {
+                Ok(_) => { vdebug!("VMM", "hypervisor initialized");
+                           hv.cpu_props_from_info(&_cpu_info)
+                },
+                Err(e) => hpvm_warn!("VMM", "hypervisor init failed: {}", e),
+            }
+        }
+    }
+
+
     let _ = boot::set_watchdog_timer(0, 0, None);
 
     vdebug!("env", "creating globalenv");
@@ -278,32 +291,32 @@ fn main() -> Status {
         GLOBALENV = Some(GlobalEnvironment::new());
     }
 
-    if crate::env::run_async_tests() {
-        crate::vdebug_autoprefix!(10, "async/await multitasking verified");
+    if env::run_async_tests() {
+        vdebug_autoprefix!(10, "async/await multitasking verified");
     } else {
-        crate::vdebug_autoprefix!(12, "async multitasking self-test failed");
+        vdebug_autoprefix!(12, "async multitasking self-test failed");
     }
 
-    if crate::multipar::run_multipar_tests() {
-        crate::vdebug_autoprefix!(10, "multi-core async executor & ArcWaker verified");
+    if multipar::run_multipar_tests() {
+        vdebug_autoprefix!(10, "multi-core async executor & ArcWaker verified");
     } else {
-        crate::vdebug_autoprefix!(12, "multi-core async executor self-test failed");
+        vdebug_autoprefix!(12, "multi-core async executor self-test failed");
     }
 
-    if crate::hardware::cpu::mp::run_mp_tests() {
-        crate::vdebug_autoprefix!(10, "MP topology verification passed");
+    if hardware::cpu::mp::run_mp_tests() {
+        vdebug_autoprefix!(10, "MP topology verification passed");
     } else {
-        crate::vdebug_autoprefix!(12, "MP topology verification failed");
+        vdebug_autoprefix!(12, "MP topology verification failed");
     }
 
-    if crate::testmodules::boot::run_all_boot_tests() {
-        crate::vdebug_autoprefix!(10, "startup, VMM/CVM and hosting self-tests passed");
+    if testmodules::boot::run_all_boot_tests() {
+        vdebug_autoprefix!(10, "startup, VMM/CVM and hosting self-tests passed");
     } else {
-        crate::vdebug_autoprefix!(12, "startup, VMM/CVM and hosting self-tests failed");
+        vdebug_autoprefix!(12, "startup, VMM/CVM and hosting self-tests failed");
     }
 
-    crate::multipar::init_global_executor();
-    crate::vdebug_autoprefix!(11, "global async executor initialized");
+    multipar::init_global_executor();
+    vdebug_autoprefix!(11, "global async executor initialized");
 
 
 
@@ -324,7 +337,7 @@ fn main() -> Status {
     FileSystem::cd("/");
     if let Ok(config_data) = FileSystem::read_file_to_string("config.cfg") {
         if config_data.contains("onstart=\"dashboard\"") {
-            crate::vdebug!("HPVMx", "Auto-starting dashboard from config.cfg");
+            vdebug!("HPVMx", "Auto-starting dashboard from config.cfg");
             unsafe {
                 terminal::show_dashboard_ui(&PACKAGE_MANAGER);
             }
@@ -333,8 +346,8 @@ fn main() -> Status {
         hpvm_warn!("autostart", "could not read config data");
     }
 
-    crate::vdebug!("HPVMx", "HPVMx Shell v1.3.2");
-    crate::vdebug!("HPVMx", "Type 'help' for commands.");
+    vdebug!("HPVMx", "HPVMx Shell v1.3.2");
+    vdebug!("HPVMx", "Type 'help' for commands.");
 
     let mut input_buffer = String::new();
 
@@ -345,7 +358,7 @@ fn main() -> Status {
 
     loop {
         // Poll ready asynchronous tasks on global executor
-        crate::multipar::task::poll_global_ready();
+        multipar::task::poll_global_ready();
 
         // drive network timers (loopback stack)
         devices::net_stack::poll_tick();
@@ -989,26 +1002,26 @@ fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
 
 pub fn init_mouse() {
     unsafe {
-        init_mouse_deep_scan();
+        MOUSE = init_mouse_deep_scan();
     }
 }
 
-pub unsafe fn init_mouse_deep_scan() {
+pub unsafe fn init_mouse_deep_scan() -> Option<ScopedProtocol<Pointer>> {
     // 1. Multi-pass connect all controllers (EDK2 BdsConnectAll style)
     // Connecting PCI controllers creates child USB controller handles;
     // connecting USB controllers creates child USB device (mouse/tablet) handles.
     for pass in 0..4 {
         if let Ok(all_handles) = boot::locate_handle_buffer(boot::SearchType::AllHandles) {
-            crate::vdebug!("usbhid", "ConnectAll pass {}: scanning {} handles", pass, all_handles.len());
+            vdebug!("usbhid", "ConnectAll pass {}: scanning {} handles", pass, all_handles.len());
             for handle in all_handles.iter() {
-                let _ = boot::connect_controller(*handle, None, None, true);
+                let _ = boot::connect_controller(*handle, &[None], None, true);
             }
         }
     }
 
     // 2. Scan & reset SimplePointer handles
     if let Ok(handles) = boot::locate_handle_buffer(boot::SearchType::ByProtocol(&SimplePointer::GUID)) {
-        crate::vdebug!("usbhid", "Found {} SimplePointer handles", handles.len());
+        vdebug!("usbhid", "Found {} SimplePointer handles", handles.len());
 
         for (i, handle) in handles.iter().enumerate() {
             if let Ok(mut mouse) = boot::open_protocol::<SimplePointer>(
@@ -1020,36 +1033,41 @@ pub unsafe fn init_mouse_deep_scan() {
                 boot::OpenProtocolAttributes::GetProtocol,
             ) {
                 let r = mouse.reset(false);
-                crate::vdebug!("usbhid", "Handle [{}]: Reset result {:?}", i, r);
+                vdebug!("usbhid", "Handle [{}]: Reset result {:?}", i, r);
                 #[allow(irrefutable_let_patterns)]
                 if let mode = mouse.mode() {
-                    crate::vdebug!("usbhid", "Handle [{}]: Res X={}", i, mode.resolution[0]);
+                    vdebug!("usbhid", "Handle [{}]: Res X={}", i, mode.resolution[0]);
                 }
+                return Some(mouse)
             }
         }
     }
+    None
 
     // 3. Scan & reset AbsolutePointer handles
-    if let Ok(handles) = boot::locate_handle_buffer(boot::SearchType::ByProtocol(&crate::graphics::AbsolutePointerProtocol::GUID)) {
-        crate::vdebug!("usbhid", "Found {} AbsolutePointer handles", handles.len());
-
-        for (i, handle) in handles.iter().enumerate() {
-            if let Ok(mut mouse) = boot::open_protocol::<crate::graphics::AbsolutePointer>(
-                boot::OpenProtocolParams {
-                    handle: *handle,
-                    agent: boot::image_handle(),
-                    controller: None,
-                },
-                boot::OpenProtocolAttributes::GetProtocol,
-            ) {
-                let r = mouse.reset(false);
-                crate::vdebug!("usbhid", "Abs Handle [{}]: Reset result {:?}", i, r);
-                if let Some(mode) = mouse.mode() {
-                    crate::vdebug!("usbhid", "Abs Handle [{}]: Max X={}, Max Y={}", i, mode.absolute_max_x, mode.absolute_max_y);
-                }
-            }
-        }
-    }
+    // if let Ok(handles) = boot::locate_handle_buffer(boot::SearchType::ByProtocol(&uefi_raw::protocol::console::AbsolutePointerProtocol::GUID)) {
+    //     vdebug!("usbhid", "Found {} AbsolutePointer handles", handles.len());
+    //
+    //     for (i, handle) in handles.iter().enumerate() {
+    //         if let Ok(mut mouse) = boot::open_protocol::<uefi_raw::protocol::console::AbsolutePointerProtocol>(
+    //             boot::OpenProtocolParams {
+    //                 handle: *handle,
+    //                 agent: boot::image_handle(),
+    //                 controller: None,
+    //             },
+    //             boot::OpenProtocolAttributes::GetProtocol,
+    //         ) {
+    //             let r = mouse.reset(false);
+    //             vdebug!("usbhid", "Abs Handle [{}]: Reset result {:?}", i, r);
+    //             if let Some(mode) = mouse.mode() {
+    //                 vdebug!("usbhid", "Abs Handle [{}]: Max X={}, Max Y={}", i, mode.absolute_max_x, mode.absolute_max_y);
+    //             }
+    //             return Some(mouse)
+    //
+    //         }
+    //     }
+    //     None
+    // }
 }
 
 static mut TSC_PER_US: u64 = 0;

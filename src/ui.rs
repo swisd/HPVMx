@@ -7,7 +7,7 @@
 pub static mut DASH_BACK_ENABLED: bool = false;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use crate::{hpvm_error, hpvm_info, hpvm_log, vdebug, TSC_PER_US};
+use crate::{hpvm_error, hpvm_info, hpvm_log, vdebug, TSC_PER_US, MOUSE};
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -113,7 +113,7 @@ pub struct DashboardUI {
     pub editor: Option<TextEditor>,
     pub package_manager: PackageManager,
     pub iter: u64,
-    pub active_apps: Vec<crate::env::SteppedApplicationContext>,
+    pub active_apps: Vec<SteppedApplicationContext>,
     pub focused_process_idx: Option<usize>, // Which app gets the keyboard?
     pub selected_app_idx: usize,
     pub app_window_position: (usize, usize),
@@ -958,9 +958,9 @@ impl DashboardUI {
             // } else {
                 if DASH_BACK_ENABLED {
                     match self.selected_tab {
-                        DashboardTab::Overview => crate::ui::tabui::overview::draw(self, &mut pg, 0, 0, width, height),
-                        DashboardTab::Apps => crate::ui::tabui::apps::draw(self, &mut pg, 0, 0, width, height),
-                        DashboardTab::VirtualMachines => crate::ui::tabui::virtualization::draw(self, &mut pg, 0, 0, width, height),
+                        DashboardTab::Overview => tabui::overview::draw(self, &mut pg, 0, 0, width, height),
+                        DashboardTab::Apps => tabui::apps::draw(self, &mut pg, 0, 0, width, height),
+                        DashboardTab::VirtualMachines => tabui::virtualization::draw(self, &mut pg, 0, 0, width, height),
                         DashboardTab::CreateVM => {
                             pg.draw_text(margin, content_top + margin, "Create New Virtual Machine", 0x00FF00);
 
@@ -2064,6 +2064,10 @@ impl DashboardUI {
                 //                [self.resources.fps, self.resources.frame_ms, self.resources.cpu_usage as usize, self.resources.used_memory_mb as usize]
                 // );
                 // cursor always drawn last (always on top)
+                if let Some(m) = MOUSE.as_ref() {
+                    self.cursor.update_from_mouse(pg.resolution().0, pg.resolution().1);
+                }
+
                 pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
 
 

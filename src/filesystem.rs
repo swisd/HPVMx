@@ -278,8 +278,6 @@ impl FileSystem {
 
             if let Ok(device_path) = device_path_res {
                 let full_path: String = device_path
-                    .to_string(DisplayOnly(false), AllowShortcuts(false))
-                    .map_err(|_| "Path string error")?
                     .to_string();
 
                 let mut category = if has_fs { "dsk" } else { "dev" };

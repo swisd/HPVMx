@@ -583,7 +583,7 @@ fn handle_httpd(src_ip: [u8; 4], src_mac: [u8; 6], tcp: &TcpHeader, flags: u16, 
 
         if !payload.is_empty() && payload.starts_with(b"GET") {
             crate::vdebug!("HTTPD", "GET request from {}.{}.{}.{}", src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
-            let body = "<html><body><h1>HPVM UEFI Server</h1><p>Status: OK</p></body></html>";
+            let body = "<html><body><h1>HPVMx UEFI Server</h1><p>Status: OK</p></body></html>";
             let response = [
                 "HTTP/1.1 200 OK\r\n",
                 "Content-Type: text/html\r\n",

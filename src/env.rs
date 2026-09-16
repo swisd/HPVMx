@@ -1692,19 +1692,19 @@ impl XSteppedApplicationContext {
 
     pub fn from_dashboard(ui: &DashboardUI, tab: DashboardTab) -> Self {
         let name = match tab {
-            crate::ui::DashboardTab::Overview => "X_Overview",
-            crate::ui::DashboardTab::VirtualMachines => "X_VMs",
-            crate::ui::DashboardTab::Storage => "X_FileManager",
-            crate::ui::DashboardTab::Resources => "X_Resources",
-            crate::ui::DashboardTab::Apps => "X_Apps",
-            crate::ui::DashboardTab::Network => "X_Network",
-            crate::ui::DashboardTab::Console => "X_Console",
-            crate::ui::DashboardTab::Devices => "X_Devices",
-            crate::ui::DashboardTab::Settings => "X_Settings",
-            crate::ui::DashboardTab::Packages => "X_Packages",
-            crate::ui::DashboardTab::Test => "X_Test",
-            crate::ui::DashboardTab::CreateVM => "X_CreateVM",
-            crate::ui::DashboardTab::Editor => "X_Editor",
+            DashboardTab::Overview => "X_Overview",
+            DashboardTab::VirtualMachines => "X_VMs",
+            DashboardTab::Storage => "X_FileManager",
+            DashboardTab::Resources => "X_Resources",
+            DashboardTab::Apps => "X_Apps",
+            DashboardTab::Network => "X_Network",
+            DashboardTab::Console => "X_Console",
+            DashboardTab::Devices => "X_Devices",
+            DashboardTab::Settings => "X_Settings",
+            DashboardTab::Packages => "X_Packages",
+            DashboardTab::Test => "X_Test",
+            DashboardTab::CreateVM => "X_CreateVM",
+            DashboardTab::Editor => "X_Editor",
             _ => "X_Overview",
         };
 
@@ -1725,7 +1725,7 @@ impl XSteppedApplicationContext {
         ctx.selection_idx = ui.selected_vm_idx;
 
         match tab {
-            crate::ui::DashboardTab::Overview => {
+            DashboardTab::Overview => {
                 if let Some(overview) = ctx.application.inner.as_any_mut().downcast_mut::<X_Overview>() {
                     overview.cpu_count = ui.resources.cpu_count;
                     overview.cpu_usage = ui.resources.cpu_usage;
