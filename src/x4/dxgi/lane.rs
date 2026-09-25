@@ -1,5 +1,5 @@
 use crate::x4::error::{ReportAlignmentAssertionFailure, TraceProviderEvent};
-use crate::x4::externals::{AcquireSRWLockExclusive, CloseHandle, EtwWriteTransfer, GetLastError, GetProcessHeap, HeapFree, OpenSemaphoreW, ReleaseSRWLockExclusive};
+use crate::x4::externals::{x4_acquiresrwlockexclusive, x4_closehandle, x4_etwwritetransfer, x4_getlasterror, x4_getprocessheap, x4_heapfree, x4_opensemaphorew, x4_releasesrwlockexclusive};
 use crate::x4::helpers::StringCchCatW;
 use crate::x4::threading::{CreateOrOpenSemaphoreW, HandleHandleCloseError, QueryAndValidateSemaphoreCount};
 use crate::x4::types::{LaneSnapshotData, SharedContextBlock, HANDLE, PSRWLOCK, __int64, LONG};
@@ -15,7 +15,7 @@ pub unsafe fn SyncBuffers(pContextBlock: *mut SharedContextBlock) -> i64 {
     InitContextInternalPools(laneFrame0.as_mut_ptr() as *mut SharedContextBlock);
 
     // Acquire exclusive ownership via Slim Reader/Writer lock interface
-    AcquireSRWLockExclusive(pContextBlock as PSRWLOCK);
+    x4_acquiresrwlockexclusive(pContextBlock as PSRWLOCK);
 
     // 1. Process Lane Index 0
     let lane_0_ptr = core::ptr::addr_of!((*pContextBlock).lanes[0]);
@@ -39,7 +39,7 @@ pub unsafe fn SyncBuffers(pContextBlock: *mut SharedContextBlock) -> i64 {
     }
 
     // Release synchronization barrier
-    ReleaseSRWLockExclusive(pContextBlock as PSRWLOCK);
+    x4_releasesrwlockexclusive(pContextBlock as PSRWLOCK);
 
     // Clean up frame metadata and free trailing allocations
     CleanupFrameTracking(laneFrame0.as_mut_ptr() as *mut _);
@@ -87,8 +87,8 @@ pub unsafe fn SwapLaneSnapshots(
     *(dest_bytes_ptr.add(48) as *mut i64) = newSrcBuffer;
 
     if !pOrphanedMemory0.is_null() {
-        let ProcessHeap = GetProcessHeap();
-        HeapFree(ProcessHeap, 0, pOrphanedMemory0);
+        let ProcessHeap = x4_getprocessheap();
+        x4_heapfree(ProcessHeap, 0, pOrphanedMemory0);
     }
 
     // 4. Restore recorded destination properties over to source targets
@@ -106,8 +106,8 @@ pub unsafe fn SwapLaneSnapshots(
     *(src_bytes_ptr.add(48) as *mut i64) = oldDestBuffer;
 
     if !pOrphanedMemory1.is_null() {
-        let procHeapHandle = GetProcessHeap();
-        HeapFree(procHeapHandle, 0, pOrphanedMemory1);
+        let procHeapHandle = x4_getprocessheap();
+        x4_heapfree(procHeapHandle, 0, pOrphanedMemory1);
     }
 
     // 6. Synchronize trailing state identifiers and flags
@@ -137,24 +137,24 @@ pub unsafe fn FreeLanePayloadBuffers(pFrameArray: *mut u64) -> i8 {
     pLane2Buffer = *pFrameArray.add(22) as *mut core::ffi::c_void;
     *pFrameArray.add(22) = 0;
     if !pLane2Buffer.is_null() {
-        hHeap2 = GetProcessHeap();
-        HeapFree(hHeap2, 0, pLane2Buffer);
+        hHeap2 = x4_getprocessheap();
+        x4_heapfree(hHeap2, 0, pLane2Buffer);
     }
 
     // 2. Clean up Lane 1 Tracking Slot (Index 14)
     pLane1Buffer = *pFrameArray.add(14) as *mut core::ffi::c_void;
     *pFrameArray.add(14) = 0;
     if !pLane1Buffer.is_null() {
-        hHeap1 = GetProcessHeap();
-        HeapFree(hHeap1, 0, pLane1Buffer);
+        hHeap1 = x4_getprocessheap();
+        x4_heapfree(hHeap1, 0, pLane1Buffer);
     }
 
     // 3. Clean up Lane 0 Tracking Slot (Index 6)
     pLane0Buffer = *pFrameArray.add(6) as *mut core::ffi::c_void;
     *pFrameArray.add(6) = 0;
     if !pLane0Buffer.is_null() {
-        hHeap0 = GetProcessHeap();
-        HeapFree(hHeap0, 0, pLane0Buffer);
+        hHeap0 = x4_getprocessheap();
+        x4_heapfree(hHeap0, 0, pLane0Buffer);
     }
     0
 }
@@ -171,7 +171,7 @@ pub unsafe fn CleanupFrameTracking(pFrameArray: *mut u8) -> i32 {
         telemetryHash[1] = 0x418A073AA3BC2475;
         telemetryHash[2] = 0x418A073AA3BC2C75;
 
-        result = EtwWriteTransfer(
+        result = x4_etwwritetransfer(
             telemetryHash.as_ptr() as u64 as __int64,
             3,
             pFrameArray as i64,
@@ -184,7 +184,7 @@ pub unsafe fn CleanupFrameTracking(pFrameArray: *mut u8) -> i32 {
         telemetryHash[1] = 0x418A073AA3BC3C75;
         telemetryHash[2] = 0x418A073AA3BC4475;
 
-        result = EtwWriteTransfer(
+        result = x4_etwwritetransfer(
             telemetryHash.as_ptr() as u64 as __int64,
             3,
             pFrameArray.add(64) as i64,
@@ -200,7 +200,7 @@ pub unsafe fn CleanupFrameTracking(pFrameArray: *mut u8) -> i32 {
         telemetryHash[4] = 0x418A073AA3BC6C75;
         telemetryHash[5] = 0x418A073AA3BC7475;
 
-        return EtwWriteTransfer(
+        return x4_etwwritetransfer(
             telemetryHash.as_ptr() as u64 as __int64,
             6,
             pFrameArray.add(128) as i64,
@@ -474,9 +474,9 @@ pub unsafe fn LookupExistingSharedContext(
     let p0_suffix: [u16; 4] = [0x005F, 0x0070, 0x0030, 0x0000]; // L"_p0"
     StringCchCatW(semNameBuffer.as_mut_ptr(), 0x104, p0_suffix.as_ptr());
 
-    hPrimarySemaphore = OpenSemaphoreW(0x1F0003, 0, semNameBuffer.as_ptr());
+    hPrimarySemaphore = x4_opensemaphorew(0x1F0003, 0, semNameBuffer.as_ptr());
     if hPrimarySemaphore.is_null() {
-        if GetLastError() != 2 {
+        if x4_getlasterror() != 2 {
             return LogDiagnosticEventWithStatus(retaddr as i32, 205, v11, v12);
         }
         return 0;
@@ -487,7 +487,7 @@ pub unsafe fn LookupExistingSharedContext(
     primaryStatus = QueryAndValidateSemaphoreCount(hPrimarySemaphore, v25.as_mut_ptr()) as i32;
     if primaryStatus < 0 {
         TraceProviderEvent(retaddr as i32 as u64, 211, v15 as u64, primaryStatus as u64);
-        if CloseHandle(hPrimarySemaphore) == 0 {
+        if x4_closehandle(hPrimarySemaphore) == 0 {
             HandleHandleCloseError(retaddr as u64 as i32, 2525, 0, 0);
         }
         return primaryStatus as u32 as i64;
@@ -496,10 +496,10 @@ pub unsafe fn LookupExistingSharedContext(
     let h_suffix: [u16; 2] = [0x0068, 0x0000]; // L"h"
     StringCchCatW(semNameBuffer.as_mut_ptr(), 0x104, h_suffix.as_ptr());
 
-    hSecondarySemaphore = OpenSemaphoreW(0x1F0003, 0, semNameBuffer.as_ptr());
+    hSecondarySemaphore = x4_opensemaphorew(0x1F0003, 0, semNameBuffer.as_ptr());
     if hSecondarySemaphore.is_null() {
         primaryStatus = LogDiagnosticEventWithStatus(retaddr as i32, 217, v18, v19);
-        if CloseHandle(hPrimarySemaphore) == 0 {
+        if x4_closehandle(hPrimarySemaphore) == 0 {
             HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
         }
         return primaryStatus as u32 as i64;
@@ -507,23 +507,23 @@ pub unsafe fn LookupExistingSharedContext(
 
     secondaryStatus = QueryAndValidateSemaphoreCount(hSecondarySemaphore, &mut v24) as i32;
     if secondaryStatus >= 0 {
-        if CloseHandle(hSecondarySemaphore) == 0 {
+        if x4_closehandle(hSecondarySemaphore) == 0 {
             HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
         }
         if !ptpOutCachedAddress.is_null() {
             *ptpOutCachedAddress = (v25[0] as u32 as u64) | ((v24 as i64) << 31) as u64;
         }
-        if CloseHandle(hPrimarySemaphore) == 0 {
+        if x4_closehandle(hPrimarySemaphore) == 0 {
             HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
         }
         return 0;
     }
 
     TraceProviderEvent(retaddr as i32 as u64, 219, v22 as u64, secondaryStatus as u64);
-    if CloseHandle(hSecondarySemaphore) == 0 {
+    if x4_closehandle(hSecondarySemaphore) == 0 {
         HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
     }
-    if CloseHandle(hPrimarySemaphore) == 0 {
+    if x4_closehandle(hPrimarySemaphore) == 0 {
         HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
     }
 

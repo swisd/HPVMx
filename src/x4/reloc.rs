@@ -885,7 +885,7 @@ pub unsafe fn ProcessReloc_Rva33_Len3(
     let mut v32: u32 = 0;
 
     // v6 = entry_count_marker + 335544320;
-    let v6 = (entry_count_marker + 335544320) as *mut RelocTableHeader;
+    let mut v6 = (entry_count_marker + 335544320) as *mut RelocTableHeader;
     let v5 = (0x140000000u64 + v2) as *mut i64;
 
     let mut v7: i64 = 0;

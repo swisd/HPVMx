@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{GetProcessHeap, HeapAlloc, HeapFree, LocalFree};
+use crate::x4::externals::{x4_getprocessheap, x4_heapalloc, x4_heapfree, x4_localfree};
 use crate::x4::spp::pointer::PointerVectorCalculateGrowthCapacity;
 use crate::x4::spp::safe::SppSafeIntAdd;
 use crate::x4::types::{VectorLayoutBuffered, HRESULT, SIZE_T, HLOCAL, SppVector};
@@ -186,7 +186,7 @@ pub unsafe fn SppVectorPushBack(
         let target_slot = pp_buffer.offset(count as isize);
         let existing = *target_slot;
         if !existing.is_null() {
-            LocalFree(existing);
+            x4_localfree(existing);
         }
         *target_slot = v18;
     }
@@ -220,7 +220,7 @@ pub unsafe fn SppVectorReallocateHeap(
 
         if target_capacity > 0 {
             LogTraceEvent(0);
-            let process_heap = GetProcessHeap();
+            let process_heap = x4_getprocessheap();
             let bytes_to_alloc = match (v3 as usize).checked_mul(8) {
                 Some(val) => val,
                 None => {
@@ -231,7 +231,7 @@ pub unsafe fn SppVectorReallocateHeap(
                 }
             };
 
-            let allocated = HeapAlloc(process_heap, 0, bytes_to_alloc as SIZE_T);
+            let allocated = x4_heapalloc(process_heap, 0, bytes_to_alloc as SIZE_T);
             new_buf = allocated as *mut *mut c_void;
 
             if new_buf.is_null() {
@@ -258,7 +258,7 @@ pub unsafe fn SppVectorReallocateHeap(
                 if !l.ppBuffer.is_null() {
                     let item_ptr = l.ppBuffer.add(v10);
                     if !item_ptr.is_null() && !(*item_ptr).is_null() {
-                        LocalFree(*item_ptr as HLOCAL);
+                        x4_localfree(*item_ptr as HLOCAL);
                         *item_ptr = core::ptr::null_mut();
                     }
                 }
@@ -270,8 +270,8 @@ pub unsafe fn SppVectorReallocateHeap(
         // Free old buffer
         let old_buffer = l.ppBuffer;
         if !old_buffer.is_null() {
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, old_buffer as *mut c_void);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, old_buffer as *mut c_void);
             l.ppBuffer = core::ptr::null_mut();
         }
 
@@ -307,7 +307,7 @@ pub unsafe fn SppVectorResize(
 
         if v3 > 0 {
             LogTraceEvent(0);
-            let process_heap = GetProcessHeap();
+            let process_heap = x4_getprocessheap();
 
             let bytes_to_alloc = match (v3 as usize).checked_mul(16) {
                 Some(val) => val,
@@ -319,7 +319,7 @@ pub unsafe fn SppVectorResize(
                 }
             };
 
-            let allocated = HeapAlloc(process_heap, 0, bytes_to_alloc as SIZE_T);
+            let allocated = x4_heapalloc(process_heap, 0, bytes_to_alloc as SIZE_T);
             new_ptr = allocated;
 
             if new_ptr.is_null() {
@@ -340,8 +340,8 @@ pub unsafe fn SppVectorResize(
 
         let old_elements_array = vector.p_elements_array;
         if !old_elements_array.is_null() {
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, old_elements_array);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, old_elements_array);
         }
 
         vector.p_elements_array = if new_ptr.is_null() {

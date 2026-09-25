@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, Ordering};
-use uefi::proto::console::text::Key;
+pub(crate) use uefi::proto::console::text::Key;
 use uefi_raw::protocol::hii::config::HiiTime;
 use crate::{apps, GLOBALENV};
 use crate::apps::AppConstructor;
@@ -193,6 +193,8 @@ pub trait Runnable: RunnableClone {
     fn logic(&mut self, vars: &mut Vec<String>, env: &mut Environment);
     /// Handles a single keyboard input event.
     fn input(&mut self, key: Key);
+    /// Lets host-managed applications report completion after a logic step.
+    fn is_done(&self) -> bool { false }
     fn as_any(&self) -> &dyn core::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn core::any::Any;
 }
@@ -310,10 +312,7 @@ pub fn dummy_waker() -> Waker {
 
 pub use crate::multipar::task::{TaskHandle, TaskId, ExecutorStats};
 use crate::version::VersionGroup;
-use crate::x4::counter::cvt;
-use crate::x4::ops::to_u16s;
-// use crate::x4::counter::cvt;
-// use crate::x4::ops::to_u16s;
+use crate::string_utils::to_u16s;
 
 /// A background task adapter tracking an asynchronous future offloaded to the multi-core executor.
 ///
@@ -1082,7 +1081,8 @@ pub unsafe fn setenv(k: String, v: String) -> Result<(), String> {
         let k = to_u16s(k)?;
         let v = to_u16s(v)?;
 
-        cvt(/*set_env_ptr_base(k.as_ptr(), v.as_ptr())*/0).map(drop)
+        let _ = (k, v);
+        Err(String::from("setting process environment variables is not implemented"))
     }
 }
 
@@ -1091,7 +1091,8 @@ pub unsafe fn unsetenv(n: String) -> Result<(), String> {
     unsafe {
         let v = to_u16s(n)?;
 
-        cvt(/*set_env_ptr_base(k.as_ptr(), ptr::null())*/0).map(drop)
+        let _ = v;
+        Err(String::from("removing process environment variables is not implemented"))
     }
 }
 
@@ -1249,6 +1250,7 @@ impl SteppedApplicationContext {
         if let Some(k) = key {
             self.handle_input(k);
         }
+        if self.application.inner.is_done() { self.exit_requested = true; }
 
         let end_busy = unsafe { core::arch::x86_64::_rdtsc() };
         unsafe {
@@ -1534,6 +1536,7 @@ impl XSteppedApplicationContext {
         if let Some(tasks) = self.background_tasks.as_mut() {
             tasks.retain_mut(|task| !task.tick(&mut self.local_vars, &mut self.environment));
         }
+        if self.application.inner.is_done() { self.exit_requested = true; }
 
         let end_busy = unsafe { core::arch::x86_64::_rdtsc() };
         unsafe {

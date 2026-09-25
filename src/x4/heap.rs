@@ -2,7 +2,7 @@ use core::ffi::c_void;
 use core::ptr::addr_of_mut;
 use core::sync::atomic::{AtomicU32, Ordering};
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{CloseHandle, DeleteCriticalSection, GetProcessHeap, HeapAlloc, HeapFree};
+use crate::x4::externals::{x4_closehandle, x4_deletecriticalsection, x4_getprocessheap, x4_heapalloc, x4_heapfree};
 use crate::x4::types::{ManagedAllocationObject40Byte, HRESULT, ManagedAllocationObject48Byte, RTL_CRITICAL_SECTION, ManagedAllocationObject48Byte_Variant2};
 
 pub unsafe fn CreateRefCountedObject40byte(
@@ -10,8 +10,8 @@ pub unsafe fn CreateRefCountedObject40byte(
 ) -> HRESULT {
     let mut v2: HRESULT = 0;
 
-    let process_heap = GetProcessHeap();
-    let allocated = HeapAlloc(process_heap, 0, 0x28);
+    let process_heap = x4_getprocessheap();
+    let allocated = x4_heapalloc(process_heap, 0, 0x28);
     let object = allocated as *mut ManagedAllocationObject40Byte;
 
     if !object.is_null() {
@@ -37,8 +37,8 @@ pub unsafe fn CreateRefCountedObject48byte(
 ) -> HRESULT {
     let mut v2: HRESULT = 0;
 
-    let process_heap = GetProcessHeap();
-    let allocated = HeapAlloc(process_heap, 0, 0x30);
+    let process_heap = x4_getprocessheap();
+    let allocated = x4_heapalloc(process_heap, 0, 0x30);
     let object = allocated as *mut ManagedAllocationObject48Byte;
 
     if !object.is_null() {
@@ -65,8 +65,8 @@ pub unsafe fn CreateRefCountedObject48byte_Variant2(
 ) -> HRESULT {
     let mut v2: HRESULT = 0;
 
-    let process_heap = GetProcessHeap();
-    let allocated = HeapAlloc(process_heap, 0, 0x30);
+    let process_heap = x4_getprocessheap();
+    let allocated = x4_heapalloc(process_heap, 0, 0x30);
     let object = allocated as *mut ManagedAllocationObject48Byte_Variant2;
 
     if !object.is_null() {
@@ -97,10 +97,10 @@ pub unsafe fn HeapFree_StructOffset24_Offset32_Minus4(a1: *mut c_void) {
     let ptr32_field = (a1 as *mut u8).add(32) as *mut *mut c_void;
     let val32 = *ptr32_field;
     if !val32.is_null() {
-        let process_heap = GetProcessHeap();
-        // The pointer passed to HeapFree is offset by -4 bytes
+        let process_heap = x4_getprocessheap();
+        // The pointer passed to x4_heapfree is offset by -4 bytes
         let adjusted_ptr = (val32 as *mut u8).sub(4) as *mut c_void;
-        HeapFree(process_heap, 0, adjusted_ptr);
+        x4_heapfree(process_heap, 0, adjusted_ptr);
         LogTraceEvent(0);
         *ptr32_field = core::ptr::null_mut();
     }
@@ -109,10 +109,10 @@ pub unsafe fn HeapFree_StructOffset24_Offset32_Minus4(a1: *mut c_void) {
     let ptr24_field = (a1 as *mut u8).add(24) as *mut *mut c_void;
     let val24 = *ptr24_field;
     if !val24.is_null() {
-        let process_heap = GetProcessHeap();
-        // The pointer passed to HeapFree is offset by -4 bytes
+        let process_heap = x4_getprocessheap();
+        // The pointer passed to x4_heapfree is offset by -4 bytes
         let adjusted_ptr = (val24 as *mut u8).sub(4) as *mut c_void;
-        HeapFree(process_heap, 0, adjusted_ptr);
+        x4_heapfree(process_heap, 0, adjusted_ptr);
         LogTraceEvent(0);
         *ptr24_field = core::ptr::null_mut();
     }
@@ -127,9 +127,9 @@ pub unsafe fn HeapFree_StructOffset24_Offset32_Offset40_Minus4(a1: *mut *mut c_v
     let ptr40_field = a1.add(5);
     let val40 = *ptr40_field;
     if !val40.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         let adjusted_ptr = (val40 as *mut u8).sub(4) as *mut c_void;
-        HeapFree(process_heap, 0, adjusted_ptr);
+        x4_heapfree(process_heap, 0, adjusted_ptr);
         LogTraceEvent(0);
         *ptr40_field = core::ptr::null_mut();
     }
@@ -138,9 +138,9 @@ pub unsafe fn HeapFree_StructOffset24_Offset32_Offset40_Minus4(a1: *mut *mut c_v
     let ptr32_field = a1.add(4);
     let val32 = *ptr32_field;
     if !val32.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         let adjusted_ptr = (val32 as *mut u8).sub(4) as *mut c_void;
-        HeapFree(process_heap, 0, adjusted_ptr);
+        x4_heapfree(process_heap, 0, adjusted_ptr);
         LogTraceEvent(0);
         *ptr32_field = core::ptr::null_mut();
     }
@@ -149,9 +149,9 @@ pub unsafe fn HeapFree_StructOffset24_Offset32_Offset40_Minus4(a1: *mut *mut c_v
     let ptr24_field = a1.add(3);
     let val24 = *ptr24_field;
     if !val24.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         let adjusted_ptr = (val24 as *mut u8).sub(4) as *mut c_void;
-        HeapFree(process_heap, 0, adjusted_ptr);
+        x4_heapfree(process_heap, 0, adjusted_ptr);
         LogTraceEvent(0);
         *ptr24_field = core::ptr::null_mut();
     }
@@ -166,9 +166,9 @@ pub unsafe fn HeapFree_StructOffset8_Offset16_Minus4(a1: *mut c_void) {
     let ptr16_field = (a1 as *mut u8).add(16) as *mut *mut c_void;
     let val16 = *ptr16_field;
     if !val16.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         let adjusted_ptr = (val16 as *mut u8).sub(4) as *mut c_void;
-        HeapFree(process_heap, 0, adjusted_ptr);
+        x4_heapfree(process_heap, 0, adjusted_ptr);
         LogTraceEvent(0);
         *ptr16_field = core::ptr::null_mut();
     }
@@ -177,9 +177,9 @@ pub unsafe fn HeapFree_StructOffset8_Offset16_Minus4(a1: *mut c_void) {
     let ptr8_field = (a1 as *mut u8).add(8) as *mut *mut c_void;
     let val8 = *ptr8_field;
     if !val8.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         let adjusted_ptr = (val8 as *mut u8).sub(4) as *mut c_void;
-        HeapFree(process_heap, 0, adjusted_ptr);
+        x4_heapfree(process_heap, 0, adjusted_ptr);
         LogTraceEvent(0);
         *ptr8_field = core::ptr::null_mut();
     }
@@ -194,8 +194,8 @@ pub unsafe fn HeapFree_StructOffsets32_16_And_Offset8Minus4(a1: *mut *mut c_void
     let ptr32_field = a1.add(4);
     let val32 = *ptr32_field;
     if !val32.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, val32);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, val32);
         *ptr32_field = core::ptr::null_mut();
     }
 
@@ -203,8 +203,8 @@ pub unsafe fn HeapFree_StructOffsets32_16_And_Offset8Minus4(a1: *mut *mut c_void
     let ptr16_field = a1.add(2);
     let val16 = *ptr16_field;
     if !val16.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, val16);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, val16);
         *ptr16_field = core::ptr::null_mut();
     }
 
@@ -212,9 +212,9 @@ pub unsafe fn HeapFree_StructOffsets32_16_And_Offset8Minus4(a1: *mut *mut c_void
     let ptr8_field = a1.add(1);
     let val8 = *ptr8_field;
     if !val8.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         let adjusted_ptr = (val8 as *mut u8).sub(4) as *mut c_void;
-        HeapFree(process_heap, 0, adjusted_ptr);
+        x4_heapfree(process_heap, 0, adjusted_ptr);
         LogTraceEvent(0);
         *ptr8_field = core::ptr::null_mut();
     }
@@ -264,8 +264,8 @@ pub unsafe fn ObjectBaseRefDestroyInternal(a1: *mut c_void) -> i64 {
     let p_size30_desc_word_array = p_element_1.add(8) as *mut *mut c_void;
     let v3 = *p_size30_desc_word_array;
     if !v3.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v3);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v3);
         *p_size30_desc_word_array = core::ptr::null_mut();
     }
 
@@ -277,8 +277,8 @@ pub unsafe fn ObjectBaseRefDestroyInternal(a1: *mut c_void) -> i64 {
     let size28_array_ptr = p_element_1.add(24) as *mut *mut c_void;
     let size28_array = *size28_array_ptr;
     if !size28_array.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, size28_array as *mut c_void);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, size28_array as *mut c_void);
         *size28_array_ptr = core::ptr::null_mut();
     }
 
@@ -290,8 +290,8 @@ pub unsafe fn ObjectBaseRefDestroyInternal(a1: *mut c_void) -> i64 {
     let variant_b_array_ptr = p_element_1.add(40) as *mut *mut c_void;
     let variant_b_array = *variant_b_array_ptr;
     if !variant_b_array.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, variant_b_array);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, variant_b_array);
         *variant_b_array_ptr = core::ptr::null_mut();
     }
 
@@ -303,8 +303,8 @@ pub unsafe fn ObjectBaseRefDestroyInternal(a1: *mut c_void) -> i64 {
     let sync_array_buffer_ptr = p_element_1.add(56) as *mut *mut c_void;
     let sync_array_buffer = *sync_array_buffer_ptr;
     if !sync_array_buffer.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, sync_array_buffer);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, sync_array_buffer);
         *sync_array_buffer_ptr = core::ptr::null_mut();
     }
 
@@ -323,7 +323,7 @@ pub unsafe fn ObjectBaseRefDestroyInternalPtr(a1: *mut c_void) -> i32 {
     if *flag_ptr != 0 {
         // Delete critical section located at offset 8
         let cs_ptr = a1.add(8) as *mut RTL_CRITICAL_SECTION;
-        DeleteCriticalSection(cs_ptr);
+        x4_deletecriticalsection(cs_ptr);
         *flag_ptr = 0;
     }
 
@@ -331,7 +331,7 @@ pub unsafe fn ObjectBaseRefDestroyInternalPtr(a1: *mut c_void) -> i32 {
     let handle56_ptr = (a1 as *mut *mut c_void).add(7);
     let handle56 = *handle56_ptr;
     if !handle56.is_null() {
-        CloseHandle(handle56);
+        x4_closehandle(handle56);
         *handle56_ptr = core::ptr::null_mut();
     }
 
@@ -339,7 +339,7 @@ pub unsafe fn ObjectBaseRefDestroyInternalPtr(a1: *mut c_void) -> i32 {
     let handle48_ptr = (a1 as *mut *mut c_void).add(6);
     let handle48 = *handle48_ptr;
     if !handle48.is_null() {
-        CloseHandle(handle48);
+        x4_closehandle(handle48);
         *handle48_ptr = core::ptr::null_mut();
     }
 
@@ -347,21 +347,21 @@ pub unsafe fn ObjectBaseRefDestroyInternalPtr(a1: *mut c_void) -> i32 {
     let mem88_ptr = (a1 as *mut *mut c_void).add(11);
     let mem88 = *mem88_ptr;
     if !mem88.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, mem88);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, mem88);
         *mem88_ptr = core::ptr::null_mut();
     }
 
     // Redundant checks/closes for offset 56 and 48 matching the original decompilation flow
     let handle56 = *handle56_ptr;
     if !handle56.is_null() {
-        CloseHandle(handle56);
+        x4_closehandle(handle56);
         *handle56_ptr = core::ptr::null_mut();
     }
 
     let handle48 = *handle48_ptr;
     if !handle48.is_null() {
-        CloseHandle(handle48);
+        x4_closehandle(handle48);
         *handle48_ptr = core::ptr::null_mut();
     }
     0
@@ -395,8 +395,8 @@ pub unsafe fn ReleaseRefCountedObjectArraySmart(a1: *mut u32) -> i64 {
                         if old_ref == 1 {
                             core::sync::atomic::fence(Ordering::Acquire);
                             HeapFree_StructOffset8_Offset16_Minus4(v7);
-                            let process_heap = GetProcessHeap();
-                            HeapFree(process_heap, 0, v7);
+                            let process_heap = x4_getprocessheap();
+                            x4_heapfree(process_heap, 0, v7);
                         }
                         *element_slot_ptr = core::ptr::null_mut();
                     }
@@ -408,8 +408,8 @@ pub unsafe fn ReleaseRefCountedObjectArraySmart(a1: *mut u32) -> i64 {
 
         let buffer = *buffer_ptr_field;
         if !buffer.is_null() {
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, buffer);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, buffer);
             *buffer_ptr_field = core::ptr::null_mut();
         }
 
@@ -450,8 +450,8 @@ pub unsafe fn ReleaseRefCountedObjectArraySmart_Type2(a1: *mut u32) -> i64 {
                         if old_ref == 1 {
                             core::sync::atomic::fence(Ordering::Acquire);
                             HeapFree_StructOffset24_Offset32_Minus4(v7);
-                            let process_heap = GetProcessHeap();
-                            HeapFree(process_heap, 0, v7);
+                            let process_heap = x4_getprocessheap();
+                            x4_heapfree(process_heap, 0, v7);
                         }
                         *element_slot_ptr = core::ptr::null_mut();
                     }
@@ -463,8 +463,8 @@ pub unsafe fn ReleaseRefCountedObjectArraySmart_Type2(a1: *mut u32) -> i64 {
 
         let buffer = *buffer_ptr_field;
         if !buffer.is_null() {
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, buffer);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, buffer);
             *buffer_ptr_field = core::ptr::null_mut();
         }
 
@@ -505,8 +505,8 @@ pub unsafe fn ReleaseRefCountedObjectArraySmart_Type3(a1: *mut u32) -> i64 {
                         if old_ref == 1 {
                             core::sync::atomic::fence(Ordering::Acquire);
                             HeapFree_StructOffsets32_16_And_Offset8Minus4( v7 as *mut *mut c_void );
-                            let process_heap = GetProcessHeap();
-                            HeapFree(process_heap, 0, v7);
+                            let process_heap = x4_getprocessheap();
+                            x4_heapfree(process_heap, 0, v7);
                         }
                         *element_slot_ptr = core::ptr::null_mut();
                     }
@@ -518,8 +518,8 @@ pub unsafe fn ReleaseRefCountedObjectArraySmart_Type3(a1: *mut u32) -> i64 {
 
         let buffer = *buffer_ptr_field;
         if !buffer.is_null() {
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, buffer);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, buffer);
             *buffer_ptr_field = core::ptr::null_mut();
         }
 
@@ -560,8 +560,8 @@ pub unsafe fn ReleaseRefCountedObjectArraySmart_Type4(a1: *mut u32) -> i64 {
                         if old_ref == 1 {
                             core::sync::atomic::fence(Ordering::Acquire);
                             HeapFree_StructOffset24_Offset32_Offset40_Minus4(v7 as *mut *mut c_void);
-                            let process_heap = GetProcessHeap();
-                            HeapFree(process_heap, 0, v7);
+                            let process_heap = x4_getprocessheap();
+                            x4_heapfree(process_heap, 0, v7);
                         }
                         *element_slot_ptr = core::ptr::null_mut();
                     }
@@ -573,8 +573,8 @@ pub unsafe fn ReleaseRefCountedObjectArraySmart_Type4(a1: *mut u32) -> i64 {
 
         let buffer = *buffer_ptr_field;
         if !buffer.is_null() {
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, buffer);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, buffer);
             *buffer_ptr_field = core::ptr::null_mut();
         }
 
@@ -589,7 +589,7 @@ pub unsafe fn ReleaseRefCountedObjectArraySmart_Type4(a1: *mut u32) -> i64 {
 
 pub unsafe fn ShutdownRefCountedSubsystem() -> i64 {
     if dword_14046C5A8 != 0 {
-        DeleteCriticalSection(&raw mut stru_14046C5B0);
+        x4_deletecriticalsection(&raw mut stru_14046C5B0);
         dword_14046C5A8 = 0;
     }
 
@@ -601,8 +601,8 @@ pub unsafe fn ShutdownRefCountedSubsystem() -> i64 {
         if old_ref == 1 && !v0.is_null() {
             core::sync::atomic::fence(Ordering::Acquire);
             ObjectBaseRefDestroyInternal(v0);
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, v0);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, v0);
         }
         qword_14046C5D8 = core::ptr::null_mut();
     }

@@ -1,4 +1,3 @@
-use crate::{far_fn_addr, Color};
 use crate::hpvm_log;
 use elf::{ElfBytes, endian::AnyEndian};
 use uefi::prelude::*;
@@ -77,7 +76,8 @@ pub unsafe fn load_and_jump_os(path: &str) -> ! {
     };
 
 
-    far_fn_addr!(entry_fn, extern "system" fn(fb: *mut u32, size: usize) -> !);
-    (entry_fn(actual_jump_address).unwrap())(fb_ptr as *mut u32, fb_size)
+    let entry_fn: extern "system" fn(fb: *mut u32, size: usize) -> ! =
+        unsafe { core::mem::transmute(actual_jump_address as usize) };
+    entry_fn(fb_ptr as *mut u32, fb_size)
 
 }

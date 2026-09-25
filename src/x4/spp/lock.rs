@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{GetCurrentThreadId, GetProcessHeap, HeapAlloc, HeapFree, LeaveCriticalSection, RaiseException, ReleaseSemaphore, SetEvent, Sleep, WaitForSingleObject};
+use crate::x4::externals::{x4_getcurrentthreadid, x4_getprocessheap, x4_heapalloc, x4_heapfree, x4_leavecriticalsection, x4_raiseexception, x4_releasesemaphore, x4_setevent, x4_sleep, x4_waitforsingleobject};
 use crate::x4::types::{SppCustomLock, SppCustomLockV2, ThreadSlot, CRITICAL_SECTION, HANDLE, DWORD, SIZE_T};
 
 pub unsafe fn SppCustomLockAcquireExclusive(lock: *mut SppCustomLockV2) {
@@ -8,8 +8,8 @@ pub unsafe fn SppCustomLockAcquireExclusive(lock: *mut SppCustomLockV2) {
         return;
     }
 
-    let current_thread_id = GetCurrentThreadId();
-    EnterCriticalSection(&mut (*lock).internalLock);
+    let current_thread_id = x4_getcurrentthreadid();
+    x4_entercriticalsection(&mut (*lock).internalLock);
 
     let mut acquired = false;
 
@@ -20,14 +20,14 @@ pub unsafe fn SppCustomLockAcquireExclusive(lock: *mut SppCustomLockV2) {
         (*lock).isWriterMode = 1;
         acquired = true;
     } else if (*lock).targetStateMarker == 0 || (*lock).owningThreadId != current_thread_id {
-        let thread_id = GetCurrentThreadId();
+        let thread_id = x4_getcurrentthreadid();
         let mut recursion_count = 0;
 
         if (*lock).isWriterMode != 0 {
             if (*lock).owningThreadId == thread_id {
                 recursion_count = (*lock).recursionCount;
             } else if (*lock).targetStateMarker == 0 {
-                EnterCriticalSection(&mut (*lock).internalLock);
+                x4_entercriticalsection(&mut (*lock).internalLock);
                 let mut index: usize = 0;
 
                 if (*lock).maxSlotsCount > 0 {
@@ -48,12 +48,12 @@ pub unsafe fn SppCustomLockAcquireExclusive(lock: *mut SppCustomLockV2) {
                         index += 1;
                     }
                 }
-                LeaveCriticalSection(&mut (*lock).internalLock);
+                x4_leavecriticalsection(&mut (*lock).internalLock);
             }
 
             if recursion_count != 0 {
                 // STATUS_POSSIBLE_DEADLOCK
-                RaiseException(0xC0000194, 0, 0, core::ptr::null());
+                x4_raiseexception(0xC0000194, 0, 0, core::ptr::null());
             }
         }
 
@@ -63,11 +63,11 @@ pub unsafe fn SppCustomLockAcquireExclusive(lock: *mut SppCustomLockV2) {
         acquired = true;
     }
 
-    LeaveCriticalSection(&mut (*lock).internalLock);
+    x4_leavecriticalsection(&mut (*lock).internalLock);
 
     if !acquired {
-        if WaitForSingleObject((*lock).hEvent, 0x337F9800) != 0 {
-            RaiseException(0xC0000194, 0, 0, core::ptr::null());
+        if x4_waitforsingleobject((*lock).hEvent, 0x337F9800) != 0 {
+            x4_raiseexception(0xC0000194, 0, 0, core::ptr::null());
         }
         (*lock).owningThreadId = current_thread_id;
     }
@@ -83,10 +83,10 @@ pub unsafe fn SppCustomLockAcquire(
 
     let mut v4: *mut ThreadSlot = core::ptr::null_mut();
     let mut v5 = 0;
-    let current_thread_id = GetCurrentThreadId();
+    let current_thread_id = x4_getcurrentthreadid();
     let mut v7 = true;
 
-    EnterCriticalSection(&mut (*lock).internalLock);
+    x4_entercriticalsection(&mut (*lock).internalLock);
 
     loop {
         if (*lock).isWriterMode == 0 {
@@ -204,12 +204,12 @@ pub unsafe fn SppCustomLockAcquire(
         }
     }
 
-    LeaveCriticalSection(&mut (*lock).internalLock);
+    x4_leavecriticalsection(&mut (*lock).internalLock);
 
     if v5 == 0 {
-        if WaitForSingleObject((*lock).activeWritersCount as HANDLE, 0x337F9800) != 0 {
+        if x4_waitforsingleobject((*lock).activeWritersCount as HANDLE, 0x337F9800) != 0 {
             // STATUS_POSSIBLE_DEADLOCK
-            RaiseException(0xC0000194, 0, 0, core::ptr::null());
+            x4_raiseexception(0xC0000194, 0, 0, core::ptr::null());
         }
     }
 
@@ -253,17 +253,17 @@ pub unsafe fn SppCustomLockResizeSlots(lock: *mut SppCustomLock) {
 
     if v3 < 0 {
         // STATUS_INTEGER_OVERFLOW (0xC0000095)
-        RaiseException(0xC0000095, 0, 0, core::ptr::null());
+        x4_raiseexception(0xC0000095, 0, 0, core::ptr::null());
         return;
     }
 
-    LeaveCriticalSection(&mut (*lock).internalLock);
+    x4_leavecriticalsection(&mut (*lock).internalLock);
 
-    let process_heap = GetProcessHeap();
-    let v9 = HeapAlloc(process_heap, 0, v2 as usize as SIZE_T) as *mut u8;
+    let process_heap = x4_getprocessheap();
+    let v9 = x4_heapalloc(process_heap, 0, v2 as usize as SIZE_T) as *mut u8;
 
     if v9.is_null() {
-        Sleep(10);
+        x4_sleep(10);
     } else {
         core::ptr::write_bytes(
             v9.add((8 * v5) as usize),
@@ -271,7 +271,7 @@ pub unsafe fn SppCustomLockResizeSlots(lock: *mut SppCustomLock) {
             (8 * (v6 - v5)) as usize,
         );
 
-        EnterCriticalSection(&mut (*lock).internalLock);
+        x4_entercriticalsection(&mut (*lock).internalLock);
 
         if v5 == (*lock).maxSlotsCount as u32 {
             if !v1.is_null() && v5 > 0 {
@@ -281,20 +281,20 @@ pub unsafe fn SppCustomLockResizeSlots(lock: *mut SppCustomLock) {
             (*lock).pThreadSlotsArray = v9 as *mut ThreadSlot;
             (*lock).maxSlotsCount = v6 as i32;
 
-            LeaveCriticalSection(&mut (*lock).internalLock);
+            x4_leavecriticalsection(&mut (*lock).internalLock);
 
             if !v1.is_null() {
-                let heap_to_free = GetProcessHeap();
-                HeapFree(heap_to_free, 0, v1 as *mut c_void);
+                let heap_to_free = x4_getprocessheap();
+                x4_heapfree(heap_to_free, 0, v1 as *mut c_void);
             }
         } else {
-            LeaveCriticalSection(&mut (*lock).internalLock);
-            let heap_to_free = GetProcessHeap();
-            HeapFree(heap_to_free, 0, v9 as *mut c_void);
+            x4_leavecriticalsection(&mut (*lock).internalLock);
+            let heap_to_free = x4_getprocessheap();
+            x4_heapfree(heap_to_free, 0, v9 as *mut c_void);
         }
     }
 
-    EnterCriticalSection(&mut (*lock).internalLock);
+    x4_entercriticalsection(&mut (*lock).internalLock);
 }
 
 
@@ -303,8 +303,8 @@ pub unsafe fn SppCustomLockRelease(lock: *mut SppCustomLock) {
         return;
     }
 
-    let current_thread_id = GetCurrentThreadId();
-    EnterCriticalSection(&mut (*lock).internalLock);
+    let current_thread_id = x4_getcurrentthreadid();
+    x4_entercriticalsection(&mut (*lock).internalLock);
     let mut should_leave_lock = true;
 
     if (*lock).recursionCount == 0 {
@@ -316,12 +316,12 @@ pub unsafe fn SppCustomLockRelease(lock: *mut SppCustomLock) {
             let slots_ptr = (*lock).pThreadSlotsArray;
             if slots_ptr.is_null() {
                 // STATUS_RESOURCE_NOT_OWNED
-                RaiseException(0xC0000264, 0, 0, core::ptr::null());
+                x4_raiseexception(0xC0000264, 0, 0, core::ptr::null());
             }
 
             let max_slots = (*lock).maxSlotsCount as usize;
             if max_slots == 0 {
-                RaiseException(0xC0000264, 0, 0, core::ptr::null());
+                x4_raiseexception(0xC0000264, 0, 0, core::ptr::null());
             }
 
             let mut found_slot: *mut ThreadSlot = core::ptr::null_mut();
@@ -336,7 +336,7 @@ pub unsafe fn SppCustomLockRelease(lock: *mut SppCustomLock) {
             }
 
             if found_slot.is_null() {
-                RaiseException(0xC0000264, 0, 0, core::ptr::null());
+                x4_raiseexception(0xC0000264, 0, 0, core::ptr::null());
             }
 
             slot_ptr = found_slot;
@@ -359,8 +359,8 @@ pub unsafe fn SppCustomLockRelease(lock: *mut SppCustomLock) {
                     (*(*lock).inlineSlot).slotRecursionCount = 1;
                     (*lock).isWriterMode = 1;
 
-                    LeaveCriticalSection(&mut (*lock).internalLock);
-                    SetEvent((*lock).hEvent);
+                    x4_leavecriticalsection(&mut (*lock).internalLock);
+                    x4_setevent((*lock).hEvent);
                     return;
                 }
             }
@@ -380,8 +380,8 @@ pub unsafe fn SppCustomLockRelease(lock: *mut SppCustomLock) {
                 should_leave_lock = false;
                 (*lock).isWriterMode = unknown_flag as u32 as i32;
 
-                LeaveCriticalSection(&mut (*lock).internalLock);
-                ReleaseSemaphore((*lock).activeWritersCount, unknown_flag, core::ptr::null_mut());
+                x4_leavecriticalsection(&mut (*lock).internalLock);
+                x4_releasesemaphore((*lock).activeWritersCount, unknown_flag, core::ptr::null_mut());
             } else {
                 let owning_thread_id = (*lock).owningThreadId;
                 if owning_thread_id != 0 {
@@ -391,8 +391,8 @@ pub unsafe fn SppCustomLockRelease(lock: *mut SppCustomLock) {
                     should_leave_lock = false;
                     (*lock).owningThreadId = owning_thread_id - 1;
 
-                    LeaveCriticalSection(&mut (*lock).internalLock);
-                    SetEvent((*lock).hEvent);
+                    x4_leavecriticalsection(&mut (*lock).internalLock);
+                    x4_setevent((*lock).hEvent);
                 } else {
                     (*lock).recursionCount = 0;
                 }
@@ -401,11 +401,11 @@ pub unsafe fn SppCustomLockRelease(lock: *mut SppCustomLock) {
     }
 
     if should_leave_lock {
-        LeaveCriticalSection(&mut (*lock).internalLock);
+        x4_leavecriticalsection(&mut (*lock).internalLock);
     }
 }
 
-fn EnterCriticalSection(p0: &mut CRITICAL_SECTION) {
+fn x4_entercriticalsection(p0: &mut CRITICAL_SECTION) {
     todo!()
 }
 

@@ -1,4 +1,4 @@
-use crate::x4::externals::{GetProcessHeap, HeapFree};
+use crate::x4::externals::{x4_getprocessheap, x4_heapfree};
 
 pub unsafe fn SwapVectorBuffersAndFreeOrphans(a1: *mut i32, a2: *mut i32) -> i32 {
     // Offset 8 corresponds to the 64-bit elements pointer in the vector struct 
@@ -20,8 +20,8 @@ pub unsafe fn SwapVectorBuffersAndFreeOrphans(a1: *mut i32, a2: *mut i32) -> i32
 
     let v8 = *p1_elem;
     if !v8.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v8);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v8);
         *p1_elem = core::ptr::null_mut();
     }
 
@@ -36,8 +36,8 @@ pub unsafe fn SwapVectorBuffersAndFreeOrphans(a1: *mut i32, a2: *mut i32) -> i32
 
     let v11 = *p2_elem;
     if !v11.is_null() {
-        let process_heap = GetProcessHeap();
-        v10 = HeapFree(process_heap, 0, v11) as *mut core::ffi::c_void;
+        let process_heap = x4_getprocessheap();
+        v10 = x4_heapfree(process_heap, 0, v11) as *mut core::ffi::c_void;
     }
 
     *p2_elem = v2;

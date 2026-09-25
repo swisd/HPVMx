@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{memcpy, RegOpenKeyExW, RegCloseKey, RegQueryValueExW, GetProcessHeap, HeapAlloc, LocalAlloc, LocalFree, HeapFree, GetLastError, RtlQueryPackageClaims, _wcsicmp};
+use crate::x4::externals::{memcpy, x4_regopenkeyexw, x4_regclosekey, x4_regqueryvalueexw, x4_getprocessheap, x4_heapalloc, x4_localalloc, x4_localfree, x4_heapfree, x4_getlasterror, x4_rtlquerypackageclaims, x4__wcsicmp};
 use crate::x4::globals::{_guard_check_icall_fptr, E_OUTOFMEMORY, E_INVALIDARG, GlobalPtrSppNamespace};
 use crate::x4::reloc::{ProcessReloc_Rva0_Len36, ProcessReloc_Rva28_Len0, ProcessReloc_Rva2_Len30, ProcessReloc_Rva30_Len0, ProcessReloc_Rva33_Len3, ProcessReloc_Rva36_Len0,
                        ProcessReloc_Rva36_Len3, ProcessReloc_Rva3_Len31, ProcessReloc_Rva3_Len36, ProcessReloc_Rva8_Len36, ProcessPeloc_Rva31_Len31};
@@ -29,9 +29,9 @@ pub unsafe fn SppQueryClientContainerToken(
 
     ProcessReloc_Rva3_Len36(*dummy_table, *dummy_data);
 
-    let current_thread = GetCurrentThread();
-    if OpenThreadToken(current_thread, 8, 0, &mut token_handle) == 0 {
-        let last_error = GetLastError();
+    let current_thread = x4_getcurrentthread();
+    if x4_openthreadtoken(current_thread, 8, 0, &mut token_handle) == 0 {
+        let last_error = x4_getlasterror();
         let mut v7: HRESULT = last_error as HRESULT;
 
         if last_error != 0 {
@@ -50,7 +50,7 @@ pub unsafe fn SppQueryClientContainerToken(
     }
 
     v12 = 256;
-    let nt_status = RtlQueryPackageClaims(
+    let nt_status = x4_rtlquerypackageclaims(
         token_handle,
         src.as_ptr(),
         &mut v12,
@@ -104,21 +104,21 @@ unsafe fn cleanup(
     dummy_data: *const c_void,
 ) -> HRESULT {
     extern "system" {
-        fn HeapFree(hHeap: HANDLE, dwFlags: u32, lpMem: *mut c_void) -> BOOL;
-        fn GetProcessHeap() -> HANDLE;
+        fn x4_heapfree(hHeap: HANDLE, dwFlags: u32, lpMem: *mut c_void) -> BOOL;
+        fn x4_getprocessheap() -> HANDLE;
         fn LogTraceEvent(status: HRESULT);
         fn ProcessReloc_Rva36_Len3(table: *const c_void, data: *const c_void);
         fn ProcessReloc_Rva30_Len0(table: *const c_void, data: *const c_void);
         fn ProcessReloc_Rva0_Len36(table: *const c_void, data: *const c_void);
-        fn CloseHandle(hObject: HANDLE) -> BOOL;
+        fn x4_closehandle(hObject: HANDLE) -> BOOL;
     }
 
     LogTraceEvent(v7);
 
     if !v4.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         // v4 - 2 skips backward 2 WCHARs (4 bytes) before freeing, as in original code
-        HeapFree(process_heap, 0, v4.offset(-2) as *mut c_void);
+        x4_heapfree(process_heap, 0, v4.offset(-2) as *mut c_void);
         LogTraceEvent(0);
         ProcessReloc_Rva36_Len3(dummy_table, dummy_data);
     }
@@ -126,7 +126,7 @@ unsafe fn cleanup(
     ProcessReloc_Rva30_Len0(dummy_table, dummy_data);
 
     if !token_handle.is_null() {
-        CloseHandle(token_handle);
+        x4_closehandle(token_handle);
     }
 
     ProcessReloc_Rva0_Len36(dummy_table, dummy_data);
@@ -261,7 +261,7 @@ pub unsafe fn SppQueryInternalPolicyNode(
 
     if !h_mem.is_null() {
         ProcessReloc_Rva3_Len36(*dummy_table, *dummy_data);
-        LocalFree(h_mem);
+        x4_localfree(h_mem);
         h_mem = core::ptr::null_mut();
     }
 
@@ -269,7 +269,7 @@ pub unsafe fn SppQueryInternalPolicyNode(
 
     if !v30.is_null() {
         ProcessReloc_Rva36_Len0(*dummy_table, *dummy_data);
-        LocalFree(v30);
+        x4_localfree(v30);
     }
 
     if !v26.is_null() {
@@ -327,33 +327,33 @@ pub unsafe fn SppQueryLicenseAttribute(
         ProcessReloc_Rva36_Len0(*dummy_table, *dummy_data);
 
         // Map friendly attribute names to their internal canonical keys
-        let internal_name: PCWSTR = if _wcsicmp(wide_str!("Name"), pwszFriendlyName) == 0 {
+        let internal_name: PCWSTR = if x4__wcsicmp(wide_str!("Name"), pwszFriendlyName) == 0 {
             wide_str!("productName")
-        } else if _wcsicmp(wide_str!("Description"), pwszFriendlyName) == 0 {
+        } else if x4__wcsicmp(wide_str!("Description"), pwszFriendlyName) == 0 {
             ProcessReloc_Rva3_Len36(*dummy_table, *dummy_data);
             wide_str!("productDescription")
-        } else if _wcsicmp(wide_str!("Author"), pwszFriendlyName) == 0 {
+        } else if x4__wcsicmp(wide_str!("Author"), pwszFriendlyName) == 0 {
             wide_str!("productAuthor")
-        } else if _wcsicmp(wide_str!("LicensorUrl"), pwszFriendlyName) == 0 {
+        } else if x4__wcsicmp(wide_str!("LicensorUrl"), pwszFriendlyName) == 0 {
             ProcessReloc_Rva0_Len36(*dummy_table, *dummy_data);
             wide_str!("licensorUrl")
         } else {
-            let res_spc = _wcsicmp(wide_str!("SPCURL"), pwszFriendlyName);
+            let res_spc = x4__wcsicmp(wide_str!("SPCURL"), pwszFriendlyName);
             ProcessReloc_Rva2_Len30(*dummy_table, *dummy_data);
 
             if res_spc == 0 {
                 wide_str!("SPCUrl")
-            } else if _wcsicmp(wide_str!("RACURL"), pwszFriendlyName) == 0 {
+            } else if x4__wcsicmp(wide_str!("RACURL"), pwszFriendlyName) == 0 {
                 wide_str!("RACUrl")
-            } else if _wcsicmp(wide_str!("PKCURL"), pwszFriendlyName) == 0 {
+            } else if x4__wcsicmp(wide_str!("PKCURL"), pwszFriendlyName) == 0 {
                 ProcessReloc_Rva8_Len36(*dummy_table, *dummy_data);
                 wide_str!("PKCUrl")
-            } else if _wcsicmp(wide_str!("EULURL"), pwszFriendlyName) == 0 {
+            } else if x4__wcsicmp(wide_str!("EULURL"), pwszFriendlyName) == 0 {
                 wide_str!("EULUrl")
-            } else if _wcsicmp(wide_str!("PAURL"), pwszFriendlyName) == 0 {
+            } else if x4__wcsicmp(wide_str!("PAURL"), pwszFriendlyName) == 0 {
                 wide_str!("PAUrl")
             } else {
-                let mapped = if _wcsicmp(wide_str!("ActivationSequence"), pwszFriendlyName) == 0 {
+                let mapped = if x4__wcsicmp(wide_str!("ActivationSequence"), pwszFriendlyName) == 0 {
                     wide_str!("ActivationSequence")
                 } else {
                     pwszFriendlyName
@@ -394,7 +394,7 @@ pub unsafe fn SppQueryLicenseAttribute(
     ProcessReloc_Rva36_Len3(*dummy_table, *dummy_data);
 
     if !h_mem.is_null() {
-        LocalFree(h_mem);
+        x4_localfree(h_mem);
     }
 
     v7
@@ -667,7 +667,7 @@ pub unsafe fn SppQueryLicensingDatabase(
                         LogTraceEvent(v12);
 
                         if v12 >= 0 {
-                            let alloc_ptr = LocalAlloc(0x40, v52 as usize as SIZE_T) as *mut GUID;
+                            let alloc_ptr = x4_localalloc(0x40, v52 as usize as SIZE_T) as *mut GUID;
                             if alloc_ptr.is_null() {
                                 v12 = -2147024882; // E_OUTOFMEMORY
                                 HandleSubsystemError(v12);
@@ -760,14 +760,14 @@ pub unsafe fn SppQueryLicensingDatabase(
     if !v11.is_null() {
         ProcessReloc_Rva3_Len36(dummy_table, dummy_data);
         ProcessReloc_Rva36_Len0(dummy_table, dummy_data);
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, (v11 as *mut u16).offset(-1) as *mut c_void);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, (v11 as *mut u16).offset(-1) as *mut c_void);
         LogTraceEvent(0);
     }
 
     if !lp_mem.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, lp_mem);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, lp_mem);
     }
 
     if !v69.is_null() {
@@ -780,11 +780,11 @@ pub unsafe fn SppQueryLicensingDatabase(
     }
 
     if !v10.is_null() {
-        LocalFree(v10 as HLOCAL);
+        x4_localfree(v10 as HLOCAL);
     }
 
     if !v9.is_null() {
-        LocalFree(v9 as HLOCAL);
+        x4_localfree(v9 as HLOCAL);
     }
 
     v12
@@ -836,7 +836,7 @@ pub unsafe fn SppQueryPropertyInternal(
     ProcessReloc_Rva36_Len3(*dummy_table, *dummy_data);
 
     if !h_mem.is_null() {
-        LocalFree(h_mem);
+        x4_localfree(h_mem);
         h_mem = core::ptr::null_mut();
         ProcessReloc_Rva0_Len36(*dummy_table, *dummy_data);
     }
@@ -881,7 +881,7 @@ pub unsafe fn SppQueryRegistryDword(
         LogTraceEvent(0);
     }
 
-    let status = RegOpenKeyExW(hKey, pwszSubKey, 0, 1, &mut h_key_a);
+    let status = x4_regopenkeyexw(hKey, pwszSubKey, 0, 1, &mut h_key_a);
     let mut v11 = status;
 
     if status != 0 {
@@ -897,7 +897,7 @@ pub unsafe fn SppQueryRegistryDword(
     LogTraceEvent(v11);
 
     if !h_key_a.is_null() {
-        RegCloseKey(h_key_a);
+        x4_regclosekey(h_key_a);
         h_key_a = core::ptr::null_mut();
     }
 
@@ -905,7 +905,7 @@ pub unsafe fn SppQueryRegistryDword(
         cb_data = 0;
 
         loop {
-            let query_status = RegQueryValueExW(
+            let query_status = x4_regqueryvalueexw(
                 v5,
                 pwszValueName,
                 core::ptr::null_mut(),
@@ -934,8 +934,8 @@ pub unsafe fn SppQueryRegistryDword(
                 break;
             }
 
-            let process_heap = GetProcessHeap();
-            v4 = HeapAlloc(process_heap, 0, cb_data as usize as SIZE_T) as *mut BYTE;
+            let process_heap = x4_getprocessheap();
+            v4 = x4_heapalloc(process_heap, 0, cb_data as usize as SIZE_T) as *mut BYTE;
 
             if v4.is_null() {
                 v11 = -2147024882; // E_OUTOFMEMORY
@@ -973,12 +973,12 @@ pub unsafe fn SppQueryRegistryDword(
     LogTraceEvent(v11);
 
     if !v4.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v4 as *mut c_void);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v4 as *mut c_void);
     }
 
     if !v5.is_null() {
-        RegCloseKey(v5);
+        x4_regclosekey(v5);
     }
 
     v11
@@ -1001,7 +1001,7 @@ pub unsafe fn SppQueryRegistryMultiString(
         LogTraceEvent(0);
     }
 
-    let status = RegOpenKeyExW(hKey, pwszSubKey, 0, 1, &mut h_key_a);
+    let status = x4_regopenkeyexw(hKey, pwszSubKey, 0, 1, &mut h_key_a);
     let mut v11 = status;
 
     if status != 0 {
@@ -1017,7 +1017,7 @@ pub unsafe fn SppQueryRegistryMultiString(
     LogTraceEvent(v11);
 
     if !h_key_a.is_null() {
-        RegCloseKey(h_key_a);
+        x4_regclosekey(h_key_a);
         h_key_a = core::ptr::null_mut();
     }
 
@@ -1025,7 +1025,7 @@ pub unsafe fn SppQueryRegistryMultiString(
         cb_data = 0;
 
         loop {
-            let query_status = RegQueryValueExW(
+            let query_status = x4_regqueryvalueexw(
                 v5,
                 pwszValueName,
                 core::ptr::null_mut(),
@@ -1054,8 +1054,8 @@ pub unsafe fn SppQueryRegistryMultiString(
                 break;
             }
 
-            let process_heap = GetProcessHeap();
-            v4 = HeapAlloc(process_heap, 0, cb_data as usize as SIZE_T) as *mut BYTE;
+            let process_heap = x4_getprocessheap();
+            v4 = x4_heapalloc(process_heap, 0, cb_data as usize as SIZE_T) as *mut BYTE;
 
             if v4.is_null() {
                 v11 = -2147024882; // E_OUTOFMEMORY
@@ -1090,12 +1090,12 @@ pub unsafe fn SppQueryRegistryMultiString(
     LogTraceEvent(v11);
 
     if !v4.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v4 as *mut c_void);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v4 as *mut c_void);
     }
 
     if !v5.is_null() {
-        RegCloseKey(v5);
+        x4_regclosekey(v5);
     }
 
     v11
@@ -1174,7 +1174,7 @@ pub unsafe fn SppQueryRegistryPolicyValue(
             match (*v7).policyType {
                 1 => {
                     v18 = 4;
-                    let alloc_ptr = LocalAlloc(0x40, 4) as *mut u32;
+                    let alloc_ptr = x4_localalloc(0x40, 4) as *mut u32;
                     v21 = alloc_ptr as *mut c_void;
                     if alloc_ptr.is_null() {
                         string_byte_length_safe = E_OUTOFMEMORY;
@@ -1213,7 +1213,7 @@ pub unsafe fn SppQueryRegistryPolicyValue(
                     v18 = 3;
                     ProcessReloc_Rva0_Len36(*dummy_table, *dummy_data);
                     binary_buffer_size = (*v7).binaryBufferSize as u32;
-                    let v20 = LocalAlloc(0x40, binary_buffer_size as usize as SIZE_T);
+                    let v20 = x4_localalloc(0x40, binary_buffer_size as usize as SIZE_T);
                     v21 = v20;
                     if v20.is_null() {
                         string_byte_length_safe = E_OUTOFMEMORY;
@@ -1241,13 +1241,13 @@ pub unsafe fn SppQueryRegistryPolicyValue(
 
     if !v11.is_null() {
         ProcessReloc_Rva30_Len0(*dummy_table, *dummy_data);
-        LocalFree(v11 as HLOCAL);
+        x4_localfree(v11 as HLOCAL);
     }
     if !v10.is_null() {
-        LocalFree(v10 as HLOCAL);
+        x4_localfree(v10 as HLOCAL);
     }
     if !v7.is_null() {
-        LocalFree(v7 as HLOCAL);
+        x4_localfree(v7 as HLOCAL);
     }
 
     string_byte_length_safe

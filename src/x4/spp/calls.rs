@@ -1,5 +1,5 @@
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::LocalFree;
+use crate::x4::externals::x4_localfree;
 use crate::x4::globals::{GlobalPtrSppNamespace, GlobalSppPacketControlFlags, _guard_check_icall_fptr};
 use crate::x4::reloc::{ProcessReloc_Rva0_Len36, ProcessReloc_Rva28_Len0, ProcessReloc_Rva2_Len30, ProcessReloc_Rva30_Len0, ProcessReloc_Rva33_Len3, ProcessReloc_Rva36_Len0, ProcessReloc_Rva36_Len3, ProcessReloc_Rva3_Len31, ProcessReloc_Rva3_Len36, ProcessReloc_Rva8_Len36};
 use crate::x4::spp::query::{SppQueryPropertyInternal, SppQuerySystemPolicyBits};
@@ -152,7 +152,7 @@ pub unsafe fn SppGetComponentInterface(
     LogTraceEvent(v7);
 
     if !hMem.is_null() {
-        LocalFree(hMem);
+        x4_localfree(hMem);
     }
 
     if v7 >= 0 {
@@ -193,7 +193,7 @@ pub unsafe fn SppGetComponentInterface(
     LogTraceEvent(v7);
 
     if !v16.is_null() {
-        LocalFree(v16);
+        x4_localfree(v16);
         v16 = core::ptr::null_mut();
     }
 
@@ -293,7 +293,7 @@ pub unsafe fn SppGetProtectedEditionString(
     );
 
     if !v6.is_null() {
-        LocalFree(v6 as *mut core::ffi::c_void);
+        x4_localfree(v6 as *mut core::ffi::c_void);
         ProcessReloc_Rva30_Len0(
             &stru_14043F5B8 as *const _ as *mut _,
             &dword_140464690 as *const _ as *mut _,
@@ -305,7 +305,7 @@ pub unsafe fn SppGetProtectedEditionString(
             &dword_14043ECB8 as *const _ as *mut _,
             &dword_140463BF8 as *const _ as *mut _,
         );
-        LocalFree(v8 as *mut core::ffi::c_void);
+        x4_localfree(v8 as *mut core::ffi::c_void);
         ProcessReloc_Rva36_Len3(
             &stru_14043CC78 as *const _ as *mut _,
             &dword_140461398 as *const _ as *mut _,

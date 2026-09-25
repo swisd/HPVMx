@@ -1,7 +1,7 @@
 use core::ffi::c_void;
 use core::ops::Sub;
 use crate::x4::error::LogTraceEvent;
-use crate::x4::externals::{GetProcessHeap, HeapFree};
+use crate::x4::externals::{x4_getprocessheap, x4_heapfree};
 
 struct FPTR(u64);
 
@@ -38,8 +38,8 @@ pub unsafe fn MoveAssignFivePointerArray(
         if !current_dst.is_null() {
             // Adjust pointer back by 4 bytes as seen in the decompiled snippet (v5 - 4)
             let adjusted = (current_dst.as_u64()).sub(4) as *mut c_void;
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, adjusted);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, adjusted);
             LogTraceEvent(0);
         }
 

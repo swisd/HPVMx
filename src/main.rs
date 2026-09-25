@@ -31,6 +31,7 @@ mod consts;
 mod types;
 mod rng;
 mod state;
+mod traits;
 mod loader;
 mod terminal;
 mod pm;
@@ -47,13 +48,16 @@ mod dls;
 mod backgrounds;
 mod xmlui;
 mod multipar;
+mod string_utils;
+#[cfg(feature = "x4")]
 mod x4;
 mod version;
 mod hosting;
 mod testmodules;
 mod localmodules;
 mod xdb;
-mod exterals;
+pub mod externals;
+pub mod disk_executable;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -381,8 +385,9 @@ fn main() -> Status {
     //     .run_forever();
 
     loop {
-        // Poll ready asynchronous tasks on global executor
+        // Poll ready asynchronous tasks and disk-loaded background executables.
         multipar::task::poll_global_ready();
+        terminal::tick_disk_executables();
 
         // drive network timers (loopback stack)
         devices::net_stack::poll_tick();

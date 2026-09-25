@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{wcsncmp, AcquireSRWLockExclusive, GetLastError, GetProcessHeap, HeapFree, LocalFree, ReleaseSRWLockExclusive, CheckTokenMembership, AllocateAndInitializeSid, FreeSid, BCryptFinishHash, LCMapStringW, BCryptDestroyHash, BCryptCloseAlgorithmProvider, BCryptHashData, BCryptOpenAlgorithmProvider, BCryptCreateHash};
+use crate::x4::externals::{wcsncmp, x4_acquiresrwlockexclusive, x4_getlasterror, x4_getprocessheap, x4_heapfree, x4_localfree, x4_releasesrwlockexclusive, x4_checktokenmembership, x4_allocateandinitializesid, x4_freesid, x4_bcryptfinishhash, x4_lcmapstringw, x4_bcryptdestroyhash, x4_bcryptclosealgorithmprovider, x4_bcrypthashdata, x4_bcryptopenalgorithmprovider, x4_bcryptcreatehash};
 use crate::x4::globals::{_guard_check_icall_fptr, pManager, pQueueMgr, GlobalPtrTelemetryContext};
 use crate::x4::misc::SwapVectorBuffersAndFreeOrphans;
 use crate::x4::ops::HIDWORD;
@@ -50,11 +50,11 @@ pub unsafe fn SppIsSubsystemInitialized() -> i64 {
     unk_config_flags_high = HIDWORD!(pQueueMgr.unk_config_flags) as u32;
     if HIDWORD!(pQueueMgr.unk_config_flags) == 0 {
         if pQueueMgr.status_flag != 0 {
-            AcquireSRWLockExclusive(&mut pQueueMgr.lock);
+            x4_acquiresrwlockexclusive(&mut pQueueMgr.lock);
             if !pQueueMgr.sub_object_1.is_null() {
                 unk_config_flags_high = HIDWORD!(pQueueMgr.unk_config_flags) as u32;
                 // LABEL_5:
-                ReleaseSRWLockExclusive(&mut pQueueMgr.lock);
+                x4_releasesrwlockexclusive(&mut pQueueMgr.lock);
                 return unk_config_flags_high as i64;
             }
 
@@ -78,11 +78,11 @@ pub unsafe fn SppIsSubsystemInitialized() -> i64 {
                 unk_config_flags_high = 1;
                 SET_HIDWORD(&mut pQueueMgr.unk_config_flags, 1);
                 // goto LABEL_5;
-                ReleaseSRWLockExclusive(&mut pQueueMgr.lock);
+                x4_releasesrwlockexclusive(&mut pQueueMgr.lock);
                 return unk_config_flags_high as i64;
             }
 
-            ReleaseSRWLockExclusive(&mut pQueueMgr.lock);
+            x4_releasesrwlockexclusive(&mut pQueueMgr.lock);
         }
         return 0;
     }
@@ -192,7 +192,7 @@ pub unsafe fn SppCheckWellKnownGroupMembership(
         HandleSubsystemError(v4);
         // goto LABEL_11;
     } else {
-        if AllocateAndInitializeSid(
+        if x4_allocateandinitializesid(
             &mut pIdentifierAuthority,
             1,
             dwTargetRid,
@@ -205,9 +205,9 @@ pub unsafe fn SppCheckWellKnownGroupMembership(
             0,
             &mut SidToCheck,
         ) == 0
-            || CheckTokenMembership(core::ptr::null_mut(), SidToCheck, &mut IsMember) == 0
+            || x4_checktokenmembership(core::ptr::null_mut(), SidToCheck, &mut IsMember) == 0
         {
-            LastError = GetLastError() as i32;
+            LastError = x4_getlasterror() as i32;
             v4 = LastError as u32 as i32;
             if LastError != 0 {
                 if LastError > 0 {
@@ -226,7 +226,7 @@ pub unsafe fn SppCheckWellKnownGroupMembership(
     // LABEL_11:
     LogTraceEvent(v4);
     if !SidToCheck.is_null() {
-        FreeSid(SidToCheck);
+        x4_freesid(SidToCheck);
     }
     v4
 }
@@ -257,7 +257,7 @@ pub unsafe fn SppNormalizeLicensingId(
 
     LogTraceEvent(v4);
     if !v5.is_null() {
-        LocalFree(v5 as HLOCAL);
+        x4_localfree(v5 as HLOCAL);
     }
 
     v4
@@ -326,8 +326,8 @@ pub unsafe fn SppNormalizeStringProperty(
                 // goto LABEL_9;
                 HandleSubsystemError(v8);
             } else {
-                if LCMapStringW(0x400, dwMapFlags, lpDestStr, cchDest, lpDestStr, cchDest) == 0 {
-                    LastError = GetLastError() as i32;
+                if x4_lcmapstringw(0x400, dwMapFlags, lpDestStr, cchDest, lpDestStr, cchDest) == 0 {
+                    LastError = x4_getlasterror() as i32;
                     v8 = LastError;
                     if LastError != 0 {
                         if LastError > 0 {
@@ -358,8 +358,8 @@ pub unsafe fn SppNormalizeStringProperty(
     // LABEL_25:
     LogTraceEvent(v8);
     if !lpDestStr.is_null() {
-        ProcessHeap = GetProcessHeap();
-        HeapFree(ProcessHeap, 0, lpDestStr.offset(-2) as *mut core::ffi::c_void);
+        ProcessHeap = x4_getprocessheap();
+        x4_heapfree(ProcessHeap, 0, lpDestStr.offset(-2) as *mut core::ffi::c_void);
         LogTraceEvent(0);
     }
 
@@ -453,8 +453,8 @@ pub unsafe fn SppPrepareComponentParameters(
                     elements = v27.elements;
                     loop {
                         if !v6.is_null() {
-                            ProcessHeap = GetProcessHeap();
-                            HeapFree(ProcessHeap, 0, v6);
+                            ProcessHeap = x4_getprocessheap();
+                            x4_heapfree(ProcessHeap, 0, v6);
                             Src.totalCapacity = 0;
                         }
                         Src.elements = core::ptr::null_mut();
@@ -512,8 +512,8 @@ pub unsafe fn SppPrepareComponentParameters(
                             PointerVectorResize(&mut Src, 0);
                             v16 = Src.elements;
                             if !Src.elements.is_null() {
-                                v17 = GetProcessHeap();
-                                HeapFree(v17, 0, v16 as *mut core::ffi::c_void);
+                                v17 = x4_getprocessheap();
+                                x4_heapfree(v17, 0, v16 as *mut core::ffi::c_void);
                             }
                             break;
                         }
@@ -527,8 +527,8 @@ pub unsafe fn SppPrepareComponentParameters(
                     PointerVectorResize(&mut Src, 0);
                     v16 = Src.elements;
                     if !Src.elements.is_null() {
-                        v17 = GetProcessHeap();
-                        HeapFree(v17, 0, v16 as *mut core::ffi::c_void);
+                        v17 = x4_getprocessheap();
+                        x4_heapfree(v17, 0, v16 as *mut core::ffi::c_void);
                     }
                 }
             }
@@ -538,26 +538,26 @@ pub unsafe fn SppPrepareComponentParameters(
     // LABEL_24:
     LogTraceEvent(v7 as i32);
     if !v6.is_null() {
-        v18 = GetProcessHeap();
-        HeapFree(v18, 0, v6);
+        v18 = x4_getprocessheap();
+        x4_heapfree(v18, 0, v6);
     }
     if !ppszDestinationString.is_null() {
         v19 = ppszDestinationString.offset(-2);
-        v20 = GetProcessHeap();
-        HeapFree(v20, 0, v19 as *mut core::ffi::c_void);
+        v20 = x4_getprocessheap();
+        x4_heapfree(v20, 0, v19 as *mut core::ffi::c_void);
         LogTraceEvent(0);
     }
     PointerVectorResize(&mut a1a, 0);
     v21 = a1a.elements;
     if !a1a.elements.is_null() {
-        v22 = GetProcessHeap();
-        HeapFree(v22, 0, v21 as *mut core::ffi::c_void);
+        v22 = x4_getprocessheap();
+        x4_heapfree(v22, 0, v21 as *mut core::ffi::c_void);
     }
     PointerVectorResize(&mut v27, 0);
     v23 = v27.elements;
     if !v27.elements.is_null() {
-        v24 = GetProcessHeap();
-        HeapFree(v24, 0, v23 as *mut core::ffi::c_void);
+        v24 = x4_getprocessheap();
+        x4_heapfree(v24, 0, v23 as *mut core::ffi::c_void);
     }
 
     v7 as i64
@@ -619,7 +619,7 @@ pub unsafe fn SppHashAndSerializeLicensingId(
             } else {
                 v6 = 0;
                 if pCryptoCtx.isHashActive != 0 {
-                    v8 = BCryptFinishHash(
+                    v8 = x4_bcryptfinishhash(
                         pCryptoCtx.hHashInstance,
                         pbOutput.as_mut_ptr(),
                         0x20,
@@ -655,24 +655,24 @@ pub unsafe fn SppHashAndSerializeLicensingId(
     // LABEL_15:
     LogTraceEvent(v6);
     if !v5.is_null() {
-        ProcessHeap = GetProcessHeap();
-        HeapFree(ProcessHeap, 0, v5.offset(-4) as *mut c_void);
+        ProcessHeap = x4_getprocessheap();
+        x4_heapfree(ProcessHeap, 0, v5.offset(-4) as *mut c_void);
         LogTraceEvent(0);
     }
     if SppCheckTelemetryState(&mut GlobalPtrTelemetryContext as *mut SppTelemetryContext) != 0 {
         pCryptoCtx.isHashActive = 0;
         if !pCryptoCtx.hHashInstance.is_null() {
-            BCryptDestroyHash(pCryptoCtx.hHashInstance);
+            x4_bcryptdestroyhash(pCryptoCtx.hHashInstance);
             pCryptoCtx.hHashInstance = core::ptr::null_mut();
         }
         if !pCryptoCtx.hAlgProvider.is_null() {
-            BCryptCloseAlgorithmProvider(pCryptoCtx.hAlgProvider, 0);
+            x4_bcryptclosealgorithmprovider(pCryptoCtx.hAlgProvider, 0);
             pCryptoCtx.hAlgProvider = core::ptr::null_mut();
         }
     }
     if !v2.is_null() {
-        v11 = GetProcessHeap();
-        HeapFree(v11, 0, v2.offset(-2) as *mut c_void);
+        v11 = x4_getprocessheap();
+        x4_heapfree(v11, 0, v2.offset(-2) as *mut c_void);
         LogTraceEvent(0);
     }
 
@@ -736,8 +736,8 @@ pub unsafe fn SppNormalizeProductKey(
     // LABEL_11:
     LogTraceEvent(v4);
     if !v5.is_null() {
-        ProcessHeap = GetProcessHeap();
-        HeapFree(ProcessHeap, 0, v5.offset(-2) as *mut core::ffi::c_void);
+        ProcessHeap = x4_getprocessheap();
+        x4_heapfree(ProcessHeap, 0, v5.offset(-2) as *mut core::ffi::c_void);
         LogTraceEvent(0);
     }
 
@@ -782,11 +782,11 @@ pub unsafe fn SppConvertContextToIdString(
 
     LogTraceEvent(v6);
     if !v3.is_null() {
-        LocalFree(v3 as *mut core::ffi::c_void);
+        x4_localfree(v3 as *mut core::ffi::c_void);
     }
     if !v5.is_null() {
-        ProcessHeap = GetProcessHeap();
-        HeapFree(ProcessHeap, 0, v5.offset(-2) as *mut core::ffi::c_void);
+        ProcessHeap = x4_getprocessheap();
+        x4_heapfree(ProcessHeap, 0, v5.offset(-2) as *mut core::ffi::c_void);
         LogTraceEvent(0);
     }
 
@@ -820,7 +820,7 @@ pub unsafe fn SppCheckBuiltinAdminMembership(
         // goto LABEL_11;
     } else {
         // 0x20u = SECURITY_BUILTIN_DOMAIN_RID, 0x220u = DOMAIN_ALIAS_RID_ADMINS
-        if AllocateAndInitializeSid(
+        if x4_allocateandinitializesid(
             &mut pIdentifierAuthority,
             2,
             0x20,
@@ -833,9 +833,9 @@ pub unsafe fn SppCheckBuiltinAdminMembership(
             0,
             &mut SidToCheck,
         ) == 0
-            || CheckTokenMembership(core::ptr::null_mut(), SidToCheck, &mut IsMember) == 0
+            || x4_checktokenmembership(core::ptr::null_mut(), SidToCheck, &mut IsMember) == 0
         {
-            LastError = GetLastError() as i32;
+            LastError = x4_getlasterror() as i32;
             v3 = LastError;
             if LastError != 0 {
                 if LastError > 0 {
@@ -854,7 +854,7 @@ pub unsafe fn SppCheckBuiltinAdminMembership(
     // LABEL_11:
     LogTraceEvent(v3);
     if !SidToCheck.is_null() {
-        FreeSid(SidToCheck);
+        x4_freesid(SidToCheck);
     }
     v3 as i32
 }
@@ -1198,14 +1198,14 @@ pub unsafe fn SppUpdateCryptoHash(
     let mut v9: i32;
 
     if (*pCryptoCtx).isHashActive != 0 {
-        status = BCryptHashData(*p_hHashInstance, pbData, cbData, 0);
+        status = x4_bcrypthashdata(*p_hHashInstance, pbData, cbData, 0);
         v9 = status;
         if status < 0 {
             HandleSubsystemError(status);
         }
     } else {
         let alg_id: [u16; 7] = [0x0053, 0x0048, 0x0041, 0x0032, 0x0035, 0x0036, 0x0000]; // L"SHA256"
-        status = BCryptOpenAlgorithmProvider(
+        status = x4_bcryptopenalgorithmprovider(
             p_hAlgProvider,
             alg_id.as_ptr(),
             core::ptr::null_mut(),
@@ -1214,7 +1214,7 @@ pub unsafe fn SppUpdateCryptoHash(
         v9 = status;
 
         if status >= 0 {
-            status = BCryptCreateHash(
+            status = x4_bcryptcreatehash(
                 *p_hAlgProvider,
                 p_hHashInstance,
                 core::ptr::null_mut(),
@@ -1227,7 +1227,7 @@ pub unsafe fn SppUpdateCryptoHash(
 
             if status >= 0 {
                 (*pCryptoCtx).isHashActive = 1;
-                status = BCryptHashData(*p_hHashInstance, pbData, cbData, 0);
+                status = x4_bcrypthashdata(*p_hHashInstance, pbData, cbData, 0);
                 v9 = status;
                 if status < 0 {
                     HandleSubsystemError(status);
@@ -1242,7 +1242,7 @@ pub unsafe fn SppUpdateCryptoHash(
 
     if (*pCryptoCtx).isHashActive == 0 {
         if !(*p_hAlgProvider).is_null() {
-            BCryptCloseAlgorithmProvider(*p_hAlgProvider, 0);
+            x4_bcryptclosealgorithmprovider(*p_hAlgProvider, 0);
         }
         *p_hAlgProvider = core::ptr::null_mut();
         *p_hHashInstance = core::ptr::null_mut();

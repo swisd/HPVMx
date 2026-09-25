@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 use crate::x4::dxgi::buffer::ReallocVectorBufferWithCacheAlignment64;
-use crate::x4::externals::{memcpy_s, AcquireSRWLockExclusive, ReleaseSRWLockExclusive};
+use crate::x4::externals::{memcpy_s, x4_acquiresrwlockexclusive, x4_releasesrwlockexclusive};
 use crate::x4::globals::pQueueMgr;
 
 pub unsafe fn SppQueueRegistrationPacket(
@@ -9,7 +9,7 @@ pub unsafe fn SppQueueRegistrationPacket(
     subsystemStatus: i32,
 ) {
     if pQueueMgr.status_flag != 0 {
-        AcquireSRWLockExclusive(&mut pQueueMgr.lock as *mut usize);
+        x4_acquiresrwlockexclusive(&mut pQueueMgr.lock as *mut usize);
 
         let hi_dword_config = (pQueueMgr.unk_config_flags >> 32) as i32;
 
@@ -47,6 +47,6 @@ pub unsafe fn SppQueueRegistrationPacket(
             core::intrinsics::atomic_and_seqcst(pControlFlags, mask);
         }
 
-        ReleaseSRWLockExclusive(&mut pQueueMgr.lock as PSRWLOCK);
+        x4_releasesrwlockexclusive(&mut pQueueMgr.lock as PSRWLOCK);
     }
 }

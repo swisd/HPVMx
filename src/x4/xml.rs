@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{GetProcessHeap, HeapAlloc, HeapFree, NtCurrentTeb};
+use crate::x4::externals::{x4_getprocessheap, x4_heapalloc, x4_heapfree, x4_ntcurrentteb};
 use crate::x4::globals::{qword_14045F780, GlobalSchema_Ext_Metadata1, qword_14045F788, GlobalSchema_Ext_Metadata2,
                          dword_14045F7A8, GlobalSchema_Ext_FactoryFn, GlobalSchema_Ext_EndBoundary_Metadata2,
                          GlobalSchema_Ext_EndBoundary_Metadata1, GlobalSchema_Ext_Value_ParserFn,
@@ -76,8 +76,8 @@ pub unsafe fn CreateSchemaElementObject48byte(
         return v2;
     }
 
-    let process_heap = GetProcessHeap();
-    let allocated = HeapAlloc(process_heap, 0, 0x30);
+    let process_heap = x4_getprocessheap();
+    let allocated = x4_heapalloc(process_heap, 0, 0x30);
     let v4 = allocated as *mut ProductKeyConfigSchemaElement;
 
     if !v4.is_null() {
@@ -110,8 +110,8 @@ pub unsafe fn CreateSchemaElementObject48byte_Variant2(
         return v2;
     }
 
-    let process_heap = GetProcessHeap();
-    let allocated = HeapAlloc(process_heap, 0, 0x30);
+    let process_heap = x4_getprocessheap();
+    let allocated = x4_heapalloc(process_heap, 0, 0x30);
     let v4 = allocated as *mut ProductKeyConfigGuidElement;
 
     if !v4.is_null() {
@@ -134,7 +134,7 @@ pub unsafe fn InitializeProductKeyConfigSchema(
     p_out_schema_table: *mut *const c_void,
     p_out_element_count: *mut u32,
 ) -> *const c_void {
-    let teb = NtCurrentTeb();
+    let teb = x4_ntcurrentteb();
     let tls_pointer = *(teb as *const *const u8);
     let tls_slot_val = *(tls_pointer.offset(4) as *const i32);
 
@@ -422,8 +422,8 @@ pub unsafe fn ProductKeyConfig__Release(p_element: *mut c_void) -> i64 {
 
     if old_ref == 1 {
         core::sync::atomic::fence(Ordering::Acquire);
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, p_element);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, p_element);
     }
 
     1

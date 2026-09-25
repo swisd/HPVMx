@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{GetProcessHeap, HeapFree, LocalFree};
+use crate::x4::externals::{x4_getprocessheap, x4_heapfree, x4_localfree};
 use crate::x4::globals::E_INVALIDARG;
 use crate::x4::misc::SwapVectorBuffersAndFreeOrphans;
 use crate::x4::spp::string::SppDuplicateStringLocal;
@@ -57,15 +57,15 @@ pub unsafe fn SppParseRegistryContainersList(
 
                 let pp_buffer = v13.ppBuffer;
                 if !pp_buffer.is_null() {
-                    let process_heap = GetProcessHeap();
-                    HeapFree(process_heap, 0, pp_buffer as *mut c_void);
+                    let process_heap = x4_getprocessheap();
+                    x4_heapfree(process_heap, 0, pp_buffer as *mut c_void);
                 }
 
                 break;
             }
 
             if !h_mem.is_null() {
-                LocalFree(h_mem);
+                x4_localfree(h_mem);
                 h_mem = core::ptr::null_mut();
             }
 
@@ -85,19 +85,19 @@ pub unsafe fn SppParseRegistryContainersList(
     LogTraceEvent(v5);
 
     if !h_mem.is_null() {
-        LocalFree(h_mem);
+        x4_localfree(h_mem);
     }
 
     SppVectorReallocateHeap(&mut layout, 0);
 
     let v10 = layout.ppBuffer;
     if !layout.ppBuffer.is_null() {
-        let v11 = GetProcessHeap();
-        HeapFree(v11, 0, v10 as *mut c_void);
+        let v11 = x4_getprocessheap();
+        x4_heapfree(v11, 0, v10 as *mut c_void);
     }
 
     if !v15.pSourceStringBase.is_null() {
-        LocalFree(v15.pSourceStringBase as HLOCAL);
+        x4_localfree(v15.pSourceStringBase as HLOCAL);
     }
 
     v5

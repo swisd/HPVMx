@@ -2,7 +2,7 @@ use core::arch::asm;
 use core::ffi::c_int;
 use core::ptr;
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{GetModuleHandleW, GetProcAddress, GetProcessHeap, HeapAlloc, HeapFree, _dllonexit, _vsnwprintf, onexit};
+use crate::x4::externals::{x4_getmodulehandlew, x4_getprocaddress, x4_getprocessheap, x4_heapalloc, x4_heapfree, x4__dllonexit, x4__vsnwprintf, x4_onexit};
 use crate::x4::globals::_guard_check_icall_fptr;
 use crate::x4::rawasm::FARPROC;
 use crate::x4::types::{__int64, unsigned_int64, SIZE_T, HANDLE, LPVOID, STRSAFE_LPWSTR, STRSAFE_LPCWSTR, HRESULT, HMODULE, DWORD};
@@ -167,7 +167,7 @@ pub unsafe fn _chkstk() -> u64 {
         v1 = ptr::null_mut();
     }
 
-    // StackLimit = (char *)NtCurrentTeb()->NtTib.StackLimit;
+    // StackLimit = (char *)x4_ntcurrentteb()->NtTib.StackLimit;
     // On Windows x64, this value is located at offset 0x10 in the GS register.
     asm!("mov {}, gs:[0x10]", out(reg) stack_limit, options(nomem, nostack, preserves_flags));
 
@@ -284,8 +284,8 @@ pub unsafe fn Vector_Resize_40Bytes(a1: i64, a2: i32) -> u32 {
                 return v4 as u32;
             }
 
-            process_heap = GetProcessHeap();
-            v8 = HeapAlloc(process_heap, 0, v5);
+            process_heap = x4_getprocessheap();
+            v8 = x4_heapalloc(process_heap, 0, v5);
             v4 = v8;
 
             if v8.is_null() {
@@ -320,8 +320,8 @@ pub unsafe fn Vector_Resize_40Bytes(a1: i64, a2: i32) -> u32 {
 
         v10 = *((a1 + 8) as *const *mut core::ffi::c_void);
         if !v10.is_null() {
-            v11 = GetProcessHeap();
-            HeapFree(v11, 0, v10);
+            v11 = x4_getprocessheap();
+            x4_heapfree(v11, 0, v10);
             *((a1 + 8) as *mut i64) = 0;
         }
 
@@ -349,19 +349,19 @@ pub unsafe fn VectorElementFree(a1: i64) {
     // v1 = *(void **)(a1 + 32);
     v1 = *((a1 + 32) as *const *mut core::ffi::c_void);
     if !v1.is_null() {
-        process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v1);
+        process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v1);
         *((a1 + 32) as *mut i64) = 0;
     }
 
     // v4 = *(_QWORD *)(a1 + 8);
     v4 = *((a1 + 8) as *const i64);
     if v4 != 0 {
-        v5 = GetProcessHeap();
+        v5 = x4_getprocessheap();
 
-        // HeapFree(v5, 0, (LPVOID)(v4 - 4));
+        // x4_heapfree(v5, 0, (LPVOID)(v4 - 4));
         let adjusted_ptr = (v4 - 4) as LPVOID;
-        HeapFree(v5, 0, adjusted_ptr);
+        x4_heapfree(v5, 0, adjusted_ptr);
 
         LogTraceEvent(0);
         *((a1 + 8) as *mut i64) = 0;
@@ -391,7 +391,7 @@ pub unsafe fn StringCchPrintfW(
 
         // Simulate extraction and calling vsnwprintf
         let mut va_list_handler = args.as_va_list(|va| va);
-        chars_written = _vsnwprintf(pszDest, cchDest - 1, pszFormat, va_list_handler);
+        chars_written = x4__vsnwprintf(pszDest, cchDest - 1, pszFormat, va_list_handler);
 
         if chars_written < 0 || chars_written as usize > max_chars {
             hr = -2147024774; // STRSAFE_E_INSUFFICIENT_BUFFER (0x8007007A)
@@ -568,8 +568,8 @@ pub unsafe fn AllocateFromHeap(dwFlags: DWORD, dwBytes: SIZE_T) -> LPVOID {
     let mut rtl_disown_module_heap_allocation: FARPROC;   // rbx
     let mut module_handle_w: HMODULE;                     // rax
 
-    process_heap = GetProcessHeap();
-    p_allocation = HeapAlloc(process_heap, dwFlags, dwBytes);
+    process_heap = x4_getprocessheap();
+    p_allocation = x4_heapalloc(process_heap, dwFlags, dwBytes);
 
     rtl_disown_module_heap_allocation = core::mem::transmute::<i64, FARPROC>(g_pfnRtlDisownModuleHeapAllocation);
 
@@ -582,14 +582,14 @@ pub unsafe fn AllocateFromHeap(dwFlags: DWORD, dwBytes: SIZE_T) -> LPVOID {
             'n' as u16, 't' as u16, 'd' as u16, 'l' as u16, 'l' as u16,
             '.' as u16, 'd' as u16, 'l' as u16, 'l' as u16, 0
         ];
-        module_handle_w = GetModuleHandleW(ntdll_name.as_ptr());
+        module_handle_w = x4_getmodulehandlew(ntdll_name.as_ptr());
 
         if module_handle_w.is_null() {
             rtl_disown_module_heap_allocation = core::mem::transmute::<i64, FARPROC>(g_pfnRtlDisownModuleHeapAllocation);
         } else {
             // C-string literal for "RtlDisownModuleHeapAllocation" (null-terminated)
             let proc_name = b"RtlDisownModuleHeapAllocation\0";
-            rtl_disown_module_heap_allocation = GetProcAddress(module_handle_w, proc_name.as_ptr());
+            rtl_disown_module_heap_allocation = x4_getprocaddress(module_handle_w, proc_name.as_ptr());
             g_pfnRtlDisownModuleHeapAllocation = core::mem::transmute::<FARPROC, i64>(rtl_disown_module_heap_allocation);
         }
 
@@ -691,14 +691,14 @@ pub unsafe fn NormalizingExitRegisterWrapper(pfn_callback: OnExitT) -> i64 {
 pub unsafe fn RegisterDllExitCallback(pfnCallback: OnExitT) -> i64 {
     let start = core::ptr::addr_of!(GlobalPOnExitTableStart).read_volatile();
     if start == -1 {
-        return onexit();
+        return x4_onexit();
     }
 
     lock();
     let v2 = GlobalPOnExitTableStart;
     let v3 = GlobalPOnExitTableEnd;
 
-    let v1 = _dllonexit();
+    let v1 = x4__dllonexit();
 
     GlobalPOnExitTableStart = v2;
     GlobalPOnExitTableEnd = v3;

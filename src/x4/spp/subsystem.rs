@@ -100,8 +100,8 @@ pub unsafe fn BuildSubsystemPathRecursive(
 
 pub unsafe fn InitializeProtectedSubsystem() -> HRESULT {
     let mut v0: HRESULT = 0;
-    let process_heap = GetProcessHeap();
-    let context_ptr = HeapAlloc(process_heap, 0, 16) as *mut ProtectedSubsystemContext;
+    let process_heap = x4_getprocessheap();
+    let context_ptr = x4_heapalloc(process_heap, 0, 16) as *mut ProtectedSubsystemContext;
     let old_context = context_ptr;
     let mut context_to_clean: *mut ProtectedSubsystemContext = core::ptr::null_mut();
 
@@ -111,12 +111,12 @@ pub unsafe fn InitializeProtectedSubsystem() -> HRESULT {
         (*context_ptr).pMappedViewsArray = core::ptr::null_mut();
 
         let cs_ptr = stru_14046B4F8;
-        if InitializeCriticalSectionAndSpinCount(cs_ptr, 0) != 0 {
+        if x4_initializecriticalsectionandspincount(cs_ptr, 0) != 0 {
             core::ptr::addr_of_mut!(dword_14046B4DC).write_volatile(1);
             pContext = *old_context;
             v0 = 0;
         } else {
-            let last_error = GetLastError() as i32;
+            let last_error = x4_getlasterror() as i32;
             v0 = last_error;
             if last_error != 0 {
                 if last_error > 0 {
@@ -173,14 +173,14 @@ pub unsafe fn ProtectedSubsystemTeardownAndSanitize(
             dword_140465D98,
         );
 
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
 
         ProcessReloc_Rva33_Len3(
             stru_140436B60,
             dword_140466218,
         );
 
-        HeapFree(process_heap, 0, p_mapped_views_array as LPVOID);
+        x4_heapfree(process_heap, 0, p_mapped_views_array as LPVOID);
 
         ProcessReloc_Rva3_Len31(
             stru_14044E300,
@@ -195,13 +195,13 @@ pub unsafe fn ProtectedSubsystemTeardownAndSanitize(
         );
     }
 
-    let v4 = GetProcessHeap();
+    let v4 = x4_getprocessheap();
     ProcessReloc_Rva0_Len36(
         stru_14044F7D8,
         pTargetState,
     );
 
-    HeapFree(v4, 0, p_context as *mut c_void);
+    x4_heapfree(v4, 0, p_context as *mut c_void);
 
     ProcessReloc_Rva2_Len30(
         stru_140435FA8,
@@ -220,11 +220,11 @@ pub unsafe fn RegisterProtectedSubsystemCallbacks() -> PVOID {
     *master_head_ptr = node_ptr as usize as __int64;
 
     // Encode pointers for secure execution tracking
-    let encoded_init = EncodePointer(InitializeProtectedSubsystem as *mut c_void);
+    let encoded_init = x4_encodepointer(InitializeProtectedSubsystem as *mut c_void);
     core::ptr::addr_of_mut!(GlobalSecureRegistrationNode_pEncodedInitFunc)
         .write_volatile(encoded_init as usize as __int64);
 
-    let result = EncodePointer(ShutdownProtectedSubsystem as *mut c_void);
+    let result = x4_encodepointer(ShutdownProtectedSubsystem as *mut c_void);
 
     core::ptr::addr_of_mut!(GlobalSecureRegistrationNode_registration_flags).write_volatile(0);
     core::ptr::addr_of_mut!(GlobalSecureRegistrationNode_pEncodedShutdownFunc)
@@ -254,8 +254,8 @@ pub unsafe fn ResizeMemoryMappedViewArray(
 
         if target_size > 0 {
             LogTraceEvent(0);
-            let process_heap = GetProcessHeap();
-            let v8 = HeapAlloc(process_heap, 0, 16 * v3) as *mut MemoryMappedViewEntry;
+            let process_heap = x4_getprocessheap();
+            let v8 = x4_heapalloc(process_heap, 0, 16 * v3) as *mut MemoryMappedViewEntry;
             v5 = v8;
 
             if v8.is_null() {
@@ -284,12 +284,12 @@ pub unsafe fn ResizeMemoryMappedViewArray(
                     // Check if handle is valid (not null and not INVALID_HANDLE_VALUE -1)
                     let val = h_file_mapping_object as usize;
                     if val != 0 && val != usize::MAX {
-                        CloseHandle(h_file_mapping_object);
+                        x4_closehandle(h_file_mapping_object);
                         (*v11).hFileMappingObject = (-1isize) as HANDLE;
                     }
 
                     if !(*v11).pMappedBaseAddress.is_null() {
-                        UnmapViewOfFile((*v11).pMappedBaseAddress);
+                        x4_unmapviewoffile((*v11).pMappedBaseAddress);
                         (*v11).pMappedBaseAddress = core::ptr::null_mut();
                     }
                 }
@@ -300,8 +300,8 @@ pub unsafe fn ResizeMemoryMappedViewArray(
 
         let p_array_buffer = vector.pArrayBuffer;
         if !p_array_buffer.is_null() {
-            let v14 = GetProcessHeap();
-            HeapFree(v14, 0, p_array_buffer as *mut c_void);
+            let v14 = x4_getprocessheap();
+            x4_heapfree(v14, 0, p_array_buffer as *mut c_void);
         }
 
         if v5.is_null() {
@@ -329,7 +329,7 @@ macro_rules! goto_cleanup {
 use goto_cleanup;
 use crate::devices::audio::mute;
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{memcpy, GetProcessHeap, EncodePointer, HeapFree, memcpy_s, HeapAlloc, GetLastError, InitializeCriticalSectionAndSpinCount, DeleteCriticalSection, CloseHandle, UnmapViewOfFile};
+use crate::x4::externals::{memcpy, x4_getprocessheap, x4_encodepointer, x4_heapfree, memcpy_s, x4_heapalloc, x4_getlasterror, x4_initializecriticalsectionandspincount, x4_deletecriticalsection, x4_closehandle, x4_unmapviewoffile};
 use crate::x4::globals::{pContext, GlobalSecureRegistrationNode, GlobalMasterCallbackListHead, GlobalSecureRegistrationNode_pEncodedInitFunc, GlobalSecureRegistrationNode_registration_flags, GlobalSecureRegistrationNode_pEncodedShutdownFunc};
 use crate::x4::reloc::{ProcessReloc_Rva0_Len36, ProcessReloc_Rva28_Len0, ProcessReloc_Rva2_Len30, ProcessReloc_Rva33_Len3, ProcessReloc_Rva36_Len0, ProcessReloc_Rva36_Len3, ProcessReloc_Rva3_Len31, ProcessReloc_Rva3_Len36, ProcessReloc_Rva8_Len36};
 
@@ -345,7 +345,7 @@ pub unsafe fn ShutdownProtectedSubsystem() -> i64 {
     let dword_val = core::ptr::addr_of!(dword_14046B4DC).read_volatile();
     if dword_val != 0 {
         let cs_ptr = core::ptr::addr_of_mut!(stru_14046B4F8) as *mut c_void;
-        DeleteCriticalSection(cs_ptr);
+        x4_deletecriticalsection(cs_ptr);
         core::ptr::addr_of_mut!(dword_14046B4DC).write_volatile(0);
     }
 

@@ -1,4 +1,5 @@
 static mut COMMAND_BUFFER_HIST: Vec<Vec<String>> = Vec::new();
+static mut DISK_EXECUTABLES: Option<crate::disk_executable::DiskExecutableManager> = None;
 
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
@@ -61,6 +62,9 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                     }
                     "micro-c" => {
                         message!("\n", "\nMicro-C Toolchain:\n  micro-c compile [file.micro] - compile source to .asm\n  micro-c run [file.bin] - run compiled binary\n")
+                    }
+                    "hpx" => {
+                        message!("\n", "\nHPX Executables:\n  run-hpx [file.hpx] [name] - load and start a disk executable\n  Header kind selects a stepped app or background task. See docs/HPX_EXECUTABLES.md for ABI v1.\n")
                     }
                     "misc" => {
                         message!("\n", "\n Misc / Other:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\n  vdebug [on|off|status] - toggle verbose debug console logs\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n  beep [freq] [ms] - play a sound\n")
@@ -257,6 +261,25 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
         "dashboard" => {
             unsafe {
                 show_dashboard_ui(package_manager);
+            }
+        }
+        "run-hpx" => {
+            if command.len() < 2 {
+                message!("\n", "Usage: run-hpx [file.hpx] [name]");
+            } else {
+                let path = command[1];
+                let name = command.get(2).copied().unwrap_or_else(|| path.rsplit(|c| c == '/' || c == '\\').next().unwrap_or(path));
+                unsafe {
+                    if DISK_EXECUTABLES.is_none() { DISK_EXECUTABLES = Some(crate::disk_executable::DiskExecutableManager::new()); }
+                    match (DISK_EXECUTABLES.as_mut(), GLOBALENV.as_mut()) {
+                        (Some(manager), Some(global)) => match manager.run_file(path, name, "1.0", &mut global.data) {
+                            Ok(pid) => message!("\n", "started HPX executable '{}' as pid {}", name, pid),
+                            Err(error) => hpvm_error!("hpx", "failed to run '{}': {}", path, error),
+                        },
+                        (_, None) => hpvm_error!("hpx", "global runtime is not initialized"),
+                        _ => hpvm_error!("hpx", "executable manager is unavailable"),
+                    }
+                }
             }
         }
         "beep" => {
@@ -956,6 +979,7 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
 
     loop {
         unsafe { crate::hpvmlog::BUSY_TSC = 0; }
+        tick_disk_executables();
         let frame_start_tsc = unsafe { core::arch::x86_64::_rdtsc() };
 
         // update non-blocking audio
@@ -1352,3 +1376,13 @@ pub enum Stdio {
 }
 
 
+
+
+/// Advance disk-loaded stepped background tasks from the main/dashboard scheduler.
+pub fn tick_disk_executables() {
+    unsafe {
+        if let Some(manager) = DISK_EXECUTABLES.as_mut() {
+            manager.step_background_tasks();
+        }
+    }
+}

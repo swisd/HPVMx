@@ -206,7 +206,8 @@ impl Database {
         Ok(Database { file_header, tables })
     }
     /// Synchronize the cache back into the database struct
-    pub fn sync_from_cache(&mut self, cache: &mut DbCache) {
+    pub fn sync_from_cache(&mut self, cache: &mut DbCache)
+    {
         let mut count = 0;
 
         for cached_entry in cache.entries.values_mut() {

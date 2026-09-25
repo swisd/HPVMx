@@ -3,7 +3,7 @@ use core::ffi::{c_void, VaList};
 use core::ptr::addr_of_mut;
 use crate::x4::dxgi::FlushDirtyShaderResources;
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{AcquireSRWLockExclusive, GetLastError, GetProcessHeap, HeapAlloc, HeapFree, LocalFree, QueryPerformanceCounter, ReleaseSRWLockExclusive};
+use crate::x4::externals::{x4_acquiresrwlockexclusive, x4_getlasterror, x4_getprocessheap, x4_heapalloc, x4_heapfree, x4_localfree, x4_queryperformancecounter, x4_releasesrwlockexclusive};
 use crate::x4::globals::{_guard_check_icall_fptr, pManager, GlobalPtrSppNamespace, GlobalSppTimerCallbackBaseVtbl};
 use crate::x4::reloc::{ProcessReloc_Rva0_Len36, ProcessReloc_Rva28_Len0, ProcessReloc_Rva2_Len30, ProcessReloc_Rva30_Len0, ProcessReloc_Rva33_Len3, ProcessReloc_Rva36_Len0, ProcessReloc_Rva36_Len3, ProcessReloc_Rva3_Len31, ProcessReloc_Rva3_Len36, ProcessReloc_Rva8_Len36};
 use crate::x4::spp::lock::{SppCustomLockAcquireExclusive, SppCustomLockRelease};
@@ -23,13 +23,13 @@ pub unsafe fn SppCancelTimerQueueItem(pTargetGuid: *const GUID) -> HRESULT {
     let mut v3: usize = 0;
     let mut v4 = 0;
 
-    let v5 = QueryPerformanceCounter(&mut performance_count);
+    let v5 = x4_queryperformancecounter(&mut performance_count);
     ProcessReloc_Rva36_Len3(&mut stru_14043A6F0, &mut dword_140469D80);
 
     let mut hr: HRESULT;
 
     if v5 == 0 {
-        let last_error = GetLastError() as i32;
+        let last_error = x4_getlasterror() as i32;
         hr = last_error;
         if last_error != 0 {
             if last_error > 0 {
@@ -127,10 +127,10 @@ pub unsafe fn SppCancelTimerQueueItem(pTargetGuid: *const GUID) -> HRESULT {
     LogTraceEvent(hr);
 
     if !v2.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         // v2 - 2 in C pointer arithmetic for WCHAR means subtracting 2 bytes (or 1 wide char element depending on layout)
         let free_ptr = (v2 as *mut u8).offset(-2) as *mut c_void;
-        HeapFree(process_heap, 0, free_ptr);
+        x4_heapfree(process_heap, 0, free_ptr);
         LogTraceEvent(0);
     }
 
@@ -210,8 +210,8 @@ pub unsafe fn SppInitializeTimerParameters(
 
     let v13 = plugin_vector.elements;
     if !v13.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v13 as *mut c_void);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v13 as *mut c_void);
     }
 
     v6 as HRESULT
@@ -471,13 +471,13 @@ pub unsafe fn SppLookupTimerHandleByGuid(
     }
 
     if !v7.is_null() {
-        LocalFree(v7);
+        x4_localfree(v7);
     }
 
     if !v3.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         let free_ptr = (v3 as *mut u8).offset(-2) as *mut c_void;
-        HeapFree(process_heap, 0, free_ptr);
+        x4_heapfree(process_heap, 0, free_ptr);
         LogTraceEvent(0);
     }
 
@@ -528,9 +528,9 @@ pub unsafe fn SppRemoveTimerFromActiveQueue(
     LogTraceEvent(v7);
 
     if !v9.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         let free_ptr = v9.offset(-4) as *mut c_void;
-        HeapFree(process_heap, 0, free_ptr);
+        x4_heapfree(process_heap, 0, free_ptr);
         LogTraceEvent(0);
     }
 
@@ -555,14 +555,14 @@ pub unsafe fn SppRemoveTimerFromActiveQueue(
     LogTraceEvent(v7);
 
     if !v4.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         let free_ptr = v4.offset(-4) as *mut c_void;
-        HeapFree(process_heap, 0, free_ptr);
+        x4_heapfree(process_heap, 0, free_ptr);
         LogTraceEvent(0);
     }
 
     if !v6.is_null() {
-        LocalFree(v6);
+        x4_localfree(v6);
     }
 
     v7
@@ -614,7 +614,7 @@ pub unsafe fn SppResolveAndInjectTimerProperties(
 
         loop {
             if !v5.is_null() {
-                LocalFree(v5);
+                x4_localfree(v5);
                 pp_out_value = core::ptr::null_mut();
                 v5 = core::ptr::null_mut();
             }
@@ -629,7 +629,7 @@ pub unsafe fn SppResolveAndInjectTimerProperties(
             }
 
             if !v4.is_null() {
-                LocalFree(v4 as HLOCAL);
+                x4_localfree(v4 as HLOCAL);
                 ppwsz_out_string = core::ptr::null_mut();
                 v4 = core::ptr::null_mut();
             }
@@ -838,13 +838,13 @@ pub unsafe fn SppResolveAndInjectTimerProperties(
     }
 
     if !v4.is_null() {
-        LocalFree(v4 as HLOCAL);
+        x4_localfree(v4 as HLOCAL);
     }
     if !v5.is_null() {
-        LocalFree(v5);
+        x4_localfree(v5);
     }
     if !h_mem.is_null() {
-        LocalFree(h_mem);
+        x4_localfree(h_mem);
     }
 
     hr
@@ -929,7 +929,7 @@ pub unsafe fn SppTeardownActiveTimer(pwsz_guid_string: *const u16) -> HRESULT {
         }
         LogTraceEvent(v4);
         if !v1.is_null() {
-            LocalFree(v1);
+            x4_localfree(v1);
         }
         return v4;
     }
@@ -964,7 +964,7 @@ pub unsafe fn SppTeardownActiveTimer(pwsz_guid_string: *const u16) -> HRESULT {
 
     LogTraceEvent(v4);
     if !v1.is_null() {
-        LocalFree(v1);
+        x4_localfree(v1);
     }
 
     v4
@@ -991,8 +991,8 @@ pub unsafe fn SppTeardownSysprepTimers(
         None => usize::MAX,
     };
 
-    let process_heap = GetProcessHeap();
-    v2 = HeapAlloc(process_heap, 0, v8 as SIZE_T) as *mut u8;
+    let process_heap = x4_getprocessheap();
+    v2 = x4_heapalloc(process_heap, 0, v8 as SIZE_T) as *mut u8;
     if v2.is_null() {
         v6 = -2147024882; // E_OUTOFMEMORY
         HandleSubsystemError(v6);
@@ -1006,7 +1006,7 @@ pub unsafe fn SppTeardownSysprepTimers(
     if cch_element_count > 0 {
         loop {
             if !v4.is_null() {
-                LocalFree(v4);
+                x4_localfree(v4);
                 v4 = core::ptr::null_mut();
             }
 
@@ -1020,7 +1020,7 @@ pub unsafe fn SppTeardownSysprepTimers(
             }
 
             if !h_mem.is_null() {
-                LocalFree(h_mem);
+                x4_localfree(h_mem);
                 h_mem = core::ptr::null_mut();
             }
 
@@ -1117,7 +1117,7 @@ pub unsafe fn SppTeardownSysprepTimers(
 
             LogTraceEvent(v6);
             if !v21.is_null() {
-                LocalFree(v21);
+                x4_localfree(v21);
             }
 
             if v6 < 0 {
@@ -1134,14 +1134,14 @@ pub unsafe fn SppTeardownSysprepTimers(
     LogTraceEvent(v6);
 
     if !h_mem.is_null() {
-        LocalFree(h_mem);
+        x4_localfree(h_mem);
     }
     if !v4.is_null() {
-        LocalFree(v4);
+        x4_localfree(v4);
     }
     if !v2.is_null() {
-        let heap = GetProcessHeap();
-        HeapFree(heap, 0, v2 as *mut c_void);
+        let heap = x4_getprocessheap();
+        x4_heapfree(heap, 0, v2 as *mut c_void);
     }
 
     v6
@@ -1159,7 +1159,7 @@ pub unsafe extern "system" fn SppTelemetryTimerCallback(
     let ctx = &mut *context;
     if ctx.status_flag != 0 {
         let p_lock = ctx.lock as PSRWLOCK;
-        AcquireSRWLockExclusive(p_lock);
+        x4_acquiresrwlockexclusive(p_lock);
 
         if ctx.status_flag != 0 {
             FlushDirtyShaderResources(context);
@@ -1168,7 +1168,7 @@ pub unsafe extern "system" fn SppTelemetryTimerCallback(
         }
 
         if !p_lock.is_null() {
-            ReleaseSRWLockExclusive(p_lock);
+            x4_releasesrwlockexclusive(p_lock);
         }
     }
 }
@@ -1214,8 +1214,8 @@ pub unsafe fn SppTimerCallbackDestructor(
 
         // If deleting flag is set (deletingFlags & 1 != 0), free the heap memory
         if (deleting_flags & 1) != 0 {
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, ptr);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, ptr);
         }
     }
 
@@ -1473,7 +1473,7 @@ pub unsafe fn SppUnbindTimerFromNamespace(
     ProcessReloc_Rva33_Len3(&mut stru_14045252C, &dword_140464300);
 
     if !v4.is_null() {
-        LocalFree(v4);
+        x4_localfree(v4);
         ProcessReloc_Rva3_Len31(&mut stru_140451F18, &dword_140463D14);
     }
 

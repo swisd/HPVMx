@@ -14,11 +14,11 @@ if ( _security_cookie == 0x2B992DDFA232LL )
 {
 GetSystemTimeAsFileTime(&system_time);
 cookie_hash = system_time;
-cookie_hash = (struct _FILETIME)(GetCurrentProcessId() ^ *(unsigned __int64 *)&cookie_hash);
-cookie_hash = (struct _FILETIME)(GetCurrentThreadId() ^ *(unsigned __int64 *)&cookie_hash);
-cookie_hash = (struct _FILETIME)(((unsigned __int64)GetTickCount() << 24) ^ *(_QWORD *)&cookie_hash);
-cookie_hash = (struct _FILETIME)((unsigned __int64)&cookie_hash ^ *(unsigned __int64 *)&cookie_hash ^ GetTickCount());
-QueryPerformanceCounter(&perf_count);
+cookie_hash = (struct _FILETIME)(x4_getcurrentprocessid() ^ *(unsigned __int64 *)&cookie_hash);
+cookie_hash = (struct _FILETIME)(x4_getcurrentthreadid() ^ *(unsigned __int64 *)&cookie_hash);
+cookie_hash = (struct _FILETIME)(((unsigned __int64)x4_gettickcount() << 24) ^ *(_QWORD *)&cookie_hash);
+cookie_hash = (struct _FILETIME)((unsigned __int64)&cookie_hash ^ *(unsigned __int64 *)&cookie_hash ^ x4_gettickcount());
+x4_queryperformancecounter(&perf_count);
 cookie = (*(_QWORD *)&cookie_hash
 ^ perf_count.QuadPart
 ^ ((unsigned __int64)perf_count.LowPart << 32))

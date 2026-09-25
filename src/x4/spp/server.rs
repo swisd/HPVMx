@@ -1,7 +1,7 @@
 use core::ffi::c_void;
 use crate::u16_str;
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{GetProcessHeap, HeapFree, NtQuerySystemInformation};
+use crate::x4::externals::{x4_getprocessheap, x4_heapfree, x4_ntquerysysteminformation};
 use crate::x4::globals::{GlobalPtrSppNamespace, SERVER_PROPS_NAMESPACE};
 use crate::x4::spp::format::SppFormatString;
 use crate::x4::spp::string::{SppGetAndDuplicateString, SppStringStartsWith};
@@ -108,22 +108,22 @@ pub unsafe fn SppClearServerValidationProperties(
 
     let v3 = v22;
     if !v3.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         // Allocation buffer offset adjustment matching C source (v3 - 2 wide chars)
-        HeapFree(process_heap, 0, v3.offset(-2) as *mut c_void);
+        x4_heapfree(process_heap, 0, v3.offset(-2) as *mut c_void);
         LogTraceEvent(0);
     }
 
     let v2 = ppsz_destination;
     if !v2.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v2.offset(-2) as *mut c_void);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v2.offset(-2) as *mut c_void);
         LogTraceEvent(0);
     }
 
     if !v5.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v5.offset(-2) as *mut c_void);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v5.offset(-2) as *mut c_void);
         LogTraceEvent(0);
     }
 
@@ -273,8 +273,8 @@ pub unsafe fn SppValidateServerProperties(
                             }
 
                             if !buf1.is_null() {
-                                let heap = GetProcessHeap();
-                                HeapFree(heap, 0, buf1.offset(-2) as *mut c_void);
+                                let heap = x4_getprocessheap();
+                                x4_heapfree(heap, 0, buf1.offset(-2) as *mut c_void);
                                 LogTraceEvent(0);
                                 buf1 = core::ptr::null_mut();
                             }
@@ -388,14 +388,14 @@ pub unsafe fn SppValidateServerProperties(
     }
 
     if !buf1.is_null() {
-        let heap = GetProcessHeap();
-        HeapFree(heap, 0, buf1.offset(-2) as *mut c_void);
+        let heap = x4_getprocessheap();
+        x4_heapfree(heap, 0, buf1.offset(-2) as *mut c_void);
         LogTraceEvent(0);
     }
 
     if !context_payload.is_null() {
-        let heap = GetProcessHeap();
-        HeapFree(heap, 0, context_payload.offset(-2) as *mut c_void);
+        let heap = x4_getprocessheap();
+        x4_heapfree(heap, 0, context_payload.offset(-2) as *mut c_void);
         LogTraceEvent(0);
     }
 
@@ -438,7 +438,7 @@ pub unsafe fn SppValidateServerPropertiesToken(
                 reserved3: 0,
             };
 
-            NtQuerySystemInformation(
+            x4_ntquerysysteminformation(
                 0x85, // SystemExtendedProcessInformation | 0x80
                 &mut params1 as *mut _ as *mut c_void,
                 0x40,
@@ -460,7 +460,7 @@ pub unsafe fn SppValidateServerPropertiesToken(
                     reserved3: 0,
                 };
 
-                NtQuerySystemInformation(
+                x4_ntquerysysteminformation(
                     0x85,
                     &mut params2 as *mut _ as *mut c_void,
                     0x40,
@@ -487,9 +487,9 @@ pub unsafe fn SppValidateServerPropertiesToken(
     LogTraceEvent(status);
 
     if !src_ptr.is_null() {
-        let heap = GetProcessHeap();
+        let heap = x4_getprocessheap();
         // Allocation buffer offset adjustment matching C source (src_ptr - 4 bytes)
-        HeapFree(heap, 0, (src_ptr as *mut u8).offset(-4) as *mut c_void);
+        x4_heapfree(heap, 0, (src_ptr as *mut u8).offset(-4) as *mut c_void);
         LogTraceEvent(0);
     }
 

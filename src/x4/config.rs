@@ -3,7 +3,7 @@ use core::ops::Add;
 use core::sync::atomic::{AtomicI32, Ordering};
 use crate::x4::dxgi::CloseContextSyncHandles;
 use crate::x4::dxgi::pipeline::GetThreadLocalPipelineContext;
-use crate::x4::externals::{memcpy_s, HeapFree, GetProcessHeap, GetCurrentThreadId, CloseHandle, WaitForSingleObjectEx, ReleaseMutex, GetLastError, SetLastError};
+use crate::x4::externals::{memcpy_s, x4_heapfree, x4_getprocessheap, x4_getcurrentthreadid, x4_closehandle, x4_waitforsingleobjectex, x4_releasemutex, x4_getlasterror, x4_setlasterror};
 use crate::x4::globals::_guard_check_icall_fptr;
 use crate::x4::helpers::{AllocateFromHeap, NormalizingExitRegisterWrapper};
 use crate::x4::ops::memset;
@@ -25,7 +25,7 @@ pub unsafe fn CleanupConfigManagerResources(p_manager_context: *mut ConfigManage
     // Clean up completion_event_1
     let completion_event_1 = (*p_manager_context).completion_event_1;
     if !completion_event_1.is_null() {
-        result = CloseHandle(completion_event_1);
+        result = x4_closehandle(completion_event_1);
         if result == 0 {
             // Passing 0 for retaddr placeholder as raw stack return addresses aren't exposed in Rust
             HandleHandleCloseError(0, 2525, 0, 0);
@@ -35,7 +35,7 @@ pub unsafe fn CleanupConfigManagerResources(p_manager_context: *mut ConfigManage
     // Clean up completion_event_0
     let completion_event_0 = (*p_manager_context).completion_event_0;
     if !completion_event_0.is_null() {
-        result = CloseHandle(completion_event_0);
+        result = x4_closehandle(completion_event_0);
         if result == 0 {
             HandleHandleCloseError(0, 2525, 0, 0);
         }
@@ -44,7 +44,7 @@ pub unsafe fn CleanupConfigManagerResources(p_manager_context: *mut ConfigManage
     // Clean up session_mutex
     let session_mutex = (*p_manager_context).session_mutex;
     if !session_mutex.is_null() {
-        result = CloseHandle(session_mutex);
+        result = x4_closehandle(session_mutex);
         if result == 0 {
             HandleHandleCloseError(0, 2525, 0, 0);
         }
@@ -74,7 +74,7 @@ pub unsafe fn ConfigManagerRelease(p_manager_context: *mut ConfigManager) -> i32
     }
 
     let mut session_mutex = (*p_manager_context).session_mutex;
-    let wait_result = WaitForSingleObjectEx(session_mutex, 0xFFFFFFFF, 0);
+    let wait_result = x4_waitforsingleobjectex(session_mutex, 0xFFFFFFFF, 0);
 
     if wait_result == 258 {
         // WAIT_TIMEOUT
@@ -88,7 +88,7 @@ pub unsafe fn ConfigManagerRelease(p_manager_context: *mut ConfigManager) -> i32
 
     if result != 0 {
         if !session_mutex.is_null() {
-            let release_res = ReleaseMutex(session_mutex);
+            let release_res = x4_releasemutex(session_mutex);
             if release_res == 0 {
                 HandleHandleCloseError(0, 2535, 0, 0);
             }
@@ -99,17 +99,17 @@ pub unsafe fn ConfigManagerRelease(p_manager_context: *mut ConfigManager) -> i32
         CloseContextSyncHandles(sync_handles_ptr);
 
         if !session_mutex.is_null() {
-            let last_error = GetLastError();
-            if ReleaseMutex(session_mutex) == 0 {
+            let last_error = x4_getlasterror();
+            if x4_releasemutex(session_mutex) == 0 {
                 HandleHandleCloseError(0, 2535, 0, 0);
             }
-            SetLastError(last_error);
+            x4_setlasterror(last_error);
         }
 
         CleanupConfigManagerResources(p_manager_context);
 
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, p_manager_context as *mut c_void);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, p_manager_context as *mut c_void);
         return 0;
     }
 
@@ -134,8 +134,8 @@ pub unsafe fn DestroyConfigHashMap(pp_bucket_array: *mut *mut ConfigHashNode) {
             let element_vector_ptr = (old_node as *mut u8).add(8) as *mut c_void;
             FreeConfigElementVector(old_node.element_vector);
 
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, old_node as *mut c_void);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, old_node as *mut c_void);
         }
 
         // Clear the bucket head pointer
@@ -157,8 +157,8 @@ pub unsafe fn DestroyConfigHashMapShallow(pp_bucket_array: *mut *mut ConfigHashN
             let v4 = v3;
             v3 = (*v4).next_node;
 
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, v4 as *mut c_void);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, v4 as *mut c_void);
         }
 
         *bucket_ptr = core::ptr::null_mut();
@@ -179,7 +179,7 @@ pub unsafe fn DispatchConfigurationPipeline(
 
     let base_ptr: usize = core::ptr::addr_of!(qword_14046B2A8).read_volatile();
     if !base_ptr.is_null() {
-        let current_thread_id = GetCurrentThreadId();
+        let current_thread_id = x4_getcurrentthreadid();
         let bucket_index = (current_thread_id % 10) as usize;
         let mut i_ptr = *base_ptr.add(bucket_index);
 
@@ -232,7 +232,7 @@ pub unsafe fn DispatchConfigurationPipeline(
         v14(v15 as usize, p_parser_workspace);
     }
 
-    let current_thread_id = GetCurrentThreadId() as i32;
+    let current_thread_id = x4_getcurrentthreadid() as i32;
     let mut thread_local_pipeline_context: *mut ThreadContextNode = core::ptr::null_mut();
 
     let current_lock_thread = core::ptr::addr_of!(dword_14046B35C).read_volatile();
@@ -403,8 +403,8 @@ pub unsafe fn DCP_sub2(a1: *mut u8, a2: i64, a3: i32) -> i32 {
         let new_mem = AllocateFromHeap(8, required_size as SIZE_T);
         if !new_mem.is_null() {
             let old_mem = *buffer_ptr_field;
-            let heap = GetProcessHeap();
-            HeapFree(heap, 0, old_mem as *mut c_void);
+            let heap = x4_getprocessheap();
+            x4_heapfree(heap, 0, old_mem as *mut c_void);
             *buffer_ptr_field = new_mem as *mut u8;
             *capacity_ptr = required_size;
         }
@@ -512,8 +512,8 @@ pub unsafe fn FreeConfigElementVector(p_vector_header: *mut ConfigVectorHeader) 
         // Free the sub-allocated buffer pointer
         let sub_buf = *ptr_field;
         if !sub_buf.is_null() {
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, sub_buf);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, sub_buf);
         }
 
         // Zero out the first two pointers in the element block (matching p_sub_allocated_buffer assignment patterns)
@@ -522,8 +522,8 @@ pub unsafe fn FreeConfigElementVector(p_vector_header: *mut ConfigVectorHeader) 
     }
 
     // Free the main array base buffer
-    let process_heap = GetProcessHeap();
-    HeapFree(process_heap, 0, array_base_pointer);
+    let process_heap = x4_getprocessheap();
+    x4_heapfree(process_heap, 0, array_base_pointer);
     let result = 0;
 
     // Reset header state

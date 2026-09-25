@@ -2,7 +2,7 @@ use core::ffi::c_void;
 use core::sync::atomic::{AtomicI32, AtomicI64, Ordering};
 use crate::x4::dxgi::buffer::ReallocVectorBufferWithCacheAlignment64;
 use crate::x4::dxgi::FlushDirtyShaderResources;
-use crate::x4::externals::{memcpy_s, AcquireSRWLockExclusive, ReleaseSRWLockExclusive, GetTickCount, GetProcAddress, GetLastError, SetThreadpoolTimer, SetLastError, CreateThreadpoolTimer, GetModuleHandleExW};
+use crate::x4::externals::{memcpy_s, x4_acquiresrwlockexclusive, x4_releasesrwlockexclusive, x4_gettickcount, x4_getprocaddress, x4_getlasterror, x4_setthreadpooltimer, x4_setlasterror, x4_createthreadpooltimer, x4_getmodulehandleexw};
 use crate::x4::globals::{GlobalDXGISwapChainPresentWrapper, GlobalPfnPresentFallback, GlobalPfnPresentPrimary, _guard_check_icall_fptr, pQueueMgr, GlobalSppPacketControlFlags};
 use crate::x4::spp::calls::SppGetOrUpdateControlFlags;
 use crate::x4::spp::queue::SppQueueRegistrationPacket;
@@ -42,7 +42,7 @@ pub unsafe fn SppCheckTelemetryState(
         3,
     );
 
-    unk_14046B398 = GetTickCount();
+    unk_14046B398 = x4_gettickcount();
 
     v3
 }
@@ -136,7 +136,7 @@ pub unsafe fn SppFlushTelemetrySynchronous(pQueueMgr: *mut ShaderManager) {
     let mgr = &mut *pQueueMgr;
 
     if mgr.status_flag != 0 {
-        AcquireSRWLockExclusive(&mut mgr.lock);
+        x4_acquiresrwlockexclusive(&mut mgr.lock);
 
         if mgr.status_flag != 0 {
             FlushDirtyShaderResources(pQueueMgr);
@@ -144,7 +144,7 @@ pub unsafe fn SppFlushTelemetrySynchronous(pQueueMgr: *mut ShaderManager) {
             mgr.unk_config_flags &= !1;
         }
 
-        ReleaseSRWLockExclusive(&mut mgr.lock);
+        x4_releasesrwlockexclusive(&mut mgr.lock);
     }
 }
 
@@ -317,7 +317,7 @@ pub unsafe fn SppIsEtwChannelEnabled(
     }
 
     if v24 == 0 && pQueueMgr.status_flag != 0 {
-        AcquireSRWLockExclusive(&mut pQueueMgr.lock);
+        x4_acquiresrwlockexclusive(&mut pQueueMgr.lock);
         if pQueueMgr.sub_object_2.is_null() {
             let pfn_create_sub_object = if let Some(f) = qword_14046B380 {
                 Some(f)
@@ -330,7 +330,7 @@ pub unsafe fn SppIsEtwChannelEnabled(
                 f(&mut pQueueMgr.sub_object_2, SppFlushTelemetrySynchronous, -1);
             }
         }
-        ReleaseSRWLockExclusive(&mut pQueueMgr.lock);
+        x4_releasesrwlockexclusive(&mut pQueueMgr.lock);
     }
 
     if enableVerbose != 0 {
@@ -391,9 +391,9 @@ pub unsafe fn SppNtStatusToHresult(
             b'.' as u16, b'd' as u16, b'l' as u16, b'l' as u16, 0,
         ];
 
-        if GetModuleHandleExW(1, ntdll_name.as_ptr(), &mut phModule) != 0 && !phModule.is_null() {
+        if x4_getmodulehandleexw(1, ntdll_name.as_ptr(), &mut phModule) != 0 && !phModule.is_null() {
             let proc_name = b"RtlNtStatusToDosError\0";
-            let proc_addr = GetProcAddress(phModule, proc_name.as_ptr());
+            let proc_addr = x4_getprocaddress(phModule, proc_name.as_ptr());
             if !proc_addr.is_null() {
                 let _ = (*atomic_qword).compare_exchange(
                     0,
@@ -427,7 +427,7 @@ pub unsafe fn SppNtStatusToHresult(
         return if v4 >= 0 { 1 } else { 0 };
     }
 
-    let last_error = GetLastError() as i32;
+    let last_error = x4_getlasterror() as i32;
     let mut v7 = last_error;
     if last_error != 0 {
         if last_error > 0 {
@@ -464,7 +464,7 @@ pub unsafe fn SppScheduleDeferredTelemetry(
         }
     }
 
-    AcquireSRWLockExclusive(&mut mgr.lock);
+    x4_acquiresrwlockexclusive(&mut mgr.lock);
 
     if mgr.status_flag != 0 {
         if g_DisableBypassCheck == 0 {
@@ -505,14 +505,14 @@ pub unsafe fn SppScheduleDeferredTelemetry(
                 let timer_ptr = &mut mgr.hThreadpoolTimer;
                 if mgr.isTimerActive == 0 {
                     if (*timer_ptr).is_null() {
-                        let last_error = GetLastError();
-                        let new_timer = CreateThreadpoolTimer(
+                        let last_error = x4_getlasterror();
+                        let new_timer = x4_createthreadpooltimer(
                             SppTelemetryTimerCallback,
                             pQueueMgr as *mut c_void,
                             core::ptr::null_mut(),
                         );
                         SafeResetThreadpoolTimer(timer_ptr, new_timer);
-                        SetLastError(last_error);
+                        x4_setlasterror(last_error);
                     }
 
                     let current_timer = *timer_ptr;
@@ -521,7 +521,7 @@ pub unsafe fn SppScheduleDeferredTelemetry(
                         let due_time_val: i64 = -3000000000;
                         let pft_due_time = &due_time_val as *const i64 as *const _FILETIME;
 
-                        SetThreadpoolTimer(current_timer, pft_due_time, 0, 0x124F8);
+                        x4_setthreadpooltimer(current_timer, pft_due_time, 0, 0x124F8);
                         mgr.isTimerActive = 1;
                     }
                 }
@@ -529,7 +529,7 @@ pub unsafe fn SppScheduleDeferredTelemetry(
         }
     }
 
-    ReleaseSRWLockExclusive(&mut mgr.lock);
+    x4_releasesrwlockexclusive(&mut mgr.lock);
 }
 
 pub unsafe fn SppTransitionEtwControlState(

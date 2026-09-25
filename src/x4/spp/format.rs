@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{GetProcessHeap, HeapAlloc, HeapFree, _vsnwprintf};
+use crate::x4::externals::{x4_getprocessheap, x4_heapalloc, x4_heapfree, x4__vsnwprintf};
 use crate::x4::spp::string::{SppDuplicateString, SppStringCchLengthW, SppStringCchVPrintfW};
 use crate::x4::types::{HRESULT, SIZE_T};
 
@@ -19,7 +19,7 @@ pub unsafe fn SppFormatStringAlloc(
     let mut ppszDestinationa: *mut u16 = core::ptr::null_mut();
     let mut buffer: [u16; 260] = [0; 260];
 
-    let v8 = _vsnwprintf(buffer.as_mut_ptr(), 0x103, pszFormat, argList);
+    let v8 = x4__vsnwprintf(buffer.as_mut_ptr(), 0x103, pszFormat, argList);
 
     if v8 >= 0x104 {
         buffer[259] = 0;
@@ -61,12 +61,12 @@ pub unsafe fn SppFormatStringAlloc(
             }
 
             if !v5.is_null() {
-                let process_heap = GetProcessHeap();
-                HeapFree(process_heap, 0, v5 as *mut c_void);
+                let process_heap = x4_getprocessheap();
+                x4_heapfree(process_heap, 0, v5 as *mut c_void);
             }
 
-            let process_heap = GetProcessHeap();
-            let v14 = HeapAlloc(process_heap, 0, v6 as usize as SIZE_T) as *mut u16;
+            let process_heap = x4_getprocessheap();
+            let v14 = x4_heapalloc(process_heap, 0, v6 as usize as SIZE_T) as *mut u16;
             v5 = v14;
 
             if v14.is_null() {
@@ -144,14 +144,14 @@ pub unsafe fn SppFormatStringAlloc(
     LogTraceEvent(v10);
 
     if !v7.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v7.offset(-2) as *mut c_void);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v7.offset(-2) as *mut c_void);
         LogTraceEvent(0);
     }
 
     if !v5.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v5 as *mut c_void);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v5 as *mut c_void);
     }
 
     v10

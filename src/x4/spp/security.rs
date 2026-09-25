@@ -1,7 +1,7 @@
 use core::ffi::c_void;
 use crate::u16_str;
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{CheckTokenMembership, ConvertStringSidToSidW, FreeSid, GetLastError, GetProcessHeap, HeapFree, I_RpcMapWin32Status, RpcImpersonateClient, RpcRevertToSelfEx};
+use crate::x4::externals::{x4_checktokenmembership, x4_convertstringsidtosidw, x4_freesid, x4_getlasterror, x4_getprocessheap, x4_heapfree, x4_i_rpcmapwin32status, x4_rpcimpersonateclient, x4_rpcreverttoselfex};
 use crate::x4::globals::{HKEY_LOCAL_MACHINE, SPP_E_ACCESS_DENIED};
 use crate::x4::reloc::{ProcessReloc_Rva0_Len36, ProcessReloc_Rva28_Len0, ProcessReloc_Rva2_Len30, ProcessReloc_Rva30_Len0, ProcessReloc_Rva33_Len3, ProcessReloc_Rva36_Len0, ProcessReloc_Rva36_Len3, ProcessReloc_Rva3_Len31, ProcessReloc_Rva3_Len36, ProcessReloc_Rva8_Len36};
 use crate::x4::spp::{SppCheckBuiltinAdminMembership, SppCheckWellKnownGroupMembership};
@@ -21,7 +21,7 @@ pub unsafe fn SppVerifyAccessSecurity() -> HRESULT {
         u16_str!("S-1-5-80-4215458991-2034252225-2287069555-1155419622-2701885083"),
     ];
 
-    let rpc_status = RpcImpersonateClient(core::ptr::null_mut());
+    let rpc_status = x4_rpcimpersonateclient(core::ptr::null_mut());
 
     if rpc_status == RPC_S_NO_CALL_ACTIVE {
         let hr = 0;
@@ -39,14 +39,14 @@ pub unsafe fn SppVerifyAccessSecurity() -> HRESULT {
         if hr < 0 {
             ProcessReloc_Rva30_Len0(&stru_140447578, &dword_140462640);
             HandleSubsystemError(hr);
-            RpcRevertToSelfEx(core::ptr::null_mut());
+            x4_rpcreverttoselfex(core::ptr::null_mut());
             LogTraceEvent(hr);
             return hr;
         }
 
         if is_member != 0 {
             hr = 0;
-            RpcRevertToSelfEx(core::ptr::null_mut());
+            x4_rpcreverttoselfex(core::ptr::null_mut());
             LogTraceEvent(hr);
             return hr;
         }
@@ -59,13 +59,13 @@ pub unsafe fn SppVerifyAccessSecurity() -> HRESULT {
                 let mut service_sid: PSID = core::ptr::null_mut();
                 let mut sid_check_pass = false;
 
-                if ConvertStringSidToSidW(sid_str, &mut service_sid) != 0
-                    && CheckTokenMembership(core::ptr::null_mut(), service_sid, &mut local_is_member) != 0
+                if x4_convertstringsidtosidw(sid_str, &mut service_sid) != 0
+                    && x4_checktokenmembership(core::ptr::null_mut(), service_sid, &mut local_is_member) != 0
                 {
                     sid_check_pass = true;
                     is_member = local_is_member;
                 } else {
-                    let last_error = GetLastError();
+                    let last_error = x4_getlasterror();
                     if last_error != 0 {
                         hr = (last_error & 0xFFFF) as i32 | (-0x7FFF0000); // 0x80070000 | (last_error & 0xFFFF)
                     } else {
@@ -78,19 +78,19 @@ pub unsafe fn SppVerifyAccessSecurity() -> HRESULT {
                 sid = service_sid;
 
                 if !service_sid.is_null() {
-                    FreeSid(service_sid);
+                    x4_freesid(service_sid);
                 }
 
                 if hr < 0 {
                     HandleSubsystemError(hr);
-                    RpcRevertToSelfEx(core::ptr::null_mut());
+                    x4_rpcreverttoselfex(core::ptr::null_mut());
                     LogTraceEvent(hr);
                     return hr;
                 }
 
                 if sid_check_pass && is_member != 0 {
                     hr = 0;
-                    RpcRevertToSelfEx(core::ptr::null_mut());
+                    x4_rpcreverttoselfex(core::ptr::null_mut());
                     LogTraceEvent(hr);
                     return hr;
                 }
@@ -101,7 +101,7 @@ pub unsafe fn SppVerifyAccessSecurity() -> HRESULT {
 
             if check_status < 0 {
                 HandleSubsystemError(check_status);
-                RpcRevertToSelfEx(core::ptr::null_mut());
+                x4_rpcreverttoselfex(core::ptr::null_mut());
                 LogTraceEvent(hr);
                 return hr;
             }
@@ -109,7 +109,7 @@ pub unsafe fn SppVerifyAccessSecurity() -> HRESULT {
             if is_member != 0 {
                 hr = 0;
                 ProcessReloc_Rva33_Len3(&stru_14043ED08, &dword_140463C20);
-                RpcRevertToSelfEx(core::ptr::null_mut());
+                x4_rpcreverttoselfex(core::ptr::null_mut());
                 LogTraceEvent(hr);
                 return hr;
             }
@@ -119,7 +119,7 @@ pub unsafe fn SppVerifyAccessSecurity() -> HRESULT {
 
             if check_status < 0 {
                 HandleSubsystemError(check_status);
-                RpcRevertToSelfEx(core::ptr::null_mut());
+                x4_rpcreverttoselfex(core::ptr::null_mut());
                 LogTraceEvent(hr);
                 return hr;
             }
@@ -128,7 +128,7 @@ pub unsafe fn SppVerifyAccessSecurity() -> HRESULT {
 
             if is_member != 0 {
                 hr = 0;
-                RpcRevertToSelfEx(core::ptr::null_mut());
+                x4_rpcreverttoselfex(core::ptr::null_mut());
                 LogTraceEvent(hr);
                 return hr;
             }
@@ -138,14 +138,14 @@ pub unsafe fn SppVerifyAccessSecurity() -> HRESULT {
 
             if hr < 0 {
                 HandleSubsystemError(hr);
-                RpcRevertToSelfEx(core::ptr::null_mut());
+                x4_rpcreverttoselfex(core::ptr::null_mut());
                 LogTraceEvent(hr);
                 return hr;
             }
 
             if is_member != 0 {
                 hr = 0;
-                RpcRevertToSelfEx(core::ptr::null_mut());
+                x4_rpcreverttoselfex(core::ptr::null_mut());
                 LogTraceEvent(hr);
                 return hr;
             }
@@ -153,7 +153,7 @@ pub unsafe fn SppVerifyAccessSecurity() -> HRESULT {
             if SppVerifyContainerOrigin(&mut origin_flag) >= 0 && origin_flag != 0 {
                 ProcessReloc_Rva36_Len3(&stru_14044CEF0, &dword_140468AC4);
                 hr = 0;
-                RpcRevertToSelfEx(core::ptr::null_mut());
+                x4_rpcreverttoselfex(core::ptr::null_mut());
                 LogTraceEvent(hr);
                 return hr;
             }
@@ -162,9 +162,9 @@ pub unsafe fn SppVerifyAccessSecurity() -> HRESULT {
         hr = SPP_E_ACCESS_DENIED;
         HandleSubsystemError(SPP_E_ACCESS_DENIED);
         ProcessReloc_Rva2_Len30(&stru_14043F3D8, &dword_140464388);
-        RpcRevertToSelfEx(core::ptr::null_mut());
+        x4_rpcreverttoselfex(core::ptr::null_mut());
     } else {
-        let mapped_status = I_RpcMapWin32Status(rpc_status);
+        let mapped_status = x4_i_rpcmapwin32status(rpc_status);
         hr = mapped_status;
 
         if mapped_status > 0 {
@@ -313,23 +313,23 @@ pub unsafe fn SppVerifyContainerOrigin(pbIsAuthorized: *mut i32) -> HRESULT {
 
     let v10 = lp_mem as *mut c_void;
     if !v10.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v10);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v10);
         ProcessReloc_Rva33_Len3(&stru_140439BD8, &dword_140469310);
     }
 
     if v2 != 0 {
-        let v12 = GetProcessHeap();
+        let v12 = x4_getprocessheap();
         ProcessReloc_Rva30_Len0(&stru_14044FC88, &dword_1404623F0);
-        HeapFree(v12, 0, (v2 - 4) as *mut c_void);
+        x4_heapfree(v12, 0, (v2 - 4) as *mut c_void);
         LogTraceEvent(0);
     }
 
     ProcessReloc_Rva30_Len0(&stru_14043BC70, &dword_14046A718);
 
     if h_client_container_token != 0 {
-        let v13 = GetProcessHeap();
-        HeapFree(v13, 0, (h_client_container_token - 4) as *mut c_void);
+        let v13 = x4_getprocessheap();
+        x4_heapfree(v13, 0, (h_client_container_token - 4) as *mut c_void);
         LogTraceEvent(0);
     }
 

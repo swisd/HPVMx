@@ -1,5 +1,5 @@
 use core::ffi::c_void;
-use crate::x4::externals::GetCurrentThreadId;
+use crate::x4::externals::x4_getcurrentthreadid;
 use crate::x4::spp::lock::{SppCustomLockAcquire, SppCustomLockRelease};
 use crate::x4::types::{ThreadMap, DWORD, SppThreadContextBody, SppThreadContextManager};
 
@@ -28,7 +28,7 @@ pub unsafe fn SppGetCurrentThreadContext(
         SppCustomLockAcquire(p_lock, 1);
     }
 
-    let current_thread_id = GetCurrentThreadId();
+    let current_thread_id = x4_getcurrentthreadid();
 
     let context = if is_valid {
         if SppThreadMapLookupIndex(

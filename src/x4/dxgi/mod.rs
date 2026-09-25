@@ -4,7 +4,7 @@ use pipeline::PipelineCoordinatorDestroy;
 use crate::x4::dxgi::lane::{CleanupFrameTracking, FreeLanePayloadBuffers, InitContextInternalPools, InitSharedMapping, LookupExistingSharedContext, SwapLaneSnapshots};
 use crate::x4::dxgi::pipeline::BindPipelineShaderResources;
 use crate::x4::error::TraceProviderEvent;
-use crate::x4::externals::{AcquireSRWLockExclusive, CloseHandle, CloseThreadpoolTimer, CreateMutexExW, DeleteCriticalSection, EnterCriticalSection, GetCurrentProcessId, GetLastError, GetModuleHandleW, GetProcAddress, GetProcessHeap, HeapFree, InitializeCriticalSectionEx, LeaveCriticalSection, ReleaseMutex, ReleaseSRWLockExclusive, SetLastError, SetThreadpoolTimer, WaitForSingleObjectEx, WaitForThreadpoolTimerCallbacks};
+use crate::x4::externals::{x4_acquiresrwlockexclusive, x4_closehandle, x4_closethreadpooltimer, x4_createmutexexw, x4_deletecriticalsection, x4_entercriticalsection, x4_getcurrentprocessid, x4_getlasterror, x4_getmodulehandlew, x4_getprocaddress, x4_getprocessheap, x4_heapfree, x4_initializecriticalsectionex, x4_leavecriticalsection, x4_releasemutex, x4_releasesrwlockexclusive, x4_setlasterror, x4_setthreadpooltimer, x4_waitforsingleobjectex, x4_waitforthreadpooltimercallbacks};
 use crate::x4::globals::{pQueueMgr, GlobalDXGISwapChainPresentWrapper, GlobalExecutionCoordinator, g_pfnConditionCheck, g_DisableBypassCheck, _guard_check_icall_fptr, GlobalPfnPresentPrimary, GlobalPfnPresentFallback, lpSource};
 use crate::x4::helpers::{AllocateFromHeap, NormalizingExitRegisterWrapper, StringCchPrintfW};
 use crate::x4::rawasm::FARPROC;
@@ -24,7 +24,7 @@ pub unsafe fn OnShaderManagerModuleExit() -> i64 {
 
 pub unsafe fn InitializeExecutionCoordinator() -> i64 {
     // Initialize critical section structures
-    InitializeCriticalSectionEx(core::ptr::addr_of_mut!(GlobalExecutionCoordinator.queue_lock), 0, 0);
+    x4_initializecriticalsectionex(core::ptr::addr_of_mut!(GlobalExecutionCoordinator.queue_lock), 0, 0);
     GlobalExecutionCoordinator.unk_state_trigger = 0;
 
     // *(_OWORD *)GlobalExecutionCoordinator.pad_112_135 = 0;
@@ -33,7 +33,7 @@ pub unsafe fn InitializeExecutionCoordinator() -> i64 {
     *(pad_112_ptr as *mut u128) = 0;
     *(pad_112_ptr.add(16) as *mut u128) = 0;
 
-    InitializeCriticalSectionEx(core::ptr::addr_of_mut!(GlobalExecutionCoordinator.state_lock), 0, 0);
+    x4_initializecriticalsectionex(core::ptr::addr_of_mut!(GlobalExecutionCoordinator.state_lock), 0, 0);
     GlobalExecutionCoordinator.heap_buffer_2 = core::ptr::null_mut();
     GlobalExecutionCoordinator.is_active_flag = 1;
 
@@ -105,7 +105,7 @@ pub unsafe fn RenderContextBlockFinalizeTeardown(a1: *mut RenderContextBlock) ->
     // 2. Handle completion_event_1
     let completion_event_1 = (*a1).sync_events.completion_event_1;
     if !completion_event_1.is_null() {
-        result = CloseHandle(completion_event_1);
+        result = x4_closehandle(completion_event_1);
         if result == 0 {
             // Uninitialized registers v4/v5 are passed down. Rust defaults them safely to zero.
             HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
@@ -115,7 +115,7 @@ pub unsafe fn RenderContextBlockFinalizeTeardown(a1: *mut RenderContextBlock) ->
     // 3. Handle completion_event_0
     let completion_event_0 = (*a1).sync_events.completion_event_0;
     if !completion_event_0.is_null() {
-        result = CloseHandle(completion_event_0);
+        result = x4_closehandle(completion_event_0);
         if result == 0 {
             HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
         }
@@ -124,7 +124,7 @@ pub unsafe fn RenderContextBlockFinalizeTeardown(a1: *mut RenderContextBlock) ->
     // 4. Handle mutex_handle
     let mutex_handle = (*a1).mutex_handle;
     if !mutex_handle.is_null() {
-        result = CloseHandle(mutex_handle);
+        result = x4_closehandle(mutex_handle);
         if result == 0 {
             HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
         }
@@ -194,23 +194,23 @@ unsafe fn finalize_allocations_and_timer(
     let heap_buffer_2 = (*manager).heap_buffer_2;
     (*manager).heap_buffer_2 = core::ptr::null_mut();
     if !heap_buffer_2.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, heap_buffer_2);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, heap_buffer_2);
     }
 
     let heap_buffer_1 = (*manager).heap_buffer_1;
     (*manager).heap_buffer_1 = core::ptr::null_mut();
     if !heap_buffer_1.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, heap_buffer_1);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, heap_buffer_1);
     }
 
     // 3. Dismantle Threadpool Windows Kernel Objs
     let timer = (*manager).timer;
     if !timer.is_null() {
-        SetThreadpoolTimer(timer, core::ptr::null_mut(), 0, 0);
-        WaitForThreadpoolTimerCallbacks(timer, 1);
-        CloseThreadpoolTimer(timer);
+        x4_setthreadpooltimer(timer, core::ptr::null_mut(), 0, 0);
+        x4_waitforthreadpooltimercallbacks(timer, 1);
+        x4_closethreadpooltimer(timer);
     }
 }
 
@@ -224,8 +224,8 @@ pub unsafe fn ShutdownAsyncQueueSystem(a1: *mut ExecutionCoordinator) {
     let heap_buffer_2 = (*a1).heap_buffer_2;
     (*a1).heap_buffer_2 = core::ptr::null_mut();
     if !heap_buffer_2.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, heap_buffer_2);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, heap_buffer_2);
     }
 
     // 3. Conditional critical context removal
@@ -248,12 +248,12 @@ pub unsafe fn ShutdownAsyncQueueSystem(a1: *mut ExecutionCoordinator) {
     let heap_buffer_1 = (*a1).heap_buffer_1;
     (*a1).heap_buffer_1 = core::ptr::null_mut();
     if !heap_buffer_1.is_null() {
-        let proc_heap_handle_0 = GetProcessHeap();
-        HeapFree(proc_heap_handle_0, 0, heap_buffer_1);
+        let proc_heap_handle_0 = x4_getprocessheap();
+        x4_heapfree(proc_heap_handle_0, 0, heap_buffer_1);
     }
 
     // 5. Release state lock and clean up notifications
-    DeleteCriticalSection(core::ptr::addr_of_mut!((*a1).state_lock));
+    x4_deletecriticalsection(core::ptr::addr_of_mut!((*a1).state_lock));
     let unk_state_trigger = (*a1).unk_state_trigger;
     if unk_state_trigger != 0 {
         UnregisterFeatureConfigurationChangeNotificationWrapper(unk_state_trigger as i64);
@@ -263,25 +263,25 @@ pub unsafe fn ShutdownAsyncQueueSystem(a1: *mut ExecutionCoordinator) {
     let heap_buffer_0 = (*a1).heap_buffer_0;
     (*a1).heap_buffer_0 = core::ptr::null_mut();
     if !heap_buffer_0.is_null() {
-        let v9 = GetProcessHeap();
-        HeapFree(v9, 0, heap_buffer_0);
+        let v9 = x4_getprocessheap();
+        x4_heapfree(v9, 0, heap_buffer_0);
     }
 
     // 7. Delete queue lock and dismantle kernel thread timers
-    DeleteCriticalSection(core::ptr::addr_of_mut!((*a1).queue_lock));
+    x4_deletecriticalsection(core::ptr::addr_of_mut!((*a1).queue_lock));
 
     let update_timer_1 = (*a1).update_timer_1;
     if !update_timer_1.is_null() {
-        SetThreadpoolTimer(update_timer_1, core::ptr::null_mut(), 0, 0);
-        WaitForThreadpoolTimerCallbacks(update_timer_1, 1);
-        CloseThreadpoolTimer(update_timer_1);
+        x4_setthreadpooltimer(update_timer_1, core::ptr::null_mut(), 0, 0);
+        x4_waitforthreadpooltimercallbacks(update_timer_1, 1);
+        x4_closethreadpooltimer(update_timer_1);
     }
 
     let update_timer_0 = (*a1).update_timer_0;
     if !update_timer_0.is_null() {
-        SetThreadpoolTimer((*a1).update_timer_0, core::ptr::null_mut(), 0, 0);
-        WaitForThreadpoolTimerCallbacks(update_timer_0, 1);
-        CloseThreadpoolTimer(update_timer_0);
+        x4_setthreadpooltimer((*a1).update_timer_0, core::ptr::null_mut(), 0, 0);
+        x4_waitforthreadpooltimercallbacks(update_timer_0, 1);
+        x4_closethreadpooltimer(update_timer_0);
     }
 
     // 8. Unlink structural render contexts
@@ -304,7 +304,7 @@ pub unsafe fn GetOrCreateRenderContextBlock(
     #[cfg(not(target_arch = "x86_64"))]
     { retaddr = 0; }
 
-    let current_process_id = GetCurrentProcessId();
+    let current_process_id = x4_getcurrentprocessid();
     let mut name_buffer = [0u16; 264];
 
     // Format wide-string: "Local\\SM0:%lu:%lu:%hs"
@@ -319,13 +319,13 @@ pub unsafe fn GetOrCreateRenderContextBlock(
         pSubsystemName,
     );
 
-    let mut v6 = CreateMutexExW(core::ptr::null_mut(), name_buffer.as_ptr(), 0, 0x1F0001);
+    let mut v6 = x4_createmutexexw(core::ptr::null_mut(), name_buffer.as_ptr(), 0, 0x1F0001);
     if v6.is_null() {
-        return GetLastError() as i32;
+        return x4_getlasterror() as i32;
     }
 
     let mut v10: *mut core::ffi::c_void = core::ptr::null_mut();
-    let v8 = WaitForSingleObjectEx(v6, 0xFFFFFFFF, 0);
+    let v8 = x4_waitforsingleobjectex(v6, 0xFFFFFFFF, 0);
     if v8 != 258 {
         if (v8 & 0xFFFFFF7F) != 0 {
             ReportLockFailureException(retaddr as u64);
@@ -396,15 +396,15 @@ pub unsafe fn GetOrCreateRenderContextBlock(
         }
 
         TraceProviderEvent(retaddr as u64, 331, 0, inited as u32 as u64);
-        if !h_object[1].is_null() && CloseHandle(h_object[1]) == 0 {
+        if !h_object[1].is_null() && x4_closehandle(h_object[1]) == 0 {
             HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
         }
-        if !h_object[0].is_null() && CloseHandle(h_object[0]) == 0 {
+        if !h_object[0].is_null() && x4_closehandle(h_object[0]) == 0 {
             HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
         }
 
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, v23 as *mut _);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, v23 as *mut _);
     } else {
         v24 = -2147024882; // 0x8007000E (E_OUTOFMEMORY)
         TraceProviderEvent(retaddr as u64, 328, 0, 2147942414);
@@ -417,10 +417,10 @@ pub unsafe fn GetOrCreateRenderContextBlock(
 
 /// Consolidated logic block mapping structural mutex unlock sequences
 unsafe fn finalize_success_path(retaddr: usize, v10: *mut core::ffi::c_void, v6: *mut core::ffi::c_void) -> i32 {
-    if !v10.is_null() && ReleaseMutex(v10) == 0 {
+    if !v10.is_null() && x4_releasemutex(v10) == 0 {
         HandleHandleCloseError(retaddr as i32, 2535, 0, 0);
     }
-    if !v6.is_null() && CloseHandle(v6) == 0 {
+    if !v6.is_null() && x4_closehandle(v6) == 0 {
         HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
     }
     0
@@ -428,10 +428,10 @@ unsafe fn finalize_success_path(retaddr: usize, v10: *mut core::ffi::c_void, v6:
 
 /// Fallback error path clearing active synchronization state descriptors
 unsafe fn cleanup_locks_and_exit(retaddr: usize, v10: *mut core::ffi::c_void, v6: *mut core::ffi::c_void) {
-    if !v10.is_null() && ReleaseMutex(v10) == 0 {
+    if !v10.is_null() && x4_releasemutex(v10) == 0 {
         HandleHandleCloseError(retaddr as i32, 2535, 0, 0);
     }
-    if !v6.is_null() && CloseHandle(v6) == 0 {
+    if !v6.is_null() && x4_closehandle(v6) == 0 {
         HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
     }
 }
@@ -454,24 +454,24 @@ pub unsafe fn CloseContextSyncHandles(pSyncStruct: *mut ContextSyncHandles) {
     // 1. Process completion_event_0
     let completion_event_0 = (*pSyncStruct).completion_event_0;
     if !completion_event_0.is_null() {
-        let LastError = GetLastError();
-        if CloseHandle(completion_event_0) == 0 {
+        let LastError = x4_getlasterror();
+        if x4_closehandle(completion_event_0) == 0 {
             // Uninitialized registers v4/v5 passed down default safely to zero
             HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
         }
-        SetLastError(LastError);
+        x4_setlasterror(LastError);
     }
     (*pSyncStruct).completion_event_0 = core::ptr::null_mut();
 
     // 2. Process completion_event_1
     let completion_event_1 = (*pSyncStruct).completion_event_1;
     if !completion_event_1.is_null() {
-        let v7 = GetLastError();
-        if CloseHandle(completion_event_1) == 0 {
+        let v7 = x4_getlasterror();
+        if x4_closehandle(completion_event_1) == 0 {
             // Uninitialized registers v8/v9 passed down default safely to zero
             HandleHandleCloseError(retaddr as i32, 2525, 0, 0);
         }
-        SetLastError(v7);
+        x4_setlasterror(v7);
     }
     (*pSyncStruct).completion_event_1 = core::ptr::null_mut();
 }
@@ -490,12 +490,12 @@ pub unsafe fn CleanupShaderResourcesTimerReset(manager: *mut ShaderManager) {
     let mut pti: PTP_TIMER = timer;
 
     // 2. Lock context and flush resources
-    AcquireSRWLockExclusive(p_lock);
+    x4_acquiresrwlockexclusive(p_lock);
     FlushDirtyShaderResources(manager);
 
     // Original decompiler sanity check: if ( p_lock )
     if !p_lock.is_null() {
-        ReleaseSRWLockExclusive(p_lock);
+        x4_releasesrwlockexclusive(p_lock);
     }
 
     // 3. Threadpool clean up lifecycle sequence
@@ -503,9 +503,9 @@ pub unsafe fn CleanupShaderResourcesTimerReset(manager: *mut ShaderManager) {
     let v4 = pti;
 
     if !pti.is_null() {
-        SetThreadpoolTimer(pti, core::ptr::null_mut(), 0, 0);
-        WaitForThreadpoolTimerCallbacks(v4, 1);
-        CloseThreadpoolTimer(v4);
+        x4_setthreadpooltimer(pti, core::ptr::null_mut(), 0, 0);
+        x4_waitforthreadpooltimercallbacks(v4, 1);
+        x4_closethreadpooltimer(v4);
     }
 }
 
@@ -679,7 +679,7 @@ pub unsafe fn RenderContextBlockRelease(lpMem: *mut RenderContextBlock) {
     } else {
         // Mutex synchronization fallback path
         let mut mutex_handle = (*lpMem).mutex_handle;
-        let v4 = WaitForSingleObjectEx(mutex_handle, 0xFFFFFFFF, 0);
+        let v4 = x4_waitforsingleobjectex(mutex_handle, 0xFFFFFFFF, 0);
 
         if v4 == 258 {
             mutex_handle = core::ptr::null_mut();
@@ -689,7 +689,7 @@ pub unsafe fn RenderContextBlockRelease(lpMem: *mut RenderContextBlock) {
 
         (*lpMem).reference_count -= 1;
         if (*lpMem).reference_count != 0 {
-            if !mutex_handle.is_null() && ReleaseMutex(mutex_handle) == 0 {
+            if !mutex_handle.is_null() && x4_releasemutex(mutex_handle) == 0 {
                 HandleHandleCloseError(retaddr as i32, 2535, 0, 0);
             }
         } else {
@@ -697,16 +697,16 @@ pub unsafe fn RenderContextBlockRelease(lpMem: *mut RenderContextBlock) {
             CloseContextSyncHandles(core::ptr::addr_of_mut!((*lpMem).sync_events) as *mut _);
 
             if !mutex_handle.is_null() {
-                let last_error = GetLastError();
-                if ReleaseMutex(mutex_handle) == 0 {
+                let last_error = x4_getlasterror();
+                if x4_releasemutex(mutex_handle) == 0 {
                     HandleHandleCloseError(retaddr as i32, 2535, 0, 0);
                 }
-                SetLastError(last_error);
+                x4_setlasterror(last_error);
             }
 
             RenderContextBlockFinalizeTeardown(lpMem);
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, lpMem as *mut _);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, lpMem as *mut _);
         }
     }
 }
@@ -724,13 +724,13 @@ pub unsafe fn UnregisterFeatureConfigurationChangeNotificationWrapper(a1: i64) -
     let mut module_handle_w = lpSource;
     if lpSource.is_null() {
         let ntdll_name = encode_wide_str("ntdll.dll\0");
-        module_handle_w = GetModuleHandleW(ntdll_name.as_ptr()) as *mut core::ffi::c_void;
+        module_handle_w = x4_getmodulehandlew(ntdll_name.as_ptr()) as *mut core::ffi::c_void;
         lpSource = module_handle_w;
     }
 
     // Lookup process entry point address
     let proc_name = core::ffi::CString::new("RtlUnregisterFeatureConfigurationChangeNotification").unwrap();
-    let result = GetProcAddress(module_handle_w as *mut _, proc_name.as_ptr());
+    let result = x4_getprocaddress(module_handle_w as *mut _, proc_name.as_ptr());
 
     qword_14046B270 = result as usize;
     v1 = core::mem::transmute::<*mut core::ffi::c_void, FARPROC>(result);
@@ -751,8 +751,8 @@ pub unsafe fn SafeRemoveContextEntryLPCritical(
     a3: i64,
 ) {
     if a3 != 0 {
-        EnterCriticalSection(lpCriticalSection);
-        AcquireSRWLockExclusive(srw_lock);
+        x4_entercriticalsection(lpCriticalSection);
+        x4_acquiresrwlockexclusive(srw_lock);
 
         // DebugInfo = lpCriticalSection[1].DebugInfo;
         // In C++, indexing a pointer like array[1] steps forward by the size of the type.
@@ -778,10 +778,10 @@ pub unsafe fn SafeRemoveContextEntryLPCritical(
         }
 
         if !srw_lock.is_null() {
-            ReleaseSRWLockExclusive(srw_lock);
+            x4_releasesrwlockexclusive(srw_lock);
         }
         if !lpCriticalSection.is_null() {
-            LeaveCriticalSection(lpCriticalSection);
+            x4_leavecriticalsection(lpCriticalSection);
         }
     }
 }

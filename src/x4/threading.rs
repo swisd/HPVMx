@@ -1,14 +1,14 @@
 
 use core::sync::atomic::{AtomicI32, Ordering};
 use crate::x4::error::{ReportAlignmentAssertionFailure, TraceProviderEvent};
-use crate::x4::externals::{AcquireSRWLockExclusive, AcquireSRWLockShared, CloseHandle, CloseThreadpoolTimer, CreateMutexExW, CreateSemaphoreExW, EnterCriticalSection, EtwWriteTransfer, GetCurrentProcessId, GetLastError, GetProcessHeap, HeapFree, InitializeCriticalSectionEx, LeaveCriticalSection, NtCurrentTeb, OpenSemaphoreW, ReleaseMutex, ReleaseSRWLockExclusive, ReleaseSRWLockShared, ReleaseSemaphore, SetLastError, SetThreadpoolTimer, WaitForSingleObject, WaitForSingleObjectEx, WaitForThreadpoolTimerCallbacks};
+use crate::x4::externals::{x4_acquiresrwlockexclusive, x4_acquiresrwlockshared, x4_closehandle, x4_closethreadpooltimer, x4_createmutexexw, x4_createsemaphoreexw, x4_entercriticalsection, x4_etwwritetransfer, x4_getcurrentprocessid, x4_getlasterror, x4_getprocessheap, x4_heapfree, x4_initializecriticalsectionex, x4_leavecriticalsection, x4_ntcurrentteb, x4_opensemaphorew, x4_releasemutex, x4_releasesrwlockexclusive, x4_releasesrwlockshared, x4_releasesemaphore, x4_setlasterror, x4_setthreadpooltimer, x4_waitforsingleobject, x4_waitforsingleobjectex, x4_waitforthreadpooltimercallbacks};
 use crate::x4::globals::_guard_check_icall_fptr;
 use crate::x4::helpers::{AllocateFromHeap, StringCchCatW, StringCchPrintfW};
 use crate::x4::types::{SharedContextBlock, SRWLOCK, ItemManager, ItemTracker, LaneFrameTracker, HANDLE, PVOID, __m128i, ContextEntry, LPCRITICAL_SECTION, PSRWLOCK, CRITICAL_SECTION, WCHAR, LONG, FileTime, TP_TIMER, __int64, FILETIME};
 
 pub unsafe fn InitThreadNotify(p_sequence_id: *mut u32) {
     let srw_lock_ptr = &mut SRWLOCK as *mut SRWLOCK;
-    AcquireSRWLockExclusive(srw_lock_ptr);
+    x4_acquiresrwlockexclusive(srw_lock_ptr);
 
     let v2 = TlsIndex as usize;
     InitSequence = InitSequence.wrapping_add(1);
@@ -17,20 +17,20 @@ pub unsafe fn InitThreadNotify(p_sequence_id: *mut u32) {
         *p_sequence_id = InitSequence;
     }
 
-    let teb = NtCurrentTeb();
+    let teb = x4_ntcurrentteb();
     if !teb.is_null() {
         let tls_pointer_array = (*teb).ThreadLocalStoragePointer;
         if !tls_pointer_array.is_null() {
             let tls_slot = *tls_pointer_array.add(v2);
             if !tls_slot.is_null() {
-                // Replicates *(_DWORD *)(*((_QWORD *)NtCurrentTeb()->ThreadLocalStoragePointer + v2) + 4LL)
+                // Replicates *(_DWORD *)(*((_QWORD *)x4_ntcurrentteb()->ThreadLocalStoragePointer + v2) + 4LL)
                 let target_dword_ptr = (tls_slot as *mut u8).add(4) as *mut u32;
                 *target_dword_ptr = InitSequence;
             }
         }
     }
 
-    ReleaseSRWLockExclusive(srw_lock_ptr);
+    x4_releasesrwlockexclusive(srw_lock_ptr);
 
     let cv_ptr = &mut ConditionVariable as *mut CONDITION_VARIABLE;
     WakeAllConditionVariable(cv_ptr);
@@ -50,7 +50,7 @@ pub unsafe extern "system" fn pfnti(
         let lock = (*context).lock;
 
         if !lock.is_null() {
-            AcquireSRWLockExclusive(lock);
+            x4_acquiresrwlockexclusive(lock);
         }
 
         // Replicates BYTE1(Context->?[0].reservedPool[1]) = 0;
@@ -59,7 +59,7 @@ pub unsafe extern "system" fn pfnti(
         *byte_target = 0;
 
         if !lock.is_null() {
-            ReleaseSRWLockExclusive(lock);
+            x4_releasesrwlockexclusive(lock);
         }
 
         if g_DisableBypassCheck == 0 {
@@ -92,7 +92,7 @@ pub unsafe fn InvalidateTrackedObjects(manager: *mut ItemManager) {
 
     if (*manager).is_active != 0 {
         let lock_ptr = &mut (*manager).srw_lock as *mut SRWLOCK;
-        AcquireSRWLockExclusive(lock_ptr);
+        x4_acquiresrwlockexclusive(lock_ptr);
 
         // manager[1] corresponds to an offset of one ItemManager struct size.
         let next_manager = manager.add(1);
@@ -126,7 +126,7 @@ pub unsafe fn InvalidateTrackedObjects(manager: *mut ItemManager) {
         // Reconstruct the 64-bit value with the updated high DWORD version
         *items_start_raw = ((next_version as u64) << 32) | (low_ptr as u64);
 
-        ReleaseSRWLockExclusive(lock_ptr);
+        x4_releasesrwlockexclusive(lock_ptr);
     }
 }
 
@@ -258,24 +258,24 @@ pub unsafe fn FreeLanePayloadBuffers(p_frame_array: *mut u64) {
     let p_lane2_buffer = *p_frame_array.add(22) as *mut core::ffi::c_void;
     *p_frame_array.add(22) = 0;
     if !p_lane2_buffer.is_null() {
-        let h_heap2 = GetProcessHeap();
-        HeapFree(h_heap2, 0, p_lane2_buffer);
+        let h_heap2 = x4_getprocessheap();
+        x4_heapfree(h_heap2, 0, p_lane2_buffer);
     }
 
     // Lane 1 buffer (index 14)
     let p_lane1_buffer = *p_frame_array.add(14) as *mut core::ffi::c_void;
     *p_frame_array.add(14) = 0;
     if !p_lane1_buffer.is_null() {
-        let h_heap1 = GetProcessHeap();
-        HeapFree(h_heap1, 0, p_lane1_buffer);
+        let h_heap1 = x4_getprocessheap();
+        x4_heapfree(h_heap1, 0, p_lane1_buffer);
     }
 
     // Lane 0 buffer (index 6)
     let p_lane0_buffer = *p_frame_array.add(6) as *mut core::ffi::c_void;
     *p_frame_array.add(6) = 0;
     if !p_lane0_buffer.is_null() {
-        let h_heap0 = GetProcessHeap();
-        HeapFree(h_heap0, 0, p_lane0_buffer);
+        let h_heap0 = x4_getprocessheap();
+        x4_heapfree(h_heap0, 0, p_lane0_buffer);
     }
 }
 
@@ -287,7 +287,7 @@ pub unsafe fn InitSharedObject(
         *ptp_out_shared_object = core::ptr::null_mut();
     }
 
-    let current_process_id = GetCurrentProcessId();
+    let current_process_id = x4_getcurrentprocessid();
     let mut mutex_name_buffer = [0u16; 264];
 
     // Format string: L"Local\\SM0:%lu:%lu:%hs"
@@ -307,13 +307,13 @@ pub unsafe fn InitSharedObject(
         context_string,
     );
 
-    let mutex = CreateMutexExW(core::ptr::null_mut(), mutex_name_buffer.as_ptr(), 0, 0x1F0001);
+    let mutex = x4_createmutexexw(core::ptr::null_mut(), mutex_name_buffer.as_ptr(), 0, 0x1F0001);
     if mutex.is_null() {
-        return GetLastError() as i32;
+        return x4_getlasterror() as i32;
     }
 
     let mut h_mutex = mutex;
-    let wait_result = WaitForSingleObjectEx(mutex, 0xFFFFFFFF, 0);
+    let wait_result = x4_waitforsingleobjectex(mutex, 0xFFFFFFFF, 0);
     let mut h_held_mutex: HANDLE = core::ptr::null_mut();
 
     if wait_result == 258 {
@@ -331,10 +331,10 @@ pub unsafe fn InitSharedObject(
         TraceProviderEvent(0, 100, 0, status as u64);
         TraceProviderEvent(0, 109, 0, status as u64);
         TraceProviderEvent(0, 299, 0, status as u64);
-        if !h_held_mutex.is_null() && ReleaseMutex(h_held_mutex) == 0 {
+        if !h_held_mutex.is_null() && x4_releasemutex(h_held_mutex) == 0 {
             HandleHandleCloseError(/* i32 */, 2535, /* i32 */, /* i32 */);
         }
-        if CloseHandle(h_mutex) == 0 {
+        if x4_closehandle(h_mutex) == 0 {
             HandleHandleCloseError(core::ptr::null_mut(), 2525);
         }
         return status as i32;
@@ -346,10 +346,10 @@ pub unsafe fn InitSharedObject(
             *ptp_out_shared_object = p_existing_object as *mut core::ffi::c_void;
             *p_existing_object = *p_existing_object + 1;
 
-            if !h_held_mutex.is_null() && ReleaseMutex(h_held_mutex) == 0 {
+            if !h_held_mutex.is_null() && x4_releasemutex(h_held_mutex) == 0 {
                 HandleHandleCloseError(core::ptr::null_mut(), 2535);
             }
-            if !h_mutex.is_null() && CloseHandle(h_mutex) == 0 {
+            if !h_mutex.is_null() && x4_closehandle(h_mutex) == 0 {
                 HandleHandleCloseError(core::ptr::null_mut(), 2525);
             }
             return 0;
@@ -376,7 +376,7 @@ pub unsafe fn InitSharedObject(
             *(p_new_object.add(32) as *mut u64) = 0;
             InitContextInternalPools(p_new_object.add(40) as *mut core::ffi::c_void);
 
-            InitializeCriticalSectionEx(p_new_object.add(232) as *mut core::ffi::c_void, 0, 0);
+            x4_initializecriticalsectionex(p_new_object.add(232) as *mut core::ffi::c_void, 0, 0);
 
             *(p_new_object.add(272) as *mut u64) = 0;
             *(p_new_object.add(280) as *mut u64) = 0;
@@ -385,31 +385,31 @@ pub unsafe fn InitSharedObject(
 
             *ptp_out_shared_object = p_new_object as *mut core::ffi::c_void;
 
-            if !h_held_mutex.is_null() && ReleaseMutex(h_held_mutex) == 0 {
+            if !h_held_mutex.is_null() && x4_releasemutex(h_held_mutex) == 0 {
                 HandleHandleCloseError(core::ptr::null_mut(), 2535);
             }
-            if !h_mutex.is_null() && CloseHandle(h_mutex) == 0 {
+            if !h_mutex.is_null() && x4_closehandle(h_mutex) == 0 {
                 HandleHandleCloseError(core::ptr::null_mut(), 2525);
             }
             return 0;
         }
 
         TraceProviderEvent(0, 331, 0, map_status);
-        if !h_shared_sections[1].is_null() && CloseHandle(h_shared_sections[1]) == 0 {
+        if !h_shared_sections[1].is_null() && x4_closehandle(h_shared_sections[1]) == 0 {
             HandleHandleCloseError(core::ptr::null_mut(), 2525);
         }
-        if !h_shared_sections[0].is_null() && CloseHandle(h_shared_sections[0]) == 0 {
+        if !h_shared_sections[0].is_null() && x4_closehandle(h_shared_sections[0]) == 0 {
             HandleHandleCloseError(core::ptr::null_mut(), 2525);
         }
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, p_new_object as *mut core::ffi::c_void);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, p_new_object as *mut core::ffi::c_void);
 
         let out_status = map_status;
         TraceProviderEvent(0, 308, 0, out_status);
-        if !h_held_mutex.is_null() && ReleaseMutex(h_held_mutex) == 0 {
+        if !h_held_mutex.is_null() && x4_releasemutex(h_held_mutex) == 0 {
             HandleHandleCloseError(core::ptr::null_mut(), 2535);
         }
-        if CloseHandle(h_mutex) == 0 {
+        if x4_closehandle(h_mutex) == 0 {
             HandleHandleCloseError(core::ptr::null_mut(), 2525);
         }
         return out_status as i32;
@@ -417,10 +417,10 @@ pub unsafe fn InitSharedObject(
         let out_status = -2147024882i32;
         TraceProviderEvent(0, 328, 0, out_status as u64);
         TraceProviderEvent(0, 308, 0, out_status as u64);
-        if !h_held_mutex.is_null() && ReleaseMutex(h_held_mutex) == 0 {
+        if !h_held_mutex.is_null() && x4_releasemutex(h_held_mutex) == 0 {
             HandleHandleCloseError(core::ptr::null_mut(), 2535);
         }
-        if CloseHandle(h_mutex) == 0 {
+        if x4_closehandle(h_mutex) == 0 {
             HandleHandleCloseError(core::ptr::null_mut(), 2525);
         }
         return out_status as i32;
@@ -519,7 +519,7 @@ pub unsafe fn LazyInitTarget(ctx: *mut ContextEntry) -> bool {
 
     // Check ctx[3].Ptr
     if (*ctx.add(3)).ptr.is_null() {
-        let last_error = GetLastError();
+        let last_error = x4_getlasterror();
 
         if (*ctx.add(3)).ptr.is_null() {
             let target_address: *mut core::ffi::c_void;
@@ -545,20 +545,20 @@ pub unsafe fn LazyInitTarget(ctx: *mut ContextEntry) -> bool {
             };
             target_address = calculated as *mut core::ffi::c_void;
 
-            // AcquireSRWLockExclusive(ctx + 4);
+            // x4_acquiresrwlockexclusive(ctx + 4);
             let lock_ptr = ctx.add(4) as *mut SRWLOCK;
-            AcquireSRWLockExclusive(lock_ptr);
+            x4_acquiresrwlockexclusive(lock_ptr);
 
             if (*ctx.add(3)).ptr.is_null() {
                 (*ctx.add(3)).ptr = target_address;
             }
 
-            // Replicates: if ( ctx != (RTL_SRWLOCK *)-32LL ) ReleaseSRWLockExclusive(ctx + 4);
+            // Replicates: if ( ctx != (RTL_SRWLOCK *)-32LL ) x4_releasesrwlockexclusive(ctx + 4);
             if ctx as usize != (!31_usize) {
-                ReleaseSRWLockExclusive(lock_ptr);
+                x4_releasesrwlockexclusive(lock_ptr);
             }
 
-            SetLastError(last_error);
+            x4_setlasterror(last_error);
         }
     }
 
@@ -580,7 +580,7 @@ pub unsafe fn QueryAndValidateSemaphoreCount(hHandle: HANDLE, a2: *mut i32) -> i
     let v5 = 0;
     let v6 = 0;
 
-    let v4 = WaitForSingleObject(hHandle, 0);
+    let v4 = x4_waitforsingleobject(hHandle, 0);
     if v4 == u32::MAX {
         return LogDiagnosticEventWithStatus(retaddr, 153, v5, v6);
     }
@@ -591,7 +591,7 @@ pub unsafe fn QueryAndValidateSemaphoreCount(hHandle: HANDLE, a2: *mut i32) -> i
         if v4 != 0 {
             // v4 == 258 (WAIT_TIMEOUT)
             let mut v13 = 0i32;
-            if ReleaseSemaphore(hHandle, 1, &mut v13) == 0 {
+            if x4_releasesemaphore(hHandle, 1, &mut v13) == 0 {
                 return LogDiagnosticEventWithStatus(retaddr, 177, v5, v6);
             }
             if v13 != 0 {
@@ -600,13 +600,13 @@ pub unsafe fn QueryAndValidateSemaphoreCount(hHandle: HANDLE, a2: *mut i32) -> i
                 TraceProviderEvent(retaddr as u64, v9 as u64, v5, status);
                 return 2147549183i64;
             }
-            if ReleaseSemaphore(hHandle, 1, core::ptr::null_mut()) != 0 || GetLastError() != 298 {
+            if x4_releasesemaphore(hHandle, 1, core::ptr::null_mut()) != 0 || x4_getlasterror() != 298 {
                 v9 = 181;
                 let status = -2147418113;
                 TraceProviderEvent(retaddr as u64, v9 as u64, v5, status);
                 return 2147549183i64;
             }
-            let v10 = WaitForSingleObject(hHandle, 0);
+            let v10 = x4_waitforsingleobject(hHandle, 0);
             if v10 == u32::MAX {
                 return LogDiagnosticEventWithStatus(retaddr, 184, v5, v6);
             }
@@ -618,11 +618,11 @@ pub unsafe fn QueryAndValidateSemaphoreCount(hHandle: HANDLE, a2: *mut i32) -> i
             }
         } else {
             // v4 == 0 (WAIT_OBJECT_0)
-            if ReleaseSemaphore(previous_count, 1, hHandle) == 0 {
+            if x4_releasesemaphore(previous_count, 1, hHandle) == 0 {
                 return LogDiagnosticEventWithStatus(retaddr, 162, v5, v6);
             }
             previous_count += 1;
-            if ReleaseSemaphore(hHandle, 1, core::ptr::null_mut()) != 0 || GetLastError() != 298 {
+            if x4_releasesemaphore(hHandle, 1, core::ptr::null_mut()) != 0 || x4_getlasterror() != 298 {
                 v9 = 167;
                 let status = -2147418113;
                 TraceProviderEvent(retaddr as u64, v9 as u64, v5, status);
@@ -652,7 +652,7 @@ pub unsafe fn DispatchCallbacks(
     }
 
     if !SRWLock.is_null() {
-        AcquireSRWLockShared(SRWLock);
+        x4_acquiresrwlockshared(SRWLock);
     }
 
     let base_ptr = lpCriticalSection as *mut u8;
@@ -667,7 +667,7 @@ pub unsafe fn DispatchCallbacks(
     let total_callbacks = (lock_count_val.wrapping_sub(debug_info_val)) >> 4;
 
     if !SRWLock.is_null() {
-        ReleaseSRWLockShared(SRWLock);
+        x4_releasesrwlockshared(SRWLock);
     }
 
     let mut current_index: usize = 0;
@@ -675,9 +675,9 @@ pub unsafe fn DispatchCallbacks(
         let mut callback_fn: Option<unsafe extern "fastcall" fn(u64)> = None;
         let mut callback_arg: u64 = 0;
 
-        EnterCriticalSection(lpCriticalSection);
+        x4_entercriticalsection(lpCriticalSection);
         if !SRWLock.is_null() {
-            AcquireSRWLockExclusive(SRWLock);
+            x4_acquiresrwlockexclusive(SRWLock);
         }
 
         if (current_index as u64) < total_callbacks {
@@ -724,7 +724,7 @@ pub unsafe fn DispatchCallbacks(
         }
 
         if !SRWLock.is_null() {
-            ReleaseSRWLockExclusive(SRWLock);
+            x4_releasesrwlockexclusive(SRWLock);
         }
 
         if let Some(func) = callback_fn {
@@ -732,7 +732,7 @@ pub unsafe fn DispatchCallbacks(
             func(callback_arg);
         }
 
-        LeaveCriticalSection(lpCriticalSection);
+        x4_leavecriticalsection(lpCriticalSection);
     }
 }
 
@@ -750,7 +750,7 @@ pub unsafe fn CleanupFrameTracking(p_frame_array: *mut u8) -> i32 {
         let telemetry_hash2: u64 = 0x418A073AA3BC2C75;
 
         let hashes = [telemetry_hash0, telemetry_hash1, telemetry_hash2];
-        result = EtwWriteTransfer(hashes.as_ptr() as u64 as __int64, 3, p_frame_array as u64 as __int64);
+        result = x4_etwwritetransfer(hashes.as_ptr() as u64 as __int64, 3, p_frame_array as u64 as __int64);
     }
 
     // Check pFrameArray[120]
@@ -760,7 +760,7 @@ pub unsafe fn CleanupFrameTracking(p_frame_array: *mut u8) -> i32 {
         let telemetry_hash2: u64 = 0x418A073AA3BC4475;
 
         let hashes = [telemetry_hash0, telemetry_hash1, telemetry_hash2];
-        result = EtwWriteTransfer(hashes.as_ptr() as u64 as __int64, 3, p_frame_array.add(64) as u64 as __int64);
+        result = x4_etwwritetransfer(hashes.as_ptr() as u64 as __int64, 3, p_frame_array.add(64) as u64 as __int64);
     }
 
     // Check pFrameArray[184]
@@ -780,7 +780,7 @@ pub unsafe fn CleanupFrameTracking(p_frame_array: *mut u8) -> i32 {
             telemetry_hash4,
             telemetry_hash5,
         ];
-        return EtwWriteTransfer(hashes.as_ptr() as __int64, 6, p_frame_array.add(128) as __int64);
+        return x4_etwwritetransfer(hashes.as_ptr() as __int64, 6, p_frame_array.add(128) as __int64);
     }
 
     result
@@ -799,7 +799,7 @@ pub unsafe fn SyncBuffers(p_context_block: *mut u8) -> i64 {
     InitContextInternalPools(*p_context_block as *mut SharedContextBlock);
 
     let lock_ptr = p_context_block as SRWLOCK;
-    AcquireSRWLockExclusive(lock_ptr);
+    x4_acquiresrwlockexclusive(lock_ptr);
 
     // Note: Replace these byte offsets (.add(N)) with your exact resolved struct layout offsets
     // corresponding to the `?` placeholder fields in the decompiler.
@@ -822,7 +822,7 @@ pub unsafe fn SyncBuffers(p_context_block: *mut u8) -> i64 {
         SwapLaneSnapshots(v5.as_mut_ptr(), dest_ptr);
     }
 
-    ReleaseSRWLockExclusive(lock_ptr as PSRWLOCK);
+    x4_releasesrwlockexclusive(lock_ptr as PSRWLOCK);
 
     CleanupFrameTracking(lane_frame0.as_mut_ptr());
     FreeLanePayloadBuffers(lane_frame0.as_mut_ptr() as *mut u64);
@@ -857,8 +857,8 @@ pub unsafe fn SwapLaneSnapshots(
     let p_orphaned_memory0 = *(p_dest_slot.add(48) as *const *mut core::ffi::c_void);
     *(p_dest_slot.add(48) as *mut *mut core::ffi::c_void) = new_src_buffer;
     if !p_orphaned_memory0.is_null() {
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, p_orphaned_memory0);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, p_orphaned_memory0);
     }
 
     // Restore saved destination snapshot data into source slot
@@ -869,8 +869,8 @@ pub unsafe fn SwapLaneSnapshots(
     let p_orphaned_memory1 = *(p_src_slot.add(48) as *const *mut core::ffi::c_void);
     *(p_src_slot.add(48) as *mut *mut core::ffi::c_void) = old_dest_buffer;
     if !p_orphaned_memory1.is_null() {
-        let proc_heap_handle = GetProcessHeap();
-        HeapFree(proc_heap_handle, 0, p_orphaned_memory1);
+        let proc_heap_handle = x4_getprocessheap();
+        x4_heapfree(proc_heap_handle, 0, p_orphaned_memory1);
     }
 
     // Replicate trailer and alignment padding byte swaps at the end of the function.
@@ -923,9 +923,9 @@ pub unsafe fn LookupExistingSharedContext(
     StringCchCatW(sem_name_buffer.as_mut_ptr(), 260, suffix_p0.as_ptr());
 
     // Open primary semaphore
-    let h_primary_semaphore = OpenSemaphoreW(0x1F0003, 0, sem_name_buffer.as_ptr());
+    let h_primary_semaphore = x4_opensemaphorew(0x1F0003, 0, sem_name_buffer.as_ptr());
     if h_primary_semaphore.is_null() || h_primary_semaphore == (-1isize as HANDLE) {
-        if GetLastError() != 2 {
+        if x4_getlasterror() != 2 {
             let v11 = 0;
             let v12 = 0;
             return LogDiagnosticEventWithStatus(retaddr, 205, v11, v12);
@@ -940,7 +940,7 @@ pub unsafe fn LookupExistingSharedContext(
     if primary_status < 0 {
         let v15 = 0;
         TraceProviderEvent(retaddr as u64, 211, v15, primary_status as u64);
-        if CloseHandle(h_primary_semaphore) == 0 {
+        if x4_closehandle(h_primary_semaphore) == 0 {
             HandleHandleCloseError(*core::ptr::null_mut(), 2525, 0, 0);
         }
         return primary_status;
@@ -951,12 +951,12 @@ pub unsafe fn LookupExistingSharedContext(
     StringCchCatW(sem_name_buffer.as_mut_ptr(), 260, suffix_h.as_ptr());
 
     // Open secondary semaphore
-    let h_secondary_semaphore = OpenSemaphoreW(0x1F0003, 0, sem_name_buffer.as_ptr());
+    let h_secondary_semaphore = x4_opensemaphorew(0x1F0003, 0, sem_name_buffer.as_ptr());
     if h_secondary_semaphore.is_null() || h_secondary_semaphore == (-1isize as HANDLE) {
         let v18 = 0;
         let v19 = 0;
         let log_res = LogDiagnosticEventWithStatus(retaddr, 217, v18, v19);
-        if CloseHandle(h_primary_semaphore) == 0 {
+        if x4_closehandle(h_primary_semaphore) == 0 {
             HandleHandleCloseError(*core::ptr::null_mut(), 2525, 0, 0);
         }
         return log_res;
@@ -964,13 +964,13 @@ pub unsafe fn LookupExistingSharedContext(
 
     let secondary_status = QueryAndValidateSemaphoreCount(h_secondary_semaphore, &mut v24);
     if secondary_status >= 0 {
-        if CloseHandle(h_secondary_semaphore) == 0 {
+        if x4_closehandle(h_secondary_semaphore) == 0 {
             HandleHandleCloseError(*core::ptr::null_mut(), 2525, 0, 0);
         }
         if !ptpOutCachedAddress.is_null() {
             *ptpOutCachedAddress = (v25[0] as u64) | ((v24 as u64) << 31);
         }
-        if CloseHandle(h_primary_semaphore) == 0 {
+        if x4_closehandle(h_primary_semaphore) == 0 {
             HandleHandleCloseError(*core::ptr::null_mut(), 2525, 0, 0);
         }
         return 0;
@@ -978,10 +978,10 @@ pub unsafe fn LookupExistingSharedContext(
 
     let v22 = 0;
     TraceProviderEvent(retaddr as u64, 219, v22, secondary_status as u64);
-    if CloseHandle(h_secondary_semaphore) == 0 {
+    if x4_closehandle(h_secondary_semaphore) == 0 {
         HandleHandleCloseError(*core::ptr::null_mut(), 2525, 0, 0);
     }
-    if CloseHandle(h_primary_semaphore) == 0 {
+    if x4_closehandle(h_primary_semaphore) == 0 {
         HandleHandleCloseError(*core::ptr::null_mut(), 2525, 0, 0);
     }
     secondary_status
@@ -999,8 +999,8 @@ pub unsafe fn CreateOrOpenSemaphoreW(
 ) -> u32 {
     let status: u32 = 0;
 
-    // CreateSemaphoreExW with sem_all_access (0x1F0003)
-    let hSemaphore = CreateSemaphoreExW(
+    // x4_createsemaphoreexw with sem_all_access (0x1F0003)
+    let hSemaphore = x4_createsemaphoreexw(
         core::ptr::null_mut(),
         lInitialCount,
         lMaximumCount,
@@ -1010,21 +1010,21 @@ pub unsafe fn CreateOrOpenSemaphoreW(
     );
 
     if !hSemaphore.is_null() {
-        GetLastError();
+        x4_getlasterror();
 
         if !ptpOutHandle.is_null() {
             let hOldHandle = *ptpOutHandle;
             if !hOldHandle.is_null() {
-                let last_error = GetLastError();
-                if CloseHandle(hOldHandle) == 0 {
+                let last_error = x4_getlasterror();
+                if x4_closehandle(hOldHandle) == 0 {
                     HandleHandleCloseError(0, 2525, 0, 0);
                 }
-                SetLastError(last_error);
+                x4_setlasterror(last_error);
             }
             *ptpOutHandle = hSemaphore;
         }
     } else {
-        return GetLastError();
+        return x4_getlasterror();
     }
 
     status
@@ -1040,11 +1040,11 @@ pub unsafe fn SafeResetThreadpoolTimer(
 
     let pTimer = *ppOldTimerSlot;
     if !pTimer.is_null() {
-        let last_error = GetLastError();
-        SetThreadpoolTimer(pTimer, core::ptr::null(), 0, 0);
-        WaitForThreadpoolTimerCallbacks(pTimer, 1);
-        CloseThreadpoolTimer(pTimer);
-        SetLastError(last_error);
+        let last_error = x4_getlasterror();
+        x4_setthreadpooltimer(pTimer, core::ptr::null(), 0, 0);
+        x4_waitforthreadpooltimercallbacks(pTimer, 1);
+        x4_closethreadpooltimer(pTimer);
+        x4_setlasterror(last_error);
     }
 
     *ppOldTimerSlot = pNewTimer;
@@ -1080,6 +1080,6 @@ pub unsafe fn SetRelativeTimer(a1: *mut TP_TIMER, a2: u32) {
 
     if dword_14046B7E8 == 0 {
         // 0x1388u = 5000 milliseconds window length
-        SetThreadpoolTimer(a1, &pft_due_time, 0, 0x1388);
+        x4_setthreadpooltimer(a1, &pft_due_time, 0, 0x1388);
     }
 }

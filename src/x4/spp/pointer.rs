@@ -1,5 +1,5 @@
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{GetProcessHeap, HeapAlloc, HeapFree};
+use crate::x4::externals::{x4_getprocessheap, x4_heapalloc, x4_heapfree};
 use crate::x4::globals::E_OUTOFMEMORY;
 use crate::x4::spp::safe::SppSafeIntAdd;
 use crate::x4::types::{PointerVector, HRESULT, SIZE_T};
@@ -17,8 +17,8 @@ pub unsafe fn PointerVectorResize(a1: *mut PointerVector, a2: i32) -> HRESULT {
 
         if a2 > 0 {
             LogTraceEvent(0);
-            let process_heap = GetProcessHeap();
-            let v8 = HeapAlloc(process_heap, 0, (8 * v3) as usize as SIZE_T) as *mut *mut core::ffi::c_void;
+            let process_heap = x4_getprocessheap();
+            let v8 = x4_heapalloc(process_heap, 0, (8 * v3) as usize as SIZE_T) as *mut *mut core::ffi::c_void;
             v5 = v8;
 
             if v8.is_null() {
@@ -46,8 +46,8 @@ pub unsafe fn PointerVectorResize(a1: *mut PointerVector, a2: i32) -> HRESULT {
                     let v14 = *v13 as *mut u8;
                     // Replicates the `v14 - 4` header offset from the C code
                     let adjusted_ptr = v14.offset(-4) as *mut core::ffi::c_void;
-                    let process_heap = GetProcessHeap();
-                    HeapFree(process_heap, 0, adjusted_ptr);
+                    let process_heap = x4_getprocessheap();
+                    x4_heapfree(process_heap, 0, adjusted_ptr);
                     LogTraceEvent(0);
                     *v13 = core::ptr::null_mut();
                 }
@@ -59,8 +59,8 @@ pub unsafe fn PointerVectorResize(a1: *mut PointerVector, a2: i32) -> HRESULT {
 
         let v16 = (*a1).elements;
         if !v16.is_null() {
-            let process_heap = GetProcessHeap();
-            HeapFree(process_heap, 0, v16 as *mut core::ffi::c_void);
+            let process_heap = x4_getprocessheap();
+            x4_heapfree(process_heap, 0, v16 as *mut core::ffi::c_void);
             (*a1).elements = core::ptr::null_mut();
         }
 
@@ -231,8 +231,8 @@ pub unsafe fn PointerVectorPushBack(
     if !target_slot.is_null() {
         let v19 = target_slot as *mut u8;
         let adjusted_ptr = v19.offset(-4) as *mut core::ffi::c_void;
-        let process_heap = GetProcessHeap();
-        HeapFree(process_heap, 0, adjusted_ptr);
+        let process_heap = x4_getprocessheap();
+        x4_heapfree(process_heap, 0, adjusted_ptr);
         LogTraceEvent(0);
     }
 

@@ -1,6 +1,6 @@
 use core::ffi::{c_void, VaList};
 use crate::x4::error::{HandleSubsystemError, LogTraceEvent};
-use crate::x4::externals::{memcmp, GetProcessHeap, _vsnwprintf, HeapAlloc, LocalAlloc, memcpy, HeapFree, LocalFree, wcschr, towlower};
+use crate::x4::externals::{memcmp, x4_getprocessheap, x4__vsnwprintf, x4_heapalloc, x4_localalloc, memcpy, x4_heapfree, x4_localfree, wcschr, towlower};
 use crate::x4::globals::{COR_E_OVERFLOW, E_INVALIDARG, E_NOT_VALID_STATE, E_OUTOFMEMORY, FALSE, GUID_FORMAT_STR, INTSAFE_E_ARITHMETIC_OVERFLOW, LMEM_ZEROINIT, MAX_BUILDER_CAPACITY, MAX_STRING_CCH, STRSAFE_E_INSUFFICIENT_BUFFER, STRSAFE_MAX_CCH, TRUE};
 use crate::x4::misc::SwapVectorBuffersAndFreeOrphans;
 use crate::x4::spp::format::SppFormatString;
@@ -60,8 +60,8 @@ pub unsafe fn SppDuplicateString(
                 LogTraceEvent(status);
 
                 if status >= 0 {
-                    let heap = GetProcessHeap();
-                    let mem_ptr = HeapAlloc(heap, 0, alloc_size as usize as SIZE_T) as *mut u32;
+                    let heap = x4_getprocessheap();
+                    let mem_ptr = x4_heapalloc(heap, 0, alloc_size as usize as SIZE_T) as *mut u32;
 
                     if !mem_ptr.is_null() {
                         // Header stores original character length (4 bytes before string data)
@@ -146,7 +146,7 @@ pub unsafe fn SppDuplicateStringLocal(
         HandleSubsystemError(status);
     } else {
         let total_bytes = byte_len as usize;
-        let alloc_ptr = LocalAlloc(LMEM_ZEROINIT, total_bytes as SIZE_T) as *mut u16;
+        let alloc_ptr = x4_localalloc(LMEM_ZEROINIT, total_bytes as SIZE_T) as *mut u16;
 
         if alloc_ptr.is_null() {
             status = E_OUTOFMEMORY;
@@ -213,7 +213,7 @@ pub unsafe fn SppDuplicateStringLocal(
     LogTraceEvent(status);
 
     if !cleanup_ptr.is_null() {
-        LocalFree(cleanup_ptr as HLOCAL);
+        x4_localfree(cleanup_ptr as HLOCAL);
     }
 
     status
@@ -617,9 +617,9 @@ pub unsafe fn SppMarshalRegistryStringToContext(
     LogTraceEvent(status);
 
     if !cleanup_ptr.is_null() {
-        let process_heap = GetProcessHeap();
+        let process_heap = x4_getprocessheap();
         // Free heap allocation offset by 2 wchar_t characters (header/prefix bytes)
-        HeapFree(process_heap, 0, cleanup_ptr.offset(-2) as *mut c_void);
+        x4_heapfree(process_heap, 0, cleanup_ptr.offset(-2) as *mut c_void);
         LogTraceEvent(0);
     }
 
@@ -825,7 +825,7 @@ pub unsafe fn SppSelectAndDuplicateString(
     LogTraceEvent(status);
 
     if !cleanup_mem.is_null() {
-        LocalFree(cleanup_mem);
+        x4_localfree(cleanup_mem);
     }
 
     status
@@ -880,8 +880,8 @@ pub unsafe fn SppSplitString(
             }
 
             if !duped_token.is_null() {
-                let heap = GetProcessHeap();
-                HeapFree(heap, 0, duped_token.offset(-2) as *mut c_void);
+                let heap = x4_getprocessheap();
+                x4_heapfree(heap, 0, duped_token.offset(-2) as *mut c_void);
                 LogTraceEvent(0);
                 duped_token = core::ptr::null_mut();
                 dest_string = core::ptr::null_mut();
@@ -971,8 +971,8 @@ pub unsafe fn SppSplitString(
             PointerVectorResize(&mut result_vec, 0);
 
             if !result_vec.elements.is_null() {
-                let heap = GetProcessHeap();
-                HeapFree(heap, 0, result_vec.elements as *mut c_void);
+                let heap = x4_getprocessheap();
+                x4_heapfree(heap, 0, result_vec.elements as *mut c_void);
             }
         }
     }
@@ -980,16 +980,16 @@ pub unsafe fn SppSplitString(
     LogTraceEvent(status);
 
     if !duped_token.is_null() {
-        let heap = GetProcessHeap();
-        HeapFree(heap, 0, duped_token.offset(-2) as *mut c_void);
+        let heap = x4_getprocessheap();
+        x4_heapfree(heap, 0, duped_token.offset(-2) as *mut c_void);
         LogTraceEvent(0);
     }
 
     PointerVectorResize(&mut temp_vec, 0);
 
     if !temp_vec.elements.is_null() {
-        let heap = GetProcessHeap();
-        HeapFree(heap, 0, temp_vec.elements as *mut c_void);
+        let heap = x4_getprocessheap();
+        x4_heapfree(heap, 0, temp_vec.elements as *mut c_void);
     }
 
     status
@@ -1271,8 +1271,8 @@ pub unsafe fn SppStringBuilderResize(
         2 * (element_count as usize)
     };
 
-    let heap = GetProcessHeap();
-    let new_buffer = HeapAlloc(heap, 0, bytes_to_alloc as SIZE_T) as *mut u16;
+    let heap = x4_getprocessheap();
+    let new_buffer = x4_heapalloc(heap, 0, bytes_to_alloc as SIZE_T) as *mut u16;
 
     if new_buffer.is_null() {
         status = E_OUTOFMEMORY;
@@ -1296,8 +1296,8 @@ pub unsafe fn SppStringBuilderResize(
 
     // Release old buffer if allocated
     if !builder_ref.buffer.is_null() {
-        let heap = GetProcessHeap();
-        HeapFree(heap, 0, builder_ref.buffer as *mut c_void);
+        let heap = x4_getprocessheap();
+        x4_heapfree(heap, 0, builder_ref.buffer as *mut c_void);
     }
 
     builder_ref.buffer = new_buffer;
@@ -1378,7 +1378,7 @@ pub unsafe fn SppStringCchVPrintfW(
         let max_chars = cchDest - 1;
         status = 0;
 
-        let written = _vsnwprintf(pszDest, max_chars, pszFormat, argList);
+        let written = x4__vsnwprintf(pszDest, max_chars, pszFormat, argList);
 
         if written < 0 || (written as usize) > max_chars {
             status = STRSAFE_E_INSUFFICIENT_BUFFER;
@@ -1443,9 +1443,9 @@ pub unsafe fn SppStringFromGuid(
     LogTraceEvent(hr);
 
     if !string_to_free.is_null() {
-        let heap = GetProcessHeap();
+        let heap = x4_getprocessheap();
         // The allocated memory buffer header offset (-2 wchars)
-        HeapFree(heap, 0, string_to_free.offset(-2) as *mut c_void);
+        x4_heapfree(heap, 0, string_to_free.offset(-2) as *mut c_void);
         LogTraceEvent(0);
     }
 

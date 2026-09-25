@@ -8,8 +8,7 @@ use core::ffi::c_void;
 use core::ptr::null;
 use core::time::Duration;
 use log::error;
-use crate::x4;
-use crate::x4::ops::to_u16s;
+use crate::string_utils::to_u16s;
 
 // #[derive(Debug)]
 // pub struct Thread {

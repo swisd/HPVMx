@@ -1,5 +1,5 @@
 use core::ptr;
-use crate::x4::externals::{memcpy_s, GetProcessHeap, HeapFree, SetLastError, GetLastError};
+use crate::x4::externals::{memcpy_s, x4_getprocessheap, x4_heapfree, x4_setlasterror, x4_getlasterror};
 use crate::x4::helpers::AllocateFromHeap;
 use crate::x4::types::VectorLayout;
 
@@ -21,7 +21,7 @@ pub unsafe fn ReallocVectorBufferWithCacheAlignment64(
     }
 
     let v6 = (v3 & 0xFFFFFFFFFFFFFFC0) + 64;
-    let LastError = GetLastError();
+    let LastError = x4_getlasterror();
     let v8 = AllocateFromHeap(0, v6) as *mut u8;
     let v9: i8 = 0;
     let v10 = v8;
@@ -36,18 +36,18 @@ pub unsafe fn ReallocVectorBufferWithCacheAlignment64(
         (*vec).pAllocation = v10;
 
         if !pAllocation.is_null() {
-            let ProcessHeap = GetProcessHeap();
-            HeapFree(ProcessHeap, 0, pAllocation as *mut _);
+            let ProcessHeap = x4_getprocessheap();
+            x4_heapfree(ProcessHeap, 0, pAllocation as *mut _);
         }
 
         (*vec).pBegin = v10;
         (*vec).pEnd = v10.add(v11 as usize);
         (*vec).pCapacityEnd = v10.add(v6 as usize);
 
-        SetLastError(LastError);
+        x4_setlasterror(LastError);
         return 1;
     }
 
-    SetLastError(LastError);
+    x4_setlasterror(LastError);
     v9
 }

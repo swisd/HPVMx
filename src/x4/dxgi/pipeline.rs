@@ -1,6 +1,6 @@
 use crate::x4::dxgi::GetOrCreateRenderContextBlock;
 use crate::x4::dxgi::lane::{CleanupFrameTracking, FreeLanePayloadBuffers, InitContextInternalPools, SwapLaneSnapshots};
-use crate::x4::externals::{DeleteCriticalSection, GetCurrentThreadId, GetProcessHeap, HeapFree};
+use crate::x4::externals::{x4_deletecriticalsection, x4_getcurrentthreadid, x4_getprocessheap, x4_heapfree};
 use crate::x4::globals::{GlobalPfnPresentFallback, GlobalPfnPresentPrimary, _guard_check_icall_fptr};
 use crate::x4::types::{PipelineBindingDescriptor, PipelineCoordinator, RenderContextBlock, SharedContextBlock, ThreadContextNode};
 
@@ -44,12 +44,12 @@ pub unsafe fn PipelineCoordinatorDestroy(a1: *mut PipelineCoordinator) {
     (*a1).dynamic_state_array = core::ptr::null_mut();
 
     if !dynamic_state_array.is_null() {
-        let ProcessHeap = GetProcessHeap();
-        HeapFree(ProcessHeap, 0, dynamic_state_array as *mut _);
+        let ProcessHeap = x4_getprocessheap();
+        x4_heapfree(ProcessHeap, 0, dynamic_state_array as *mut _);
     }
 
     // Clean up concurrency lock and bucket buffers
-    DeleteCriticalSection(&mut (*a1).lane_lock);
+    x4_deletecriticalsection(&mut (*a1).lane_lock);
     FreeLanePayloadBuffers((*a1).thread_buckets);
 }
 
@@ -77,7 +77,7 @@ pub unsafe fn GetThreadLocalPipelineContext() -> *mut ThreadContextNode {
         let v3 = ((render_context as u64).wrapping_add(32) & condition_mask) as *mut PipelineCoordinator;
 
         if !v3.is_null() {
-            let CurrentThreadId = GetCurrentThreadId();
+            let CurrentThreadId = x4_getcurrentthreadid();
 
             // thread_buckets[CurrentThreadId % 0xAuLL]
             let bucket_index = (CurrentThreadId as u64 % 0xAu64) as usize;

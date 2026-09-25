@@ -1,7 +1,7 @@
 use core::ffi::c_void;
 use core::result;
 use crate::vdebug_autoprefix;
-use crate::x4::externals::NtCurrentTeb;
+use crate::x4::externals::x4_ntcurrentteb;
 use crate::x4::globals::{BreakCode, GlobalEtwEventRegister, _guard_check_icall_fptr};
 use crate::x4::helpers::HResultToNtStatus;
 use crate::x4::ops::__fastfail;
@@ -133,7 +133,7 @@ pub  fn TerminateExecutionStub() {
     });
 }
 pub unsafe fn HandleFatalRelocError() {
-    let teb = NtCurrentTeb();
+    let teb = x4_ntcurrentteb();
     let mut stack_limit = (*teb).nt_tib.stack_limit as *mut *const c_void;
 
     // Define the local stack variable anchor (v1)
