@@ -77,7 +77,7 @@ pub unsafe fn load_and_jump_os(path: &str) -> ! {
     };
 
 
-    far_fn_addr!(entry_fn, extern "C" fn(fb: *mut u32, size: usize) -> !);
+    far_fn_addr!(entry_fn, extern "system" fn(fb: *mut u32, size: usize) -> !);
     (entry_fn(actual_jump_address).unwrap())(fb_ptr as *mut u32, fb_size)
 
 }

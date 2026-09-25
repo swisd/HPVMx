@@ -26,10 +26,10 @@ fn mix_state_mersenne_mod3529_add_high_dword(a1: i64, a2: &mut [u32; 2], a3: u8)
     let v3 = a3 as i32 - 765773044;
     // unsigned __int64 v4; // rax
     let v4 = 3529194252u64
-        * (3529194252u64 * (((v3 as u64 + a2[1] as u64) << 32) >> 32)) >> 32;
+        * (3529194252u64 * __PAIR64__(v3 as u32 + a2[1], v3 as u32 + a2[1])) >> 32;
     // __int64 v5; // rax
     let v5 = 3529194252i64
-        * (2 * ((v4 >> 32) as i32) as i64
+        * (2 * /*((v4 >> 32) as i32) as i64*/ HIDWORD!(v4) as i64
         - ((((v4 as i32) >> 31) & 0x7FFFFFFF) as i64)
         + (v4 as i32) as i64
         - 0x7FFFFFFF
@@ -79,7 +79,6 @@ fn mix_state_ror27_high_mul1446(a1: i64, a2: &mut [u32; 2], a3: u8) -> i64 {
     result
 }
 
-
 /*__int64 __fastcall MixState_DualRor19_3_Rol20339(__int64 a1, _DWORD *a2, unsigned __int8 a3)
 {
 int v3; // r8d
@@ -99,18 +98,16 @@ fn mix_state_dual_ror19_3_rol20339(a1: i64, a2: &mut [u32; 2], a3: u8) -> i64 {
     // int v3; // r8d
     let v3 = a3 as i32 - 1052177357;
     // int v4; // eax
-    let v4 = (-1052177357i32 as i64)
-        .wrapping_mul(((3242789939u32 as u64 * ((v3 as u64 + a2[1] as u64) as i64 as u64)) >> 32) as i64)
-        .rotate_right(19) as i32;
+    let v4 = __ROR4__((-1052177357i32 as i64)
+        .wrapping_mul(((3242789939u32 as u64 * ((v3 as u64 + a2[1] as u64) as i64 as u64)) >> 32) as i64),19) as i32;
     // int v5; // ecx
-    let v5 = v4.rotate_right(3) ^ (20339 * v4).rotate_left(3);
+    let v5 = __ROR4__(v4,3) ^ __ROL4__((20339 * v4),3);
     a2[1] = v5 as u32;
     // __int64 result; // rax
     let result = (v5 + v3) as u32 as i64;
     a2[0] = a2[0].wrapping_add(result as u32);
     result
 }
-
 
 /*__int64 __fastcall MixState_MersenneMod2123_RorRol2403(__int64 a1, _DWORD *a2, unsigned __int8 a3)
 {
@@ -156,20 +153,20 @@ fn mix_state_mersenne_mod2123_ror_rol2403(a1: i64, a2: &mut [u32; 2], a3: u8) ->
     //  + v7
     //  - 0x7FFFFFFF
     //  + (((2 * HIDWORD(v7) - (((int)v7 >> 31) & 0x7FFFFFFF) + (int)v7 - 0x7FFFFFFF) >> 31) & 0x7FFFFFFF)
-    let v8 = (2 * ((v7 >> 32) as i32))
+    let v8 = (2 * HIDWORD!(v7))
         - (((v7 as u32 as i32) >> 31) & 0x7FFFFFFF)
         + (v7 as i32)
         - 0x7FFFFFFF
-        + (((((2 * ((v7 >> 32) as i32))
+        + (((((2 * HIDWORD!(v7))
         - (((v7 as u32 as i32) >> 31) & 0x7FFFFFFF)
         + (v7 as i32)
         - 0x7FFFFFFF)
         >> 31)
-        & 0x7FFFFFFF) as i32);
+        & 0x7FFFFFFF));
 
     // LODWORD(v7): __ROR4__(v8, 11) ^ __ROL4__(2403 * v8, 11)
-    let ror4_v8_11 = v8.rotate_right(11);
-    let rol4_2403_v8_11 = (2403 * v8).rotate_left(11);
+    let ror4_v8_11 = __ROR4__(v8,11);
+    let rol4_2403_v8_11 = __ROR4__((2403 * v8),11);
     let v7 = ror4_v8_11 ^ rol4_2403_v8_11;
 
     a2[1] = v7 as u32;
@@ -182,8 +179,6 @@ fn mix_state_mersenne_mod2123_ror_rol2403(a1: i64, a2: &mut [u32; 2], a3: u8) ->
 
     result
 }
-
-
 
 /*__int64 __fastcall MixState_MersenneRor2(__int64 a1, _DWORD *a2, unsigned __int8 a3)
 {
@@ -236,8 +231,6 @@ fn mix_state_mersenne_ror2(a1: i64, a2: &mut [u32; 2], a3: u8) -> i64 {
     result
 }
 
-
-
 /*__int64 __fastcall MixState_XorMul52700(__int64 a1, _DWORD *a2, unsigned __int8 a3)
 {
 int v4; // r9d
@@ -269,8 +262,6 @@ fn mix_state_xor_mul_52700(a1: i64, a2: &mut [u32; 2], a3: u8) -> i64 {
     a2[0] = a2[0].wrapping_add(result as u32);
     result
 }
-
-
 
 /*__int64 __fastcall MixState_MersenneMod3127(__int64 a1, _DWORD *a2, unsigned __int8 a3)
 {
@@ -333,8 +324,6 @@ fn mix_state_mersenne_mod3127(a1: i64, a2: &mut [u32; 2], a3: u8) -> i64 {
     result as i64
 }
 
-
-
 /*__int64 __fastcall MixState_DualRor13_HighMul2203(__int64 a1, _DWORD *a2, unsigned __int8 a3)
 {
 int v4; // r8d
@@ -362,10 +351,6 @@ fn mix_state_dual_ror13_high_mul2203(a1: i64, a2: &mut [u32; 2], a3: u8) -> i64 
     a2[0] = a2[0].wrapping_add(result);
     result as i64
 }
-
-
-
-
 
 /*__int64 __fastcall MixState_DualRor18_RorRol14_23570(__int64 a1, _DWORD *a2, unsigned __int8 a3)
 {
@@ -396,7 +381,6 @@ fn mix_state_dual_ror18_rorrol14_23570(a1: i64, a2: &mut [u32; 2], a3: u8) -> i6
     a2[0] = a2[0].wrapping_add(result as u32);
     return result;
 }
-
 
 /*__int64 __fastcall MixState_RorRol28850(__int64 ctxRef, _DWORD *pStateBuffer, unsigned __int8 salt)
 {

@@ -72,8 +72,6 @@ unsafe fn security_init_cookie() -> usize {
     cookie_complement
 }
 
-
-
 /*void __cdecl _security_check_cookie(uintptr_t StackCookie)
 {
 __int64 v1; // rcx
@@ -135,7 +133,6 @@ unk_14046ACE0 = _security_cookie_complement;
 HandlerData[2] = (PVOID)_security_cookie_complement;
 _raise_securityfailure((struct _EXCEPTION_POINTERS *)&ExceptionInfo);
 }*/
-
 // #[noreturn]
 unsafe /*extern "fastcall"*/ fn report_gsfailure(corrupted_cookie: usize) {
     // let mut function_entry: *mut _RUNTIME_FUNCTION; // FunctionEntry

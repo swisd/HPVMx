@@ -17,7 +17,7 @@ use uefi::data_types::CStr16;
 use uefi::{Handle, Identify};
 use uefi::proto::device_path::DevicePath;
 use uefi::proto::device_path::text::{AllowShortcuts, DisplayOnly};
-use uefi::proto::media::file::{File, FileMode, FileAttribute, FileInfo, FileHandle};
+use uefi::proto::media::file::{File, FileMode, FileAttribute, FileInfo, FileHandle, FileType};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi_raw::protocol::device_path::{DeviceSubType, DeviceType};
 use crate::hpvmlog::LogEntry;
@@ -424,10 +424,26 @@ impl FileSystem {
         let mut root = Self::get_root(drive.as_deref())?;
         let path_cstr = Self::path_to_cstr16(path)?;
 
-        let file = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
+        // 1. Open the file (creates it if missing, opens it if it exists)
+        let mut file_handle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
             .map_err(|_| "Failed to create file")?;
 
-        Ok(file)
+        // 2. Fetch the file info to see if it already contains data
+        let mut buffer = [0u8; 128];
+        let file_info = file_handle.get_info::<FileInfo>(&mut buffer)
+            .map_err(|_| "Failed to get file info")?;
+
+        // 3. If it already exists and has contents, delete it and recreate it empty
+        if file_info.file_size() > 0 {
+            // delete() closes and removes the file, consuming the handle
+            file_handle.delete().map_err(|_| "Failed to delete existing file")?;
+
+            // Re-open/create a completely fresh, 0-byte file
+            file_handle = root.open(path_cstr, FileMode::CreateReadWrite, FileAttribute::empty())
+                .map_err(|_| "Failed to recreate empty file")?;
+        }
+
+        Ok(file_handle)
     }
 
 

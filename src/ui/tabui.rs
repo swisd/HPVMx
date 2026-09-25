@@ -2597,11 +2597,15 @@ pub mod network {
 // 7. Console Tab (Hypervisor Real-time Log & Command Line)
 // =========================================================================
 pub mod console {
+    use alloc::borrow::ToOwned;
+    use alloc::boxed::Box;
     use super::*;
+    
+    static mut PREFIX: &str = "HPVMx";
 
     pub fn draw(ui: &DashboardUI, pg: &mut PixelGraphics, _x: usize, _y: usize, width: usize, height: usize) {
         let margin = 16usize;
-        pg.draw_text(20, 100, "Hypervisor Real-time Log", 0x00FF00);
+        //pg.draw_text(20, 100, "Hypervisor Real-time Log", 0x00FF00);
         let logs = crate::hpvmlog::get_logs();
         pg.draw_log_viewer(
             margin,
@@ -2621,7 +2625,17 @@ pub mod console {
             pg.draw_rect_outline_adv(margin - 1, height.saturating_sub(96), (width.saturating_sub(margin * 8)) + 2, 37, 0x888844, 3, 0x0F0F0F0F);
         }
         pg.draw_text(margin + 5, height.saturating_sub(60), "press enter to send, end to enter type mode, and esc to exit", 0x888888);
-        pg.draw_text(margin + 5, height.saturating_sub(85), alloc::format!("HPVMx> {}", ui.term_buf).as_str(), 0xDDDDDD);
+        unsafe {
+            pg.draw_text(margin + 5, height.saturating_sub(85), alloc::format!("{}> {}", PREFIX, ui.term_buf).as_str(), 0xDDDDDD);
+        }
+    }
+
+    pub fn reset_prefix() {
+        unsafe { PREFIX = "HPVMx"; }
+    }
+
+    pub fn set_prefix(pre: String) {
+        unsafe { PREFIX = Box::leak(pre.clone().into_boxed_str()); }
     }
 
     pub fn logic(_ui: &mut DashboardUI) {}

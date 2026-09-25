@@ -7,6 +7,8 @@
 #![no_std]
 #![no_main]
 #![feature(const_heap)]
+#![feature(try_trait_v2)]
+#![feature(core_intrinsics)]
 extern crate alloc;
 
 mod ui;
@@ -50,6 +52,8 @@ mod version;
 mod hosting;
 mod testmodules;
 mod localmodules;
+mod xdb;
+mod exterals;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -61,6 +65,12 @@ pub use crate::micro_c::ir;
 pub use crate::micro_c::regalloc;
 pub use crate::micro_c::stackframe;
 pub use crate::micro_c::fs;
+pub use crate::xdb::interface;
+pub use crate::xdb::database;
+pub use crate::xdb::manager;
+pub use crate::xdb::cache;
+pub use crate::xdb::server;
+pub use crate::xdb::cmd_parser;
 
 
 pub fn get_total_physical_memory_mb() -> u32 {
@@ -70,7 +80,7 @@ pub fn get_total_physical_memory_mb() -> u32 {
 
 //extern crate alloc;
 use alloc::string::{String, ToString};
-use alloc::vec;
+use alloc::{format, vec};
 use alloc::vec::Vec;
 use core::fmt::Write;
 use core::ptr::addr_of_mut;
@@ -121,6 +131,12 @@ static mut PAGEFILE: Pagefile = Pagefile { header: PagefileHeader::DefaultHeader
 
 static mut MOUSE: Option<ScopedProtocol<Pointer>> = None;
 
+
+
+static REG_HIVE_PATHS: [&str; 3] = [
+    "/reg/hive/hive0.xdb", // Primary hive
+    "/reg/hive/hive1.xdb", // Secondary hive
+    "/reg/hive/hive2.xdb"];// Backup hive
 //use crate::graphics::Cursor;
 
 pub static mut GLOBALENV: Option<GlobalEnvironment> = None;
@@ -283,6 +299,14 @@ fn main() -> Status {
         }
     }
 
+    let mut dbserver0 = crate::xdb::open_db(REG_HIVE_PATHS[0]);
+    let mut out: String = dbserver0.parse_command(&"CREATE TABLE 1 superhive_meta ( id Int32 key Int32 name Text type Text data Text )".as_bytes().to_vec(), &mut Vec::new());
+    out += ";";
+    let mut out: String = dbserver0.parse_command(&format!("INSERT INTO 1 ROW 1 VALUES Int32(1) Int32(1) Text(\"version_str\") Text(\"String\") Text(\"{}\")", VersionGroup::from_env().format_to_string()).as_bytes().to_vec(), &mut Vec::new());
+    out += ";";
+    out += &*(dbserver0.parse_command(&"COMMIT".as_bytes().to_vec(), &mut Vec::new()));
+    let dbserver1 = crate::xdb::open_db(REG_HIVE_PATHS[1]);
+    let dbserver2 = crate::xdb::open_db(REG_HIVE_PATHS[2]);
 
     let _ = boot::set_watchdog_timer(0, 0, None);
 

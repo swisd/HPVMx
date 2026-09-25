@@ -367,6 +367,48 @@ where
     (value >> count) | (value << neg_count)
 }
 
+#[inline]
+pub fn __ROL2__<T>(value: T, count: i32) -> T
+where
+    T: Copy + core::ops::Shl<u32, Output=T> + core::ops::Shr<u32, Output=T> + core::ops::BitOr<Output=T>,
+{
+    let mask = (CHAR_BIT * size_of::<T>() - 1) as i32;
+    let count = (count & mask) as u32;
+    let neg_count = ((-(count as i32)) & mask) as u32;
+    (value << count) | (value >> neg_count)
+}
+
+#[inline]
+pub fn __ROR2__<T>(value: T, count: i32) -> T
+where
+    T: Copy + core::ops::Shl<u32, Output=T> + core::ops::Shr<u32, Output=T> + core::ops::BitOr<Output=T>,
+{
+    let mask = (CHAR_BIT * size_of::<T>() - 1) as i32;
+    let count = (count & mask) as u32;
+    let neg_count = ((-(count as i32)) & mask) as u32;
+    (value >> count) | (value << neg_count)
+}
+
+pub fn __ROR1__<T>(value: T, count: i32) -> T
+where
+    T: Copy + core::ops::Shl<u32, Output=T> + core::ops::Shr<u32, Output=T> + core::ops::BitOr<Output=T>,
+{
+    let mask = (CHAR_BIT * size_of::<T>() - 1) as i32;
+    let count = (count & mask) as u32;
+    let neg_count = ((-(count as i32)) & mask) as u32;
+    (value >> count) | (value << neg_count)
+}
+
+pub fn __ROL1__<T>(value: T, count: i32) -> T
+where
+    T: Copy + core::ops::Shl<u32, Output=T> + core::ops::Shr<u32, Output=T> + core::ops::BitOr<Output=T>,
+{
+    let mask = (CHAR_BIT * size_of::<T>() - 1) as i32;
+    let count = (count & mask) as u32;
+    let neg_count = ((-(count as i32)) & mask) as u32;
+    (value << count) | (value >> neg_count)
+}
+
 pub fn __CFADD__<T, U>(x: T, y: U) -> i8
 where
     T: Copy + core::ops::Add<U, Output=T> + PartialOrd,
@@ -376,45 +418,6 @@ where
 }
 
 
-// Type aliases
-pub type HANDLE = *mut core::ffi::c_void;
-pub type HRESULT = i32;
-pub type wchar_t = u16;
-pub type size_t = u64;
-pub type STRSAFE_LPWSTR = *mut wchar_t;
-pub type STRSAFE_LPCWSTR = *const wchar_t;
-
-pub type BYTE = u8;
-pub type WORD = u16;
-pub type DWORD = u32;
-pub type QWORD = u64;
-pub type OWORD = u128;
-
-pub type LONG = i32;
-pub type ULONG = u32;
-pub type ULONG_PTR = u64;
-pub type DWORD_PTR = u32;
-pub type WORD_PTR = u16;
-pub type BYTE_PTR = u8;
-
-pub type WCHAR = i16;
-pub type DWORD32 = i32;
-pub type QWORD64 = i64;
-
-pub type ULONGLONG = u64;
-pub type LONGLONG = i64;
-
-pub type USHORT = u16;
-pub type UCHAR = u8;
-
-// _M128A structure
-#[repr(C, align(16))]
-pub struct _M128A {
-    Low: ULONGLONG,
-    High: LONGLONG,
-}
-
-pub type M128A = _M128A;
 
 // Macros for byte extraction
 macro_rules! BYTE0 { ($val:expr) => { (($val as i64 >> 0) & 0xFF) as i8 }; }
@@ -453,8 +456,9 @@ macro_rules! HIDWORD { ($val:expr) => { ((($val as i64) >> 32) & 0xFFFFFFFF) as 
 pub (crate) use LODWORD;
 pub (crate) use HIDWORD;
 
-unsafe extern "C" {
-    pub fn __fastfail(Code: u32) -> !;
+
+pub fn __fastfail(Code: u32) /*-> !*/ {
+    vdebug_autoprefix!("fastfail {Code}")
 }
 
 
@@ -463,8 +467,10 @@ macro_rules! __offset {
 }
 
 macro_rules! __hex {
-    () => {};
+    ($($args:tt)*) => { $($args)* };
 }
+
 
 pub(crate) use __offset;
 pub(crate) use __hex;
+use crate::vdebug_autoprefix;

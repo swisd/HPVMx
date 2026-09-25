@@ -302,6 +302,7 @@
     <inspection_tool class="MysqlLoadDataPathInspection" enabled="false" level="WARNING" enabled_by_default="false" />
     <inspection_tool class="MysqlParsingInspection" enabled="false" level="WARNING" enabled_by_default="false" />
     <inspection_tool class="MysqlSpaceAfterFunctionNameInspection" enabled="false" level="ERROR" enabled_by_default="false" />
+    <inspection_tool class="NewCrateVersionAvailable" enabled="false" level="WARNING" enabled_by_default="false" />
     <inspection_tool class="NoTitleInspection" enabled="false" level="WARNING" enabled_by_default="false" />
     <inspection_tool class="NodeCoreCodingAssistance" enabled="false" level="WARNING" enabled_by_default="false" />
     <inspection_tool class="NonAsciiCharacters" enabled="false" level="WARNING" enabled_by_default="false" />
@@ -471,6 +472,7 @@
     <inspection_tool class="RsInternalPartlyUnknownType" enabled="true" level="WARNING" enabled_by_default="true" />
     <inspection_tool class="RsInternalUnexpandedMacro" enabled="true" level="WARNING" enabled_by_default="true" />
     <inspection_tool class="RsNonConstantInConstant" enabled="true" level="ERROR" enabled_by_default="true" />
+    <inspection_tool class="RsStaticConstNaming" enabled="false" level="WARNING" enabled_by_default="false" />
     <inspection_tool class="SassScssResolvedByNameOnly" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
     <inspection_tool class="SassScssUnresolvedMixin" enabled="false" level="WARNING" enabled_by_default="false" />
     <inspection_tool class="SassScssUnresolvedPlaceholderSelector" enabled="false" level="WARNING" enabled_by_default="false" />

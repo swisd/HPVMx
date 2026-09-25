@@ -3,6 +3,8 @@
 pub mod cpu;
 pub mod pci;
 pub mod sysinfo;
+pub mod apic;
+
 pub use cpu::{ap_count, core_count, CpuInfo};
 pub use cpu::mp;
 pub use sysinfo::SystemInformation;

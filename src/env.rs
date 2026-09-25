@@ -122,13 +122,14 @@ pub struct GlobalEnvironment {
     // pub user: EnvironmentVariable,
     // pub devname: EnvironmentVariable,
     // pub processor_count: EnvironmentVariable,
-    // pub os_version: EnvironmentVariable,
+    pub os_version: VersionGroup,
     pub data: GlobalEnvironmentData,
 }
 
 impl GlobalEnvironment {
     pub fn new() -> GlobalEnvironment {
         GlobalEnvironment {
+            os_version: VersionGroup::from_env(),
             data: GlobalEnvironmentData::new()
         }
     }
@@ -308,6 +309,7 @@ pub fn dummy_waker() -> Waker {
 }
 
 pub use crate::multipar::task::{TaskHandle, TaskId, ExecutorStats};
+use crate::version::VersionGroup;
 use crate::x4::counter::cvt;
 use crate::x4::ops::to_u16s;
 // use crate::x4::counter::cvt;

@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+use alloc::vec;
 use alloc::vec::Vec;
 use ordered_float::OrderedFloat;
 
@@ -696,22 +698,188 @@ where
     (f(x + h) - f(x - h)) / (2.0 * h)
 }
 
-// returns [P, Q, -R, R] where 4a^3 + 27b^2 != 0
-pub fn elliptic_curve(x: f64, a: f64, b: f64) -> Option<[f64; 4]> {
+/// y^2 = x^3 + ax + b where 4a^3 + 27b^2 neq 0
+///
+/// returns fn(x,y) for elliptic curve
+pub fn elliptic_curve(x: f64, a: f64, b: f64) -> Box<dyn Fn(f64, f64)> {
+    // Assert the smoothness/non-singularity condition
+    assert_ne!(4.0 * fpowi(a, 3) + 27.0 * fpowi(b, 2), 0.0, "The curve is singular!");
+
+    Box::new(move |x_val, y_val| {
+        // Outer `x`, `a`, and `b` are safely moved into the closure
+        let _residual = fpowi(y_val, 2) - (fpowi(x_val, 3) + a * x_val + b);
+    })
+}
+
+
+/// Returns [P, Q, -R, R] where P + Q = R on the elliptic curve y^2 = x^3 + ax + b
+pub fn elliptic_curve_add(
+    p: (f64, f64),
+    q: (f64, f64),
+    a: f64,
+    b: f64
+) -> Option<[(f64, f64); 4]> {
+    // 1. Verify the curve is non-singular
+    let discriminant = 4.0 * fpowi(a, 3) + 27.0 * fpowi(b, 2);
+    if discriminant == 0.0 {
+        return None;
+    }
+
+    // 2. Compute the slope (lambda) based on whether P == Q (doubling) or P != Q (addition)
+    let lambda = if p == q {
+        // Point doubling: slope = (3*x^2 + a) / (2*y)
+        if p.1 == 0.0 { return None; } // Tangent is vertical (point at infinity)
+        (3.0 * fpowi(p.0, 2) + a) / (2.0 * p.1)
+    } else {
+        // Point addition: slope = (y2 - y1) / (x2 - x1)
+        if p.0 == q.0 { return None; } // Vertical line (P + (-P) = Point at infinity)
+        (q.1 - p.1) / (q.0 - p.0)
+    };
+
+    // 3. Compute R.x = lambda^2 - p.x - q.x
+    let rx = fpowi(lambda, 2) - p.0 - q.0;
+
+    // 4. Compute R.y = lambda * (p.x - R.x) - p.y
+    let ry = lambda * (p.0 - rx) - p.1;
+
+    let r = (rx, ry);
+    let neg_r = (rx, -ry); // Inverse of R on an elliptic curve
+
+    Some([p, q, neg_r, r])
+}
+
+/// Evaluates the curve at x and returns [R, -R] as coordinate pairs
+pub fn elliptic_curve_lookup(x: f64, a: f64, b: f64) -> Option<[(f64, f64); 2]> {
     let discriminant = 4.0 * fpowi(a, 3) + 27.0 * fpowi(b, 2);
     if discriminant == 0.0 {
         return None;
     }
 
     let y_squared = fpowi(x, 3) + a * x + b;
-
-    // If negative, no real roots exist for this x
     if y_squared < 0.0 {
-        return None;
+        return None; // No real points at this x
     }
 
     let y = sqrt(y_squared);
 
-    // Returns [R.x, R.y, -R.x, -R.y]
-    Some([x, y, x, -y])
+    // Returns [R, -R]
+    Some([(x, y), (x, -y)])
+}
+
+
+// Calculates the dot product of two 1D matrices (vectors) of any matching length.
+/// Returns the result in the first element of a 4-element array, or None if lengths mismatch.
+pub fn mm1d(mat1: &[f64], mat2: &[f64]) -> Option<[f64; 4]> {
+    // 1D matrix multiplication (dot product) requires identical lengths
+    if mat1.len() != mat2.len() {
+        return None;
+    }
+
+    // Compute the dot product: sum of (mat1[i] * mat2[i])
+    let dot_product: f64 = mat1
+        .iter()
+        .zip(mat2.iter())
+        .map(|(&a, &b)| (a) * (b))
+        .sum();
+
+    // Return the result inside the required [f64; 4] structure
+    Some([dot_product, 0.0, 0.0, 0.0])
+}
+
+
+/// Multiplies two 2D matrices represented as slices of slices.
+/// Returns None if the dimensions are incompatible or if any matrix is empty/ragged.
+pub fn mm2d(mat1: &[&[f64]], mat2: &[&[f64]]) -> Option<Vec<Vec<f64>>> {
+    // Check for empty inputs
+    if mat1.is_empty() || mat1[0].is_empty() || mat2.is_empty() || mat2[0].is_empty() {
+        return None;
+    }
+
+    let rows_1 = mat1.len();
+    let cols_1 = mat1[0].len();
+    let rows_2 = mat2.len();
+    let cols_2 = mat2[0].len();
+
+    // Matrix multiplication constraint: Cols of A must equal Rows of B
+    if cols_1 != rows_2 {
+        return None;
+    }
+
+    // Ensure mat1 is not a "ragged" array (all rows must have the same length)
+    if mat1.iter().any(|row| row.len() != cols_1) {
+        return None;
+    }
+
+    // Ensure mat2 is not a "ragged" array
+    if mat2.iter().any(|row| row.len() != cols_2) {
+        return None;
+    }
+
+    // Initialize the result matrix with zeros (dimensions: rows_1 x cols_2)
+    let mut result = vec![vec![0.0; cols_2]; rows_1];
+
+    // Perform standard matrix multiplication (O(N^3))
+    for i in 0..rows_1 {
+        for j in 0..cols_2 {
+            let mut sum = 0.0;
+            for k in 0..cols_1 {
+                sum += mat1[i][k] * mat2[k][j];
+            }
+            result[i][j] = sum;
+        }
+    }
+
+    Some(result)
+}
+
+/// Performs batched 3D matrix multiplication.
+/// Dimensions must be: (Batch, Rows_A, Cols_A) x (Batch, Cols_A, Cols_B) -> (Batch, Rows_A, Cols_B)
+pub fn mm3d(mat1: &[&[&[f64]]], mat2: &[&[&[f64]]]) -> Option<Vec<Vec<Vec<f64>>>> {
+    // 1. Ensure batches are not empty and lengths match
+    if mat1.is_empty() || mat1.len() != mat2.len() {
+        return None;
+    }
+
+    let batch_size = mat1.len();
+    let mut result_batch = Vec::with_capacity(batch_size);
+
+    // 2. Loop through each 2D matrix pair in the batch
+    for b in 0..batch_size {
+        let m1_2d = mat1[b];
+        let m2_2d = mat2[b];
+
+        // Ensure the 2D matrices in this batch slice are not empty
+        if m1_2d.is_empty() || m1_2d[0].is_empty() || m2_2d.is_empty() || m2_2d[0].is_empty() {
+            return None;
+        }
+
+        let rows_1 = m1_2d.len();
+        let cols_1 = m1_2d[0].len();
+        let rows_2 = m2_2d.len();
+        let cols_2 = m2_2d[0].len();
+
+        // Validate dimension alignment and protect against ragged structures
+        if cols_1 != rows_2
+            || m1_2d.iter().any(|row| row.len() != cols_1)
+            || m2_2d.iter().any(|row| row.len() != cols_2)
+        {
+            return None;
+        }
+
+        // 3. Multiply the 2D matrices for this batch slice
+        let mut result_2d = vec![vec![0.0; cols_2]; rows_1];
+        for i in 0..rows_1 {
+            for j in 0..cols_2 {
+                let mut sum = 0.0;
+                for k in 0..cols_1 {
+                    sum += m1_2d[i][k] * m2_2d[k][j];
+                }
+                result_2d[i][j] = sum;
+            }
+        }
+
+        result_batch.push(result_2d);
+    }
+
+    Some(result_batch)
 }

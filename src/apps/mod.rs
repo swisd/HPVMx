@@ -73,6 +73,7 @@ pub mod x_storage;
 pub mod x_editor;
 pub mod x_settings;
 pub mod x_packages;
+mod regedit;
 
 /// A type alias for a function that creates a boxed app and returns its preferred window dimensions.
 pub type AppConstructor = fn() -> (Box<dyn Runnable>, (usize, usize));
