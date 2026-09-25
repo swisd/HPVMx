@@ -10,12 +10,13 @@ use crate::ui::pixel_graphics::PixelGraphics;
 
 pub const HPX_MAGIC: [u8; 4] = *b"HPX1";
 pub const HPX_ABI_VERSION: u16 = 1;
+pub const HPX_HOST_API_VERSION: u32 = 2;
 pub const HPX_HEADER_SIZE: usize = 40;
 pub const KIND_STEPPED_APP: u16 = 1;
 pub const KIND_STEPPED_BACKGROUND: u16 = 2;
 
-/// Stable C ABI passed to disk executables. All host calls are optional pointers
-/// only in future ABI versions; v1 executables may rely on every entry here.
+/// Stable C ABI passed to disk executables. Host-table version 2 appends callbacks
+/// after the original v1 prefix; the executable file header remains ABI version 1.
 #[repr(C)]
 pub struct PluginHostApi {
     pub abi_version: u32,
@@ -25,17 +26,183 @@ pub struct PluginHostApi {
     pub write_file: unsafe extern "C" fn(*const u8, usize, *const u8, usize) -> i32,
     pub allocate: unsafe extern "C" fn(usize, usize) -> *mut c_void,
     pub deallocate: unsafe extern "C" fn(*mut c_void, usize, usize),
+    pub file_make_dir: unsafe extern "C" fn(*const u8, usize) -> i32,
+    pub file_remove: unsafe extern "C" fn(*const u8, usize) -> i32,
+    pub file_rename: unsafe extern "C" fn(*const u8, usize, *const u8, usize) -> i32,
+    pub current_directory: unsafe extern "C" fn(*mut u8, usize) -> i64,
+    pub set_global_variable: unsafe extern "C" fn(*const u8, usize, *const u8, usize) -> i32,
+    pub get_global_variable: unsafe extern "C" fn(*const u8, usize, *mut u8, usize) -> i64,
+    pub cpu_info: unsafe extern "C" fn(*mut HpxCpuInfo) -> i32,
+    pub pci_device_count: unsafe extern "C" fn() -> u32,
+    pub pci_get_device: unsafe extern "C" fn(u32, *mut HpxPciDeviceInfo) -> i32,
+    pub pci_read_u32: unsafe extern "C" fn(u8, u8, u8, u8) -> u32,
+    pub pci_write_u32: unsafe extern "C" fn(u8, u8, u8, u8, u32),
+    pub network_initialize: unsafe extern "C" fn() -> i32,
+    pub network_link_up: unsafe extern "C" fn() -> u8,
+    pub network_transmit: unsafe extern "C" fn(*const u8, usize) -> i32,
+    pub network_receive: unsafe extern "C" fn(*mut u8, usize) -> i64,
+    pub beep: unsafe extern "C" fn(u32),
+    pub play_tone: unsafe extern "C" fn(u32, u64),
+    pub mute: unsafe extern "C" fn(),
+    pub sleep_ms: unsafe extern "C" fn(u64),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct HpxCpuInfo {
+    pub vendor: [u8; 13],
+    pub brand: [u8; 49],
+    pub cores: u32,
+    pub threads: u32,
+    pub ap_count: u32,
+    /// Bit flags: 0=64-bit, 1=VMX, 2=SVM, 3=AVX2, 4=SSE4.2, 5=MP.
+    pub feature_flags: u32,
+}
+impl Default for HpxCpuInfo {
+    fn default() -> Self { Self { vendor: [0; 13], brand: [0; 49], cores: 0, threads: 0, ap_count: 0, feature_flags: 0 } }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct HpxPciDeviceInfo {
+    pub bus: u8,
+    pub device: u8,
+    pub function: u8,
+    pub class_id: u8,
+    pub subclass_id: u8,
+    pub interface_id: u8,
+    pub revision_id: u8,
+    pub reserved: u8,
+    pub vendor_id: u16,
+    pub device_id: u16,
 }
 
 static HOST_API: PluginHostApi = PluginHostApi {
-    abi_version: HPX_ABI_VERSION as u32,
+    abi_version: HPX_HOST_API_VERSION,
     draw_text: host_draw_text,
     fill_rect: host_fill_rect,
     read_file: host_read_file,
     write_file: host_write_file,
     allocate: host_allocate,
     deallocate: host_deallocate,
+    file_make_dir: host_file_make_dir,
+    file_remove: host_file_remove,
+    file_rename: host_file_rename,
+    current_directory: host_current_directory,
+    set_global_variable: host_set_global_variable,
+    get_global_variable: host_get_global_variable,
+    cpu_info: host_cpu_info,
+    pci_device_count: host_pci_device_count,
+    pci_get_device: host_pci_get_device,
+    pci_read_u32: host_pci_read_u32,
+    pci_write_u32: host_pci_write_u32,
+    network_initialize: host_network_initialize,
+    network_link_up: host_network_link_up,
+    network_transmit: host_network_transmit,
+    network_receive: host_network_receive,
+    beep: host_beep,
+    play_tone: host_play_tone,
+    mute: host_mute,
+    sleep_ms: host_sleep_ms,
 };
+
+fn plugin_path(ptr: *const u8, len: usize) -> Result<String, ()> {
+    if ptr.is_null() || len == 0 || len > 4096 { return Err(()); }
+    let bytes = unsafe { core::slice::from_raw_parts(ptr, len) };
+    core::str::from_utf8(bytes).map(String::from).map_err(|_| ())
+}
+
+unsafe extern "C" fn host_file_make_dir(path: *const u8, len: usize) -> i32 {
+    plugin_path(path, len).ok().and_then(|path| FileSystem::mkdir(&path).ok()).map(|_| 0).unwrap_or(-1)
+}
+unsafe extern "C" fn host_file_remove(path: *const u8, len: usize) -> i32 {
+    plugin_path(path, len).ok().and_then(|path| FileSystem::remove(&path).ok()).map(|_| 0).unwrap_or(-1)
+}
+unsafe extern "C" fn host_file_rename(from: *const u8, from_len: usize, to: *const u8, to_len: usize) -> i32 {
+    let (Ok(from), Ok(to)) = (plugin_path(from, from_len), plugin_path(to, to_len)) else { return -1; };
+    FileSystem::rename(&from, &to).map(|_| 0).unwrap_or(-1)
+}
+unsafe extern "C" fn host_current_directory(out: *mut u8, capacity: usize) -> i64 {
+    let Ok((cwd)) = FileSystem::get_cwd() else { return -1; };
+    if out.is_null() || capacity == 0 { return cwd.len().min(i64::MAX as usize) as i64; }
+    if cwd.len() > capacity { return -2; }
+    unsafe { core::ptr::copy_nonoverlapping(cwd.as_ptr(), out, cwd.len()); }
+    cwd.len() as i64
+}
+unsafe extern "C" fn host_set_global_variable(key: *const u8, key_len: usize, value: *const u8, value_len: usize) -> i32 {
+    if key.is_null() || value.is_null() || key_len == 0 || key_len > 4096 || value_len > 65536 { return -1; }
+    let (Ok(key), Ok(value)) = (
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(key, key_len) }),
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(value, value_len) }),
+    ) else { return -1; };
+    crate::env::set_global_var(key, value);
+    0
+}
+unsafe extern "C" fn host_get_global_variable(key: *const u8, key_len: usize, out: *mut u8, capacity: usize) -> i64 {
+    if key.is_null() || key_len == 0 || key_len > 4096 { return -1; }
+    let Ok(key) = core::str::from_utf8(unsafe { core::slice::from_raw_parts(key, key_len) }) else { return -1; };
+    let Some(value) = crate::env::get_global_var(key) else { return -1; };
+    if out.is_null() || capacity == 0 { return value.len().min(i64::MAX as usize) as i64; }
+    if value.len() > capacity { return -2; }
+    unsafe { core::ptr::copy_nonoverlapping(value.as_ptr(), out, value.len()); }
+    value.len() as i64
+}
+unsafe extern "C" fn host_cpu_info(out: *mut HpxCpuInfo) -> i32 {
+    if out.is_null() { return -1; }
+    let cpu = crate::hardware::cpu::CpuInfo::get();
+    let mut result = HpxCpuInfo::default();
+    let vendor = cpu.vendor.as_bytes();
+    let brand = cpu.brand.as_bytes();
+    let vendor_len = vendor.len().min(result.vendor.len() - 1);
+    let brand_len = brand.len().min(result.brand.len() - 1);
+    result.vendor[..vendor_len].copy_from_slice(&vendor[..vendor_len]);
+    result.brand[..brand_len].copy_from_slice(&brand[..brand_len]);
+    result.cores = cpu.cores;
+    result.threads = cpu.threads;
+    result.ap_count = cpu.ap_count;
+    result.feature_flags = (cpu.supports_64bit as u32)
+        | ((cpu.supports_vmx as u32) << 1) | ((cpu.supports_svm as u32) << 2)
+        | ((cpu.supports_avx2 as u32) << 3) | ((cpu.supports_sse42 as u32) << 4)
+        | ((cpu.supports_mp as u32) << 5);
+    unsafe { out.write(result); }
+    0
+}
+unsafe extern "C" fn host_pci_device_count() -> u32 {
+    crate::hardware::pci::scan_bus().len().min(u32::MAX as usize) as u32
+}
+unsafe extern "C" fn host_pci_get_device(index: u32, out: *mut HpxPciDeviceInfo) -> i32 {
+    if out.is_null() { return -1; }
+    let devices = crate::hardware::pci::scan_bus();
+    let Some(device) = devices.get(index as usize) else { return -1; };
+    unsafe { out.write(HpxPciDeviceInfo {
+        bus: device.bus, device: device.device, function: device.function,
+        class_id: device.class_id, subclass_id: device.subclass_id,
+        interface_id: device.interface_id, revision_id: device.revision_id, reserved: 0,
+        vendor_id: device.vendor_id, device_id: device.device_id,
+    }); }
+    0
+}
+unsafe extern "C" fn host_pci_read_u32(bus: u8, slot: u8, function: u8, offset: u8) -> u32 {
+    crate::hardware::pci::pci_config_read_u32(bus, slot, function, offset)
+}
+unsafe extern "C" fn host_pci_write_u32(bus: u8, slot: u8, function: u8, offset: u8, value: u32) {
+    crate::hardware::pci::pci_config_write_u32(bus, slot, function, offset, value)
+}
+unsafe extern "C" fn host_network_initialize() -> i32 { crate::devices::net_hw::init().map(|_| 0).unwrap_or(-1) }
+unsafe extern "C" fn host_network_link_up() -> u8 { crate::devices::net_hw::link_up() as u8 }
+unsafe extern "C" fn host_network_transmit(frame: *const u8, len: usize) -> i32 {
+    if frame.is_null() || len < 14 || len > 65535 { return -1; }
+    crate::devices::net_hw::tx(unsafe { core::slice::from_raw_parts(frame, len) }).map(|_| 0).unwrap_or(-1)
+}
+unsafe extern "C" fn host_network_receive(out: *mut u8, capacity: usize) -> i64 {
+    if out.is_null() || capacity == 0 || capacity > 65535 { return -1; }
+    crate::devices::net_hw::rx(unsafe { core::slice::from_raw_parts_mut(out, capacity) })
+        .map(|len| len as i64).unwrap_or(-1)
+}
+unsafe extern "C" fn host_beep(frequency: u32) { crate::devices::audio::beep(frequency); }
+unsafe extern "C" fn host_play_tone(frequency: u32, duration_ms: u64) { crate::devices::audio::play_tone_nb(frequency, duration_ms); }
+unsafe extern "C" fn host_mute() { crate::devices::audio::mute(); }
+unsafe extern "C" fn host_sleep_ms(milliseconds: u64) { crate::devices::timer::sleep_ms(milliseconds); }
 
 unsafe extern "C" fn host_draw_text(x: usize, y: usize, bytes: *const u8, len: usize, color: u32) {
     if bytes.is_null() || len > 1_048_576 { return; }

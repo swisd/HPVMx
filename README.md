@@ -2,7 +2,7 @@
 
 A bare-metal (+BIOS & EFI) hardware provisioning and virtualization manager written in Rust. HPVMx provides a complete environment for managing virtual machines, exploring storage, and developing software on bare metal.
 
-![](https://img.shields.io/badge/latest_version-1.16.0-blue)\
+![](https://img.shields.io/badge/latest_version-1.16.3-blue)\
 ![](https://img.shields.io/badge/supported_version*-1.15.1-green)
 > *supported version is the oldest verion that does not have to be updated to the newest version
 
@@ -91,10 +91,15 @@ Launch `MicroIDE` from the **Apps** tab in the dashboard.
 - **F7**: Clear output
 - **UP/DOWN**: Scroll source code
 
+### xDB
+Custom HashMap/Tree database implementation
+
 ## Documentation
 
-- [Operator Manual](doc/manual.md): Detailed usage instructions for the dashboard and shell.
-- [Development Manual](doc/development.md): Guide for creating apps and extensions for HPVMx.
+- [Operator Manual](docs/manual.md): Detailed usage instructions for the dashboard and shell.
+- [Development Manual](docs/development.md): Guide for creating apps and extensions for HPVMx.
+- [Writing an Executable](/docs/HPX_EXECUTABLES.md): Guide for writing your own apps and programs for HPVMx.
+- [External API](/docs/EXTERNAL_API.md): External api extensions for writing executables.
 - [Project Architecture](hpvmx.md): Deep dive into the internal design of HPVMx.
 
 ## Planned Additions and Removals
@@ -109,8 +114,8 @@ Launch `MicroIDE` from the **Apps** tab in the dashboard.
 - vm terminal connection
 - micro-c jit compiler
 - micro-c live code
-- `SteppedApplicationContext` improvements
 - hot-reload xml based ui formatting for micro-c apps and future applications
+- full custom executable and linked-library support
 
 ### Deprecations
 
@@ -124,22 +129,22 @@ Launch `MicroIDE` from the **Apps** tab in the dashboard.
 
 ## Gallery
 
-![Storage-Old](/doc/img/dash01.png)
+![Storage-Old](/docs/img/dash01.png)
 *Storage Interface* **(OLD)[0.9.13]**
 
-![Terminal](/doc/img/term01.png)
+![Terminal](/docs/img/term01.png)
 *Interactive Shell* **[1.3.12]**
 
-![Terminal](/doc/img/img.png)
+![Terminal](/docs/img/img.png)
 *Resource Monitor* **[1.9.8]**
 
-![Terminal](/doc/img/img_1.png)
+![Terminal](/docs/img/img_1.png)
 *Storage UI* **[1.9.8]**
 
-![Terminal](/doc/img/img_2.png)
+![Terminal](/docs/img/img_2.png)
 *Network UI* **[1.9.8]**
 
-![Terminal](/doc/img/img_3.png)
+![Terminal](/docs/img/img_3.png)
 *Package UI* **[1.9.8]**
 
 [//]: # (Theoretical Final Flowchart)

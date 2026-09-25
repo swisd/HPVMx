@@ -92,7 +92,7 @@ pub(crate) static APP_REGISTRY: &[(&str, AppConstructor, ICON32, &str)] = &[
     }, icons::CLOCK_RED_32_ICON_DATA, "0.2.1"),
     ("Manual", || {
         let book = FileSystem::read_file_to_string("/docs/man/manual.md")
-            .unwrap_or_else(|_| include_str!("../../doc/manual.md").to_string());
+            .unwrap_or_else(|_| include_str!("../../docs/manual.md").to_string());
         let app = InstructionManualApp::new(&*book, 1100usize);
         let dims = crate::env::AppInfo::dimensions(&app);
         (Box::new(app), dims)

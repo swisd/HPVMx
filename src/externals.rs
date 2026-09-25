@@ -21,6 +21,133 @@ pub use crate::env::{
 pub use crate::ui::pixel_graphics::PixelGraphics;
 pub use uefi::proto::console::text::Key;
 
+/// File and directory operations exposed to in-kernel applications.
+pub mod fs {
+    use alloc::{string::String, vec::Vec};
+
+    pub fn read(path: &str) -> Result<Vec<u8>, &'static str> { crate::filesystem::FileSystem::read_file(path) }
+    pub fn read_text(path: &str) -> Result<String, &'static str> { crate::filesystem::FileSystem::read_file_to_string(path) }
+    pub fn write(path: &str, bytes: &[u8]) -> Result<(), &'static str> { crate::filesystem::FileSystem::write_to_file_bytes(path, bytes, 'w') }
+    pub fn append(path: &str, bytes: &[u8]) -> Result<(), &'static str> { crate::filesystem::FileSystem::write_to_file_bytes(path, bytes, 'a') }
+    pub fn create(path: &str) -> Result<uefi::proto::media::file::FileHandle, &'static str> { crate::filesystem::FileSystem::create(path) }
+    pub fn make_dir(path: &str) -> Result<(), &'static str> { crate::filesystem::FileSystem::mkdir(path) }
+    pub fn remove(path: &str) -> Result<(), &'static str> { crate::filesystem::FileSystem::remove(path) }
+    pub fn remove_dir(path: &str) -> Result<(), &'static str> { crate::filesystem::FileSystem::remove_dir(path) }
+    pub fn rename(from: &str, to: &str) -> Result<(), &'static str> { crate::filesystem::FileSystem::rename(from, to) }
+    pub fn copy(from: &str, to: &str) -> Result<(), &'static str> { crate::filesystem::FileSystem::copy(from, to) }
+    pub fn list(path: &str) -> Result<Vec<(String, bool)>, &'static str> { crate::filesystem::FileSystem::read_dir(path) }
+    pub fn current_dir() -> Result<String, ()> { crate::filesystem::FileSystem::get_cwd() }
+    pub fn change_dir(path: &str) { crate::filesystem::FileSystem::cd(path) }
+    pub fn statistics() -> (u64, u64, u64, u64) { crate::filesystem::disk_stats() }
+}
+
+/// CPU and PCI operations. PCI writes directly affect hardware configuration space.
+pub mod hardware {
+    use alloc::vec::Vec;
+    pub fn cpu_info() -> crate::hardware::cpu::CpuInfo { crate::hardware::cpu::CpuInfo::get() }
+    pub fn core_count() -> u32 { crate::hardware::cpu::core_count() }
+    pub fn application_processor_count() -> u32 { crate::hardware::cpu::ap_count() }
+    pub fn pci_devices() -> Vec<crate::hardware::pci::PciDeviceInfo> { crate::hardware::pci::scan_bus() }
+    pub fn pci_read_u32(bus: u8, slot: u8, function: u8, offset: u8) -> u32 { crate::hardware::pci::pci_config_read_u32(bus, slot, function, offset) }
+    pub fn pci_write_u32(bus: u8, slot: u8, function: u8, offset: u8, value: u32) { crate::hardware::pci::pci_config_write_u32(bus, slot, function, offset, value) }
+}
+
+/// Network and audio driver entry points.
+pub mod devices {
+    pub fn network_initialize() -> Result<(), &'static str> { crate::devices::net_hw::init() }
+    pub fn network_is_initialized() -> bool { crate::devices::net_hw::is_initialized() }
+    pub fn network_link_up() -> bool { crate::devices::net_hw::link_up() }
+    pub fn network_transmit(frame: &[u8]) -> Result<(), &'static str> { crate::devices::net_hw::tx(frame) }
+    pub fn network_receive(buffer: &mut [u8]) -> Result<usize, &'static str> { crate::devices::net_hw::rx(buffer) }
+    pub fn beep(frequency_hz: u32) { crate::devices::audio::beep(frequency_hz) }
+    pub fn play_tone(frequency_hz: u32, duration_ms: u64) { crate::devices::audio::play_tone_nb(frequency_hz, duration_ms) }
+    pub fn mute() { crate::devices::audio::mute() }
+    pub fn sleep_ms(milliseconds: u64) { crate::devices::timer::sleep_ms(milliseconds) }
+}
+
+/// Direct drawing helpers backed by PixelGraphics.
+pub mod gui {
+    use crate::ui::pixel_graphics::PixelGraphics;
+    pub fn resolution() -> Option<(usize, usize)> { PixelGraphics::new().map(|g| g.resolution()) }
+    pub fn clear(color: u32) {
+        if let Some(mut g) = PixelGraphics::new() { g.clear(color); g.flip(); }
+    }
+    pub fn fill_rect(x: usize, y: usize, width: usize, height: usize, color: u32) {
+        if let Some(mut g) = PixelGraphics::new() { g.fill_rect(x, y, width, height, color); g.flip(); }
+    }
+    pub fn draw_text(x: usize, y: usize, text: &str, foreground: u32, background: u32) {
+        if let Some(mut g) = PixelGraphics::new() { g.draw_text_bg(x, y, text, foreground, background); g.flip(); }
+    }
+    pub fn draw_button(x: usize, y: usize, width: usize, height: usize, label: &str, focused: bool) {
+        if let Some(mut g) = PixelGraphics::new() { g.draw_button(x, y, width, height, label, focused); g.flip(); }
+    }
+}
+
+/// Kernel-wide environment values and timing utilities.
+pub mod system {
+    use alloc::string::String;
+    pub fn set_variable(key: &str, value: &str) { crate::env::set_global_var(key, value); }
+    pub fn get_variable(key: &str) -> Option<String> { crate::env::get_global_var(key) }
+    pub fn variables() -> alloc::vec::Vec<crate::env::EnvironmentVariable> { crate::env::global_vars_snapshot() }
+    pub fn timestamp_ms() -> u64 {
+        #[cfg(target_arch = "x86_64")]
+        { unsafe { core::arch::x86_64::_rdtsc() / (crate::TSC_PER_US.max(1) * 1000) } }
+        #[cfg(not(target_arch = "x86_64"))]
+        { 0 }
+    }
+}
+
+/// Persistence helpers for HPVMx system and device settings.
+pub mod registry {
+    pub fn load_devices() -> Result<(), &'static str> {
+        crate::registry::load_device_registry(crate::registry::DEFAULT_DEVICE_REG_PATH)
+    }
+    pub fn save_devices() -> Result<(), &'static str> {
+        crate::registry::save_device_registry(crate::registry::DEFAULT_DEVICE_REG_PATH)
+    }
+    pub fn load_system(settings: &mut crate::ui::UiSettings) -> Result<(), &'static str> {
+        crate::registry::load_system_registry(crate::registry::DEFAULT_SYSTEM_REG_PATH, settings)
+    }
+    pub fn save_system(settings: &crate::ui::UiSettings) -> Result<(), &'static str> {
+        crate::registry::save_system_registry(crate::registry::DEFAULT_SYSTEM_REG_PATH, settings)
+    }
+}
+
+/// Operations on the live stepped-app table. App code still advances on the OS scheduler.
+pub mod processes {
+    use crate::env::GlobalEnvironmentData;
+    pub fn count(runtime: &GlobalEnvironmentData) -> usize { runtime.active_apps.len() }
+    pub fn terminate(runtime: &mut GlobalEnvironmentData, pid: usize) -> bool {
+        let Some(index) = runtime.active_apps.iter().position(|app| app.pid == pid) else { return false; };
+        runtime.active_apps.remove(index);
+        runtime.focused_process_idx = runtime.focused_process_idx.and_then(|focused| {
+            if focused == index { None } else if focused > index { Some(focused - 1) } else { Some(focused) }
+        });
+        if runtime.selected_app_idx > index { runtime.selected_app_idx -= 1; }
+        runtime.selected_app_idx = runtime.selected_app_idx.min(runtime.active_apps.len().saturating_sub(1));
+        true
+    }
+}
+
+/// Explicitly unsafe allocator calls for ABI consumers that need raw buffers.
+/// Pass the same size and alignment to `deallocate` that were used to allocate.
+pub mod memory {
+    use core::alloc::Layout;
+    pub unsafe fn allocate(size: usize, alignment: usize) -> Option<*mut u8> {
+        let alignment = alignment.max(core::mem::align_of::<usize>()).checked_next_power_of_two()?;
+        let layout = Layout::from_size_align(size.max(1), alignment).ok()?;
+        let ptr = unsafe { alloc::alloc::alloc(layout) };
+        (!ptr.is_null()).then_some(ptr)
+    }
+    pub unsafe fn deallocate(ptr: *mut u8, size: usize, alignment: usize) -> bool {
+        if ptr.is_null() { return false; }
+        let Some(alignment) = alignment.max(core::mem::align_of::<usize>()).checked_next_power_of_two() else { return false; };
+        let Ok(layout) = Layout::from_size_align(size.max(1), alignment) else { return false; };
+        unsafe { alloc::alloc::dealloc(ptr, layout); }
+        true
+    }
+}
+
 /// Package a Rust application implementation with its executable metadata.
 pub fn application<T>(name: &str, version: &str, dimensions: (usize, usize), app: T) -> Application
 where
@@ -257,4 +384,7 @@ impl ExecutableManager {
 
 
 /// Disk executable loader and its stable plugin ABI.
-pub use crate::disk_executable::{DiskExecutableManager, HpxHeader, PluginHostApi};
+pub use crate::disk_executable::{
+    DiskExecutableManager, HpxCpuInfo, HpxHeader, HpxPciDeviceInfo, PluginHostApi,
+    HPX_HOST_API_VERSION,
+};

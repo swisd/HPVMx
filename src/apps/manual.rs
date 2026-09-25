@@ -71,7 +71,7 @@ impl AppInfo for InstructionManualApp {
 impl RunnableClone for InstructionManualApp {
     fn clone_box(&self) -> Box<dyn Runnable> {
         let book = FileSystem::read_file_to_string("/docs/man/manual.md")
-            .unwrap_or_else(|_| include_str!("../../doc/manual.md").to_string());
+            .unwrap_or_else(|_| include_str!("../../docs/manual.md").to_string());
         let app = InstructionManualApp::new(&*book, 1100usize);
         Box::new(app)
     }
