@@ -4333,28 +4333,295 @@ pub mod test {
     #[derive(Clone)]
     pub struct X_Test {
         pub iter: usize,
+        page: usize,
+        cpu_vendor: String,
+        cpu_brand: String,
+        cpu_cores: u32,
+        cpu_threads: u32,
+        cpu_usage: u32,
+        memory_total_mb: u32,
+        memory_used_mb: u32,
+        fps: usize,
+        frame_ms: usize,
+        disk_read_kbps: u64,
+        disk_write_kbps: u64,
+        net_rx_kbps: u64,
+        net_tx_kbps: u64,
+        display: (usize, usize),
+        last_key: u32,
+        key_count: usize,
+        recent_keys: Vec<u32>,
+        memory_test: Vec<u32>,
+        memory_cursor: usize,
+        memory_running: bool,
+        memory_passed: Option<bool>,
+        memory_errors: usize,
+        memory_pattern: u32,
+        benchmark_remaining: usize,
+        benchmark_rounds: usize,
+        benchmark_checksum: u64,
+        benchmark_start_tsc: u64,
+        benchmark_elapsed_ms: u64,
     }
 
     impl X_Test {
         pub fn new() -> Self {
+            let cpu = crate::hardware::cpu::CpuInfo::get();
+            let display = PixelGraphics::new().map(|pg| pg.resolution()).unwrap_or((0, 0));
             Self {
                 iter: 0,
+                page: 0,
+                cpu_vendor: cpu.vendor,
+                cpu_brand: cpu.brand,
+                cpu_cores: cpu.cores,
+                cpu_threads: cpu.threads,
+                cpu_usage: 0,
+                memory_total_mb: 0,
+                memory_used_mb: 0,
+                fps: 0,
+                frame_ms: 0,
+                disk_read_kbps: 0,
+                disk_write_kbps: 0,
+                net_rx_kbps: 0,
+                net_tx_kbps: 0,
+                display,
+                last_key: 0,
+                key_count: 0,
+                recent_keys: Vec::new(),
+                memory_test: Vec::new(),
+                memory_cursor: 0,
+                memory_running: false,
+                memory_passed: None,
+                memory_errors: 0,
+                memory_pattern: 0xA5C3_7E19,
+                benchmark_remaining: 0,
+                benchmark_rounds: 0,
+                benchmark_checksum: 0x9E37_79B9_7F4A_7C15,
+                benchmark_start_tsc: 0,
+                benchmark_elapsed_ms: 0,
             }
+        }
+
+        fn select_page(&mut self, page: usize) { self.page = page % 4; }
+
+        fn draw_header(&self, pg: &mut PixelGraphics, x: usize, y: usize, title: &str) {
+            pg.draw_text(x + 18, y + 18, title, 0x00FFFF);
+            let names = ["Overview", "Graphics", "Memory", "Input"];
+            let mut tab_x = x + 18;
+            for (idx, name) in names.iter().enumerate() {
+                let selected = self.page == idx;
+                let width = 104;
+                pg.fill_rect(tab_x, y + 44, width, 24, if selected { 0x006666 } else { 0x303840 });
+                pg.draw_rect_outline(tab_x, y + 44, width, 24, if selected { 0x00FFFF } else { 0x667080 });
+                pg.draw_text(tab_x + 8, y + 49, name, if selected { 0xFFFFFF } else { 0xAAAAAA });
+                tab_x += width + 8;
+            }
+        }
+
+        fn draw_overview(&self, pg: &mut PixelGraphics, x: usize, y: usize) {
+            let left = x + 20;
+            let top = y + 88;
+            pg.draw_text(left, top, "Live system snapshot", 0xFFFFFF);
+            pg.draw_text(left, top + 26, &alloc::format!("CPU: {}", self.cpu_brand), 0xBBBBBB);
+            pg.draw_text(left, top + 48, &alloc::format!("Vendor: {}", self.cpu_vendor), 0x888888);
+
+            let cards = [
+                ("Cores", alloc::format!("{} physical / {} logical", self.cpu_cores, self.cpu_threads), 0x0088AA),
+                ("Memory", alloc::format!("{} / {} MB", self.memory_used_mb, self.memory_total_mb), 0x226633),
+                ("Display", alloc::format!("{} x {}", self.display.0, self.display.1), 0x664488),
+                ("Frame", alloc::format!("{} FPS  /  {} ms", self.fps, self.frame_ms), 0x885522),
+            ];
+            for (idx, (label, value, color)) in cards.iter().enumerate() {
+                let cx = left + (idx % 2) * 350;
+                let cy = top + 88 + (idx / 2) * 70;
+                pg.fill_rect(cx, cy, 328, 56, *color);
+                pg.draw_rect_outline(cx, cy, 328, 56, 0xAABBCD);
+                pg.draw_text(cx + 10, cy + 7, label, 0xFFFFFF);
+                pg.draw_text(cx + 10, cy + 30, value, 0xEEEEEE);
+            }
+            pg.draw_text(left, top + 246, &alloc::format!("CPU load: {}%", self.cpu_usage.min(100)), 0x80FF80);
+            pg.draw_text(left, top + 270, &alloc::format!("Disk: read {} KB/s   write {} KB/s", self.disk_read_kbps, self.disk_write_kbps), 0xAAAAAA);
+            pg.draw_text(left, top + 292, &alloc::format!("Network: rx {} KB/s   tx {} KB/s", self.net_rx_kbps, self.net_tx_kbps), 0xAAAAAA);
+            pg.draw_text(left, top + 326, "Press 1-4 or LEFT/RIGHT to switch panels", 0x00FFFF);
+        }
+
+        fn draw_graphics(&self, pg: &mut PixelGraphics, x: usize, y: usize) {
+            let left = x + 20;
+            let top = y + 94;
+            pg.draw_text(left, top, "PixelGraphics primitive and color test", 0xFFFFFF);
+            let colors = [0xFF4040, 0xFFAA22, 0xFFFF44, 0x40DD60, 0x30C8E8, 0x4466FF, 0xAA55DD, 0xFFFFFF];
+            for (idx, color) in colors.iter().enumerate() {
+                let cx = left + (idx % 4) * 82;
+                let cy = top + 36 + (idx / 4) * 68;
+                pg.fill_rect(cx, cy, 64, 42, *color);
+                pg.draw_rect_outline(cx, cy, 64, 42, 0xFFFFFF);
+                pg.draw_text(cx + 4, cy + 47, &alloc::format!("{:06X}", color), 0xCCCCCC);
+            }
+            let wave_y = top + 212;
+            pg.draw_text(left, wave_y, "Animated line / pixel grid", 0xAAAAAA);
+            let phase = self.iter % 80;
+            for idx in 0..32 {
+                let px = left + idx * 14;
+                let py = wave_y + 34 + ((idx * 7 + phase) % 28);
+                pg.draw_pixel(px, py, colors[(idx + phase / 10) % colors.len()]);
+                if idx > 0 {
+                    let prev_x = left + (idx - 1) * 14;
+                    let prev_y = wave_y + 34 + (((idx - 1) * 7 + phase) % 28);
+                    pg.draw_line(prev_x, prev_y, px, py, colors[idx % colors.len()]);
+                }
+            }
+            pg.draw_icon(left + 10, wave_y + 90, 32, 32, &pixel_graphics::icons::CPU_ICON_DATA);
+            pg.draw_icon(left + 58, wave_y + 90, 32, 32, &pixel_graphics::icons::RAM_ICON_DATA);
+            pg.draw_icon(left + 106, wave_y + 90, 32, 32, &pixel_graphics::icons::ETHERNET_ICON_DATA);
+            pg.draw_text(left + 160, wave_y + 100, "Icons, fills, outlines, text and lines", 0xCCCCCC);
+        }
+
+        fn draw_memory(&self, pg: &mut PixelGraphics, x: usize, y: usize) {
+            let left = x + 20;
+            let top = y + 96;
+            pg.draw_text(left, top, "Bounded memory integrity check", 0xFFFFFF);
+            pg.draw_text(left, top + 28, "M: run a 4,096-word write/read check (256 words per frame)", 0xAAAAAA);
+            pg.draw_text(left, top + 54, &alloc::format!("Buffer: {} words  |  errors: {}", self.memory_test.len(), self.memory_errors), 0xCCCCCC);
+            let completed = self.memory_cursor.min(self.memory_test.len());
+            let percent = if self.memory_test.is_empty() { 0 } else { completed * 100 / self.memory_test.len() };
+            pg.draw_progress_bar(left, top + 88, 420, 24, percent, 100, if self.memory_passed == Some(false) { 0xFF4040 } else { 0x30DD70 });
+            let status = if self.memory_running { "Running in small cooperative chunks..." }
+                else if self.memory_passed == Some(true) { "PASS: all tested words matched" }
+                else if self.memory_passed == Some(false) { "FAIL: data mismatch found" }
+                else { "Idle" };
+            pg.draw_text(left, top + 124, status, if self.memory_passed == Some(false) { 0xFF8080 } else { 0x80FF80 });
+            pg.draw_text(left, top + 158, &alloc::format!("Pattern: 0x{:08X}   completed: {}%", self.memory_pattern, percent), 0xAAAAAA);
+            pg.draw_text(left, top + 194, "This only tests an app-owned buffer; it does not probe physical RAM.", 0x888888);
+            pg.draw_text(left, top + 224, "B: start bounded CPU checksum benchmark", 0x00FFFF);
+            if self.benchmark_remaining == 0 && self.benchmark_rounds > 0 {
+                pg.draw_text(left, top + 250, &alloc::format!("Benchmark: {} rounds in {} ms (checksum {:016X})", self.benchmark_rounds, self.benchmark_elapsed_ms, self.benchmark_checksum), 0xCCCCCC);
+            } else if self.benchmark_remaining > 0 {
+                pg.draw_text(left, top + 250, &alloc::format!("Benchmark running: {} rounds remaining", self.benchmark_remaining), 0xCCCCCC);
+            }
+        }
+
+        fn draw_input(&self, pg: &mut PixelGraphics, x: usize, y: usize) {
+            let left = x + 20;
+            let top = y + 96;
+            pg.draw_text(left, top, "Keyboard event monitor", 0xFFFFFF);
+            pg.draw_text(left, top + 34, &alloc::format!("Events received: {}", self.key_count), 0xCCCCCC);
+            pg.draw_text(left, top + 60, &alloc::format!("Last packed key: 0x{:05X}", self.last_key), 0x00FFFF);
+            pg.draw_text(left, top + 92, "Recent key codes (oldest to newest):", 0xAAAAAA);
+            for (idx, key) in self.recent_keys.iter().enumerate() {
+                let col = idx % 6;
+                let row = idx / 6;
+                pg.fill_rect(left + col * 92, top + 122 + row * 38, 82, 28, 0x303840);
+                pg.draw_rect_outline(left + col * 92, top + 122 + row * 38, 82, 28, 0x607080);
+                pg.draw_text(left + col * 92 + 8, top + 129 + row * 38, &alloc::format!("{:05X}", key), 0xFFFFFF);
+            }
+            pg.draw_text(left, top + 220, "Use arrows, letters, digits and ENTER to exercise input delivery.", 0x00FFFF);
+            pg.draw_text(left, top + 248, "LEFT/RIGHT changes pages; ESC closes the app window.", 0x888888);
         }
     }
 
     impl Runnable for X_Test {
         fn draw(&self, pg: &mut PixelGraphics, _vars: &Vec<String>, x: usize, y: usize) {
-            pg.draw_text(x + 20, y + 20, "System Diagnostics", 0x00FF00);
+            pg.fill_rect(x, y, 760, 500, 0x151B22);
+            self.draw_header(pg, x, y, "HPVMx Test Bench");
+            match self.page {
+                0 => self.draw_overview(pg, x, y),
+                1 => self.draw_graphics(pg, x, y),
+                2 => self.draw_memory(pg, x, y),
+                _ => self.draw_input(pg, x, y),
+            }
+            pg.draw_text(x + 18, y + 470, &alloc::format!("App ticks: {}", self.iter), 0x778899);
         }
 
         fn logic(&mut self, _vars: &mut Vec<String>, env: &mut Environment) {
+            self.iter = self.iter.wrapping_add(1);
             if let Some(data) = env.global_data.as_ref() {
-                self.iter = data.iter as usize;
+                self.cpu_usage = data.resources.cpu_usage;
+                self.memory_total_mb = data.resources.total_memory_mb;
+                self.memory_used_mb = data.resources.used_memory_mb;
+                self.fps = data.resources.fps;
+                self.frame_ms = data.resources.frame_ms;
+                self.disk_read_kbps = data.resources.disk_read_kbps;
+                self.disk_write_kbps = data.resources.disk_write_kbps;
+                self.net_rx_kbps = data.resources.net_rx_kbps;
+                self.net_tx_kbps = data.resources.net_tx_kbps;
+            }
+
+            if self.memory_running {
+                let end = (self.memory_cursor + 256).min(self.memory_test.len());
+                for idx in self.memory_cursor..end {
+                    self.memory_test[idx] = self.memory_pattern ^ (idx as u32).wrapping_mul(0x9E37_79B9);
+                }
+                for idx in self.memory_cursor..end {
+                    if self.memory_test[idx] != self.memory_pattern ^ (idx as u32).wrapping_mul(0x9E37_79B9) {
+                        self.memory_errors += 1;
+                    }
+                }
+                self.memory_cursor = end;
+                if end == self.memory_test.len() {
+                    self.memory_running = false;
+                    self.memory_passed = Some(self.memory_errors == 0);
+                }
+            }
+
+            if self.benchmark_remaining > 0 {
+                let rounds = self.benchmark_remaining.min(2_000);
+                for idx in 0..rounds {
+                    self.benchmark_checksum = self.benchmark_checksum
+                        .rotate_left(7)
+                        .wrapping_mul(0xD6E8_FEB8_6659_FD93)
+                        .wrapping_add(idx as u64 ^ self.iter as u64);
+                }
+                self.benchmark_rounds += rounds;
+                self.benchmark_remaining -= rounds;
+                if self.benchmark_remaining == 0 {
+                    let elapsed_cycles = unsafe { core::arch::x86_64::_rdtsc() }.saturating_sub(self.benchmark_start_tsc);
+                    self.benchmark_elapsed_ms = elapsed_cycles / (unsafe { crate::TSC_PER_US }.max(1) as u64 * 1_000);
+                }
             }
         }
 
-        fn input(&mut self, _key: Key) {}
+        fn input(&mut self, key: Key) {
+            match key {
+                Key::Special(ScanCode::LEFT) => self.select_page(self.page + 3),
+                Key::Special(ScanCode::RIGHT) => self.select_page(self.page + 1),
+                Key::Printable(c) => {
+                    let code = u16::from(c) as u32;
+                    self.last_key = code;
+                    self.key_count = self.key_count.saturating_add(1);
+                    if self.recent_keys.len() == 12 { self.recent_keys.remove(0); }
+                    self.recent_keys.push(code);
+                    match char::from_u32(code).unwrap_or('\0').to_ascii_lowercase() {
+                        '1' => self.select_page(0),
+                        '2' => self.select_page(1),
+                        '3' => self.select_page(2),
+                        '4' => self.select_page(3),
+                        'm' => {
+                            self.memory_test.clear();
+                            self.memory_test.resize(4_096, 0);
+                            self.memory_cursor = 0;
+                            self.memory_errors = 0;
+                            self.memory_passed = None;
+                            self.memory_running = true;
+                            self.page = 2;
+                        }
+                        'b' => {
+                            self.benchmark_remaining = 20_000;
+                            self.benchmark_rounds = 0;
+                            self.benchmark_start_tsc = unsafe { core::arch::x86_64::_rdtsc() };
+                            self.page = 2;
+                        }
+                        _ => {}
+                    }
+                }
+                Key::Special(scan) => {
+                    let code = 0x1_0000 | scan.0 as u32;
+                    self.last_key = code;
+                    self.key_count = self.key_count.saturating_add(1);
+                    if self.recent_keys.len() == 12 { self.recent_keys.remove(0); }
+                    self.recent_keys.push(code);
+                }
+            }
+        }
 
         fn as_any(&self) -> &dyn core::any::Any { self }
         fn as_any_mut(&mut self) -> &mut dyn core::any::Any { self }

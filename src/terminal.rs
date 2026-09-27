@@ -36,7 +36,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
 
         COMMAND_BUFFER_HIST.push(owned_command);
     };
-    match command.as_slice()[0] {
+        match command.as_slice()[0] {
         "help" => {
             if parts.len() < 2 {
                 message!("\n", "commands sets available: \n\nhelp fs - FileSystem Help\nhelp vm - VM Help\nhelp hv - Hypervisor Help\nhelp net - Network Help\nhelp pm - Package Manager Help\nhelp reg - Registry Help\nhelp micro-c - Micro-C Help\nhelp misc - Misc. Help\nhelp prog [command] - Command-Specific Help\n\n")
@@ -63,8 +63,11 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                     "micro-c" => {
                         message!("\n", "\nMicro-C Toolchain:\n  micro-c compile [file.micro] - compile source to .asm\n  micro-c run [file.bin] - run compiled binary\n")
                     }
+                    "cc" => {
+                        message!("\n", "\nC tools:\n  cc [source.c] [output.o] - compile C to an HPVMx relocatable object\n  hpx-link [input.o|input.asm ...] [image.bin] - link mixed modules and write image.bin.hrel\n  hpx-pack [app|background] [image.bin] [out.hpx] [step] [state-size] [draw] [input] [width] [height] [image.bin.hrel]\n  See docs/HPX_EXECUTABLES.md for the on-disk ABI and calling convention.\n")
+                    }
                     "hpx" => {
-                        message!("\n", "\nHPX Executables:\n  run-hpx [file.hpx] [name] - load and start a disk executable\n  Header kind selects a stepped app or background task. See docs/HPX_EXECUTABLES.md for ABI v1.\n")
+                        message!("\n", "\nHPX Executables:\n  exec [file.hpx] [name] - execute a disk application or background task\n  run-hpx [file.hpx] [name] - alias for exec\n  hpx-link [input.o|input.asm ...] [image.bin]\n  hpx-pack [app|background] [image.bin] [out.hpx] [step] [state-size] [draw] [input] [width] [height] [image.bin.hrel]\n  Header kind selects a stepped app or background task. See docs/HPX_EXECUTABLES.md for ABI v1.\n")
                     }
                     "misc" => {
                         message!("\n", "\n Misc / Other:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\n  vdebug [on|off|status] - toggle verbose debug console logs\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n  beep [freq] [ms] - play a sound\n")
@@ -263,22 +266,27 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 show_dashboard_ui(package_manager);
             }
         }
-        "run-hpx" => {
+        "exec" | "run-hpx" => {
             if command.len() < 2 {
-                message!("\n", "Usage: run-hpx [file.hpx] [name]");
+                message!("\n", "Usage: exec [file.hpx] [name]");
             } else {
                 let path = command[1];
                 let name = command.get(2).copied().unwrap_or_else(|| path.rsplit(|c| c == '/' || c == '\\').next().unwrap_or(path));
-                unsafe {
+                let launch_result = unsafe {
                     if DISK_EXECUTABLES.is_none() { DISK_EXECUTABLES = Some(crate::disk_executable::DiskExecutableManager::new()); }
                     match (DISK_EXECUTABLES.as_mut(), GLOBALENV.as_mut()) {
-                        (Some(manager), Some(global)) => match manager.run_file(path, name, "1.0", &mut global.data) {
-                            Ok(pid) => message!("\n", "started HPX executable '{}' as pid {}", name, pid),
-                            Err(error) => hpvm_error!("hpx", "failed to run '{}': {}", path, error),
-                        },
-                        (_, None) => hpvm_error!("hpx", "global runtime is not initialized"),
-                        _ => hpvm_error!("hpx", "executable manager is unavailable"),
+                        (Some(manager), Some(global)) => manager.run_file(path, name, "1.0", &mut global.data),
+                        (_, None) => Err("global runtime is not initialized"),
+                        _ => Err("executable manager is unavailable"),
                     }
+                };
+                match launch_result {
+                    Ok(pid) => {
+                        message!("\n", "started executable '{}' as pid {}", name, pid);
+                        // The stepped app scheduler and window renderer run in the dashboard.
+                        unsafe { show_dashboard_ui(package_manager); }
+                    }
+                    Err(error) => hpvm_error!("exec", "failed to execute '{}': {}", path, error),
                 }
             }
         }
@@ -427,6 +435,95 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 }
             } else {
                 message!("\n", "Usage: micro-c [compile|run] [arch] [file]")
+            }
+        }
+
+        "hpx-pack" => {
+            if command.len() < 5 {
+                message!("\n", "Usage: hpx-pack [app|background] [image.bin] [out.hpx] [step] [state-size] [draw] [input] [width] [height] [image.bin.hrel]");
+            } else {
+                let result = (|| -> Result<(), &'static str> {
+                    let kind = match command[1] {
+                        "app" => crate::tools::hpx_pack::KIND_APP,
+                        "background" => crate::tools::hpx_pack::KIND_BACKGROUND,
+                        _ => return Err("kind must be app or background"),
+                    };
+                    let image = FileSystem::read_file(command[2])?;
+                    let parse_arg = |idx: usize, default: u32| -> Result<u32, &'static str> {
+                        command.get(idx).map(|v| crate::tools::hpx_pack::parse_u32(v)).unwrap_or(Ok(default))
+                    };
+                    let imports = if let Some(path) = command.get(10) {
+                        let sidecar = FileSystem::read_file(path)?;
+                        crate::tools::hpx_pack::decode_imports(&sidecar, image.len())?
+                    } else { Vec::new() };
+                    let packed = crate::tools::hpx_pack::pack_with_imports(&image, crate::tools::hpx_pack::PackOptions {
+                        kind,
+                        state_size: parse_arg(5, 0)?,
+                        step_offset: parse_arg(4, 0)?,
+                        draw_offset: parse_arg(6, 0)?,
+                        input_offset: parse_arg(7, 0)?,
+                        width: parse_arg(8, 640)?,
+                        height: parse_arg(9, 480)?,
+                    }, &imports)?;
+                    let _ = FileSystem::remove(command[3]);
+                    FileSystem::write_to_file_bytes(command[3], &packed, 'w')?;
+                    Ok(())
+                })();
+                match result {
+                    Ok(()) => message!("\n", "packed {} as HPX v1", command[3]),
+                    Err(error) => hpvm_error!("hpx-pack", "{}", error),
+                }
+            }
+        }
+
+        "cc" => {
+            if command.len() < 2 {
+                message!("\n", "Usage: cc [source.c] [output.o]");
+            } else {
+                let result = (|| -> Result<(), &'static str> {
+                    let source = FileSystem::read_file_to_string(command[1])?;
+                    let object = crate::tools::c_compiler::compile_to_object(&source)?;
+                    let output = command.get(2).copied().unwrap_or("output.o");
+                    let _ = FileSystem::remove(output);
+                    FileSystem::write_to_file_bytes(output, &object, 'w')?;
+                    Ok(())
+                })();
+                match result {
+                    Ok(()) => message!("\n", "compiled {} to HPVMx object {}", command[1], command.get(2).copied().unwrap_or("output.o")),
+                    Err(error) => hpvm_error!("cc", "{}", error),
+                }
+            }
+        }
+
+        "hpx-link" => {
+            if command.len() < 3 {
+                message!("\n", "Usage: hpx-link [input.o|input.asm ...] [image.bin]");
+            } else {
+                let result = (|| -> Result<(), &'static str> {
+                    let output = command[command.len() - 1];
+                    let mut modules = Vec::new();
+                    for path in &command[1..command.len() - 1] {
+                        let bytes = FileSystem::read_file(path)?;
+                        if path.ends_with(".o") {
+                            let object = crate::tools::c_object::decode(&bytes)?;
+                            modules.push(object.assembly);
+                        } else {
+                            modules.push(String::from(core::str::from_utf8(&bytes).map_err(|_| "assembly input must be UTF-8")?));
+                        }
+                    }
+                    let module_refs: Vec<&str> = modules.iter().map(String::as_str).collect();
+                    let linked = crate::tools::x64_linker::link_modules(&module_refs)?;
+                    let imports = crate::tools::hpx_pack::encode_imports(&linked.imports)?;
+                    let sidecar = alloc::format!("{}.hrel", output);
+                    let _ = FileSystem::remove(output);
+                    let _ = FileSystem::remove(&sidecar);
+                    FileSystem::write_to_file_bytes(output, &linked.image, 'w')?;
+                    FileSystem::write_to_file_bytes(&sidecar, &imports, 'w')?;
+                    message!("\n", "linked {} bytes; callbacks step={} draw={} input={} imports={}", linked.image.len(), linked.step_offset, linked.draw_offset, linked.input_offset, linked.imports.len());
+                    message!("\n", "relocations: {}", sidecar);
+                    Ok(())
+                })();
+                if let Err(error) = result { hpvm_error!("hpx-link", "{}", error); }
             }
         }
 
@@ -893,6 +990,22 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
         match crate::registry::load_system_registry(crate::registry::DEFAULT_SYSTEM_REG_PATH, &mut dashboard.settings) {
             Ok(_) => crate::vdebug!("reg", "loaded {}", crate::registry::DEFAULT_SYSTEM_REG_PATH),
             Err(e) => hpvm_warn!("reg", "could not load registry: {}", e),
+        }
+
+    }
+
+    // Commands such as `exec` add contexts to the shared runtime before opening
+    // the dashboard. Move them into the live renderer instead of replacing them
+    // with DashboardUI's empty initial process list on the first frame.
+    unsafe {
+        if let Some(global) = GLOBALENV.as_mut() {
+            if !global.data.active_apps.is_empty() {
+                dashboard.active_apps = core::mem::take(&mut global.data.active_apps);
+                dashboard.focused_process_idx = global.data.focused_process_idx;
+                dashboard.selected_app_idx = global.data.selected_app_idx;
+                dashboard.selected_process_idx = global.data.selected_process_idx;
+                dashboard.app_window_position = global.data.app_window_position;
+            }
         }
     }
 

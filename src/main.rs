@@ -36,6 +36,7 @@ mod loader;
 mod terminal;
 mod pm;
 mod micro_c;
+mod micro_c_externs;
 mod cpucheck;
 mod env;
 mod apps;

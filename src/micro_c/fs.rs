@@ -21,7 +21,7 @@ pub fn open_file_or_lib(path: &str) -> String {
             s.push_str("extern fn ref_get(ptr);\n");
             s
         }
-        "FS" | "fs" => {
+        "HPVMX.FS" | "hpvmx.fs" => {
             let mut s = String::new();
             s.push_str("extern fn fs_read_file(path);\n");
             s.push_str("extern fn fs_write_file(path, data);\n");
@@ -30,7 +30,7 @@ pub fn open_file_or_lib(path: &str) -> String {
             s.push_str("extern fn fs_mkdir(path);\n");
             s
         }
-        "OS" | "os" => {
+        "HPVMX.OS" | "hpvmx.os" => {
             let mut s = String::new();
             s.push_str("struct VM {\n");
             s.push_str("    id: i64;\n");
@@ -43,7 +43,7 @@ pub fn open_file_or_lib(path: &str) -> String {
             s.push_str("extern fn os_list_vms();\n");
             s
         }
-        "UI" | "ui" => {
+        "HPVMX.UI" | "hpvmx.ui" => {
             let mut s = String::new();
             s.push_str("extern fn ui_draw_pixel(x, y, color);\n");
             s.push_str("extern fn ui_fill_rect(x, y, w, h, color);\n");

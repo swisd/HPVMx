@@ -2022,13 +2022,6 @@ impl DashboardUI {
                     }
                     let step_tsc_end = unsafe { core::arch::x86_64::_rdtsc() };
 
-                    let draw_tsc_begin = unsafe { core::arch::x86_64::_rdtsc() };
-                    if !app_ctx.window.is_minimized {
-                        app_ctx.draw(&mut pg);
-                    }
-                    let draw_tsc_end = unsafe { core::arch::x86_64::_rdtsc() };
-
-                    app_ctx.ui_time = draw_tsc_end.saturating_sub(draw_tsc_begin) as usize;
                     app_ctx.cpu_time = step_tsc_end.saturating_sub(step_tsc_begin) as usize;
                 }
 
@@ -2043,6 +2036,19 @@ impl DashboardUI {
                     }
                 }
 
+                // App contents share the dashboard backbuffer with their
+                // window chrome. Later windows are drawn on top, matching the
+                // reverse-order hit testing used for pointer input.
+                for app_ctx in self.active_apps.iter_mut() {
+                    if app_ctx.window.is_minimized { continue; }
+                    let draw_tsc_begin = unsafe { core::arch::x86_64::_rdtsc() };
+                    crate::disk_executable::begin_plugin_frame_draw();
+                    app_ctx.draw(&mut pg);
+                    crate::disk_executable::end_plugin_frame_draw();
+                    crate::disk_executable::flush_plugin_frame_draw(&mut pg);
+                    let draw_tsc_end = unsafe { core::arch::x86_64::_rdtsc() };
+                    app_ctx.ui_time = draw_tsc_end.saturating_sub(draw_tsc_begin) as usize;
+                }
 
                 // Draw functional UI layers
                 let mut ypos = 0;
@@ -2085,8 +2091,7 @@ impl DashboardUI {
                 }
 
 
-                // Presentation belongs to the dashboard, not to a particular
-                // app or tab renderer.
+                // Present the complete dashboard and all windows in one copy.
                 pg.flip();
             // }
         }

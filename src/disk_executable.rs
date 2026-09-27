@@ -3,8 +3,9 @@
 //! The file is a 40-byte little-endian header followed by an x86-64 PIC image.
 //! The image has no imports or relocations: it calls the kernel only through
 //! `PluginHostApi`. Function offsets in the header select stepped app/task callbacks.
-use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
+use alloc::{boxed::Box, string::{String, ToString}, sync::Arc, vec, vec::Vec};
 use core::{alloc::Layout, ffi::c_void, mem::transmute, ptr::NonNull};
+use core::sync::atomic::{AtomicBool, Ordering};
 use crate::{env::{Application, Background, BackgroundSteppedApplicationContext, BackgroundTask, GlobalEnvironmentData, Runnable, SpinLock, SteppedApplicationContext}, filesystem::FileSystem};
 use crate::ui::pixel_graphics::PixelGraphics;
 
@@ -14,6 +15,36 @@ pub const HPX_HOST_API_VERSION: u32 = 2;
 pub const HPX_HEADER_SIZE: usize = 40;
 pub const KIND_STEPPED_APP: u16 = 1;
 pub const KIND_STEPPED_BACKGROUND: u16 = 2;
+
+enum PluginDrawCommand {
+    Text(usize, usize, String, u32),
+    FillRect(usize, usize, usize, usize, u32),
+}
+
+static PLUGIN_DRAW_ACTIVE: AtomicBool = AtomicBool::new(false);
+static PLUGIN_DRAW_COMMANDS: SpinLock<Vec<PluginDrawCommand>> = SpinLock::new(Vec::new());
+
+/// Begin collecting an executable's host drawing calls for the active frame.
+pub(crate) fn begin_plugin_frame_draw() {
+    PLUGIN_DRAW_COMMANDS.lock().clear();
+    PLUGIN_DRAW_ACTIVE.store(true, Ordering::Release);
+}
+
+/// Stop collecting drawing calls before flushing them into the shared backbuffer.
+pub(crate) fn end_plugin_frame_draw() {
+    PLUGIN_DRAW_ACTIVE.store(false, Ordering::Release);
+}
+
+/// Apply queued executable drawing calls to the dashboard's current backbuffer.
+pub(crate) fn flush_plugin_frame_draw(pg: &mut PixelGraphics) {
+    let commands = core::mem::take(&mut *PLUGIN_DRAW_COMMANDS.lock());
+    for command in commands {
+        match command {
+            PluginDrawCommand::Text(x, y, text, color) => pg.draw_text(x, y, &text, color),
+            PluginDrawCommand::FillRect(x, y, width, height, color) => pg.fill_rect(x, y, width, height, color),
+        }
+    }
+}
 
 /// Stable C ABI passed to disk executables. Host-table version 2 appends callbacks
 /// after the original v1 prefix; the executable file header remains ABI version 1.
@@ -205,12 +236,13 @@ unsafe extern "C" fn host_mute() { crate::devices::audio::mute(); }
 unsafe extern "C" fn host_sleep_ms(milliseconds: u64) { crate::devices::timer::sleep_ms(milliseconds); }
 
 unsafe extern "C" fn host_draw_text(x: usize, y: usize, bytes: *const u8, len: usize, color: u32) {
-    if bytes.is_null() || len > 1_048_576 { return; }
+    if !PLUGIN_DRAW_ACTIVE.load(Ordering::Acquire) || bytes.is_null() || len > 4096 { return; }
     let Ok(text) = core::str::from_utf8(unsafe { core::slice::from_raw_parts(bytes, len) }) else { return; };
-    if let Some(mut pg) = PixelGraphics::new() { pg.draw_text(x, y, text, color); pg.flip(); }
+    PLUGIN_DRAW_COMMANDS.lock().push(PluginDrawCommand::Text(x, y, text.to_string(), color));
 }
 unsafe extern "C" fn host_fill_rect(x: usize, y: usize, w: usize, h: usize, color: u32) {
-    if let Some(mut pg) = PixelGraphics::new() { pg.fill_rect(x, y, w, h, color); pg.flip(); }
+    if !PLUGIN_DRAW_ACTIVE.load(Ordering::Acquire) { return; }
+    PLUGIN_DRAW_COMMANDS.lock().push(PluginDrawCommand::FillRect(x, y, w, h, color));
 }
 unsafe extern "C" fn host_read_file(path: *const u8, path_len: usize, out: *mut u8, capacity: usize) -> i64 {
     if path.is_null() || path_len == 0 || path_len > 4096 { return -1; }
@@ -358,10 +390,18 @@ impl DiskExecutableManager {
         let image_start = header.header_size as usize;
         let image_end = image_start.checked_add(header.image_size as usize).ok_or("HPX image size overflow")?;
         let image_bytes = bytes.get(image_start..image_end).ok_or("truncated HPX image")?;
+        let imports = crate::tools::hpx_pack::decode_imports(&bytes[image_end..], image_bytes.len())?;
+        let resolved_imports: Vec<(usize, usize)> = imports.iter().map(|import| {
+            let address = crate::micro_c_externs::resolve_import(&import.symbol).ok_or("HPX imports an unsupported HPVMx function")?;
+            Ok((import.patch_offset as usize, address))
+        }).collect::<Result<_, &'static str>>()?;
         let pages = (image_bytes.len() + 4095) / 4096;
         let allocation = uefi::boot::allocate_pages(uefi::boot::AllocateType::AnyPages, uefi::boot::MemoryType::LOADER_CODE, pages).map_err(|_| "could not allocate executable pages")?;
         let image_ptr = NonNull::new(allocation.as_ptr().cast::<u8>()).ok_or("UEFI returned a null executable image")?;
         unsafe { core::ptr::copy_nonoverlapping(image_bytes.as_ptr(), image_ptr.as_ptr(), image_bytes.len()); }
+        for (offset, address) in resolved_imports {
+            unsafe { core::ptr::write_unaligned(image_ptr.as_ptr().add(offset).cast::<u64>(), address as u64); }
+        }
         let state_words = (header.state_size as usize).saturating_add(7) / 8;
         let state = vec![0u64; state_words].into_boxed_slice();
         let plugin = Arc::new(SpinLock::new(PluginState { image: image_ptr, header, state, running: true }));
@@ -376,6 +416,9 @@ impl DiskExecutableManager {
                 let context = SteppedApplicationContext::new(app, None);
                 let pid = context.pid;
                 runtime.active_apps.push(context);
+                runtime.focused_process_idx = Some(runtime.active_apps.len() - 1);
+                runtime.selected_app_idx = runtime.active_apps.len() - 1;
+                runtime.selected_process_idx = 2 + runtime.active_apps.len() - 1;
                 Ok(pid)
             }
             KIND_STEPPED_BACKGROUND => {

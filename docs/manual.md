@@ -72,11 +72,17 @@ Configure runtime environment variables.
 
 ### Micro-C IDE
 
-Accessible via the **Apps** tab. Provides a lightweight environment for C development.
-- **F5**: Compile the current source buffer.
-- **F6**: Cycle through target architectures (`x86_64`, `win64`, `arm64`).
-- **F7**: Clear the output/diagnostics pane.
-- **UP/DOWN**: Scroll through the source code.
+Accessible via the **Apps** tab. The IDE edits and saves Micro-C and C source files and invokes their independent compiler pipelines.
+- **F2**: Save the current buffer to the displayed source path.
+- **F3**: Load the displayed source path into the editor.
+- **F4**: Toggle source-path editing; type the path, then press F4 again.
+- **F5**: Compile. Micro-C writes target assembly to a sibling `.asm` file; C writes an HPVMx HXO object to a sibling `.o` file. Compiler output and errors appear in the right pane.
+- **F6**: Cycle the Micro-C target (`x86_64`, `win64`, `arm64`, `bytecode64`).
+- **F7**: Clear the output pane.
+- **F8**: Switch between Micro-C and C source modes and load a small example for that mode.
+- **Arrow keys**: Move the source cursor; **Backspace/Delete** removes the preceding character; printable keys edit source.
+
+The C mode uses the standalone C frontend and object writer, not the Micro-C backend. Its current implementation supports scalar integer expressions, direct calls, conditionals, and braced loops; it is not yet complete ISO C. See [HPX executable toolchain](HPX_EXECUTABLES.md) for supported language features and the linker/packer workflow.
 
 ### Shell Compilation
 You can also compile files directly from the shell:

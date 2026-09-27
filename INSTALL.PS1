@@ -43,7 +43,7 @@ Write-Output "Copying Binary EFI"
 New-Item -Path "$($MOUNT_LETTER):\EFI\BOOT" -ItemType Directory -Force
 Copy-Item $EFI_PATH "$($MOUNT_LETTER):\EFI\BOOT\BOOTX64.EFI"
 New-Item -Path "$($MOUNT_LETTER):\docs\man" -ItemType Directory -Force
-Copy-Item "./doc/manual.md" "$($MOUNT_LETTER):\docs\man\manual.md"
+Copy-Item "./docs/manual.md" "$($MOUNT_LETTER):\docs\man\manual.md"
 
 Copy-Item -Path "./internal/pm/*" -Destination "$($MOUNT_LETTER):\pm\" -Recurse -Force
 
