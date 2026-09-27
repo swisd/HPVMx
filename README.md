@@ -3,7 +3,7 @@
 A bare-metal (+BIOS & EFI) hardware provisioning and virtualization manager written in Rust. HPVMx provides a complete environment for managing virtual machines, exploring storage, and developing software on bare metal.
 
 ![](https://img.shields.io/badge/latest_version-1.16.3-blue)\
-![](https://img.shields.io/badge/supported_version*-1.15.1-green)
+![](https://img.shields.io/badge/supported_version*-1.15.1-green)\
 [![build](https://github.com/swisd/HPVMx/actions/workflows/rust.yml/badge.svg)](https://github.com/swisd/HPVMx/actions/workflows/rust.yml)
 > *supported version is the oldest verion that does not have to be updated to the newest version
 
