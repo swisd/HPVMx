@@ -9,6 +9,8 @@
 #![feature(const_heap)]
 #![feature(try_trait_v2)]
 #![feature(core_intrinsics)]
+#![allow(internal_features)]
+#![allow(stable_features)]
 extern crate alloc;
 
 mod ui;
