@@ -16,10 +16,10 @@ use uefi::{boot, runtime, system};
 use uefi_raw::Status;
 use uefi_raw::table::runtime::ResetType;
 use crate::filesystem::FileSystem;
-use crate::{hpvm_error, hpvm_info, hpvm_warn, hpvm_log, message, read_line, ui, HYPERVISOR, devices, loader, logiclang_int, read_line_int, env, apps, TSC_PER_US, GLOBALENV};
+use crate::{hpvm_error, hpvm_info, hpvm_warn, hpvm_log, message, read_line, ui, HYPERVISOR, devices, loader, logiclang_int, read_line_int, env, apps, TSC_PER_US, GLOBALENV, GLOBAL_SYNC_STATE};
 use crate::kernel::KernelLoader;
 use crate::rng::XorShiftRng;
-use crate::ui::DashboardUI;
+use crate::ui::{DashboardUI, VectorSyncState};
 use uefi::proto::console::text::{Color, Key};
 use crate::env::{Application, Environment};
 use crate::pm::PackageManager;
@@ -27,7 +27,7 @@ use crate::apps::simple_app::SimpleApp;
 use crate::hpvmlog::{LOGGING_SILENCED, set_verbose_debug, verbose_debug_enabled};
 use crate::ui::pixel_graphics::PixelGraphics;
 
-pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manager: &mut PackageManager) {
+pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manager: &mut PackageManager, parent_dashboard_ref: Option<&mut DashboardUI>) {
     unsafe {
         let owned_command: Vec<String> = command
             .iter()
@@ -276,15 +276,27 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                     if DISK_EXECUTABLES.is_none() { DISK_EXECUTABLES = Some(crate::disk_executable::DiskExecutableManager::new()); }
                     match (DISK_EXECUTABLES.as_mut(), GLOBALENV.as_mut()) {
                         (Some(manager), Some(global)) => manager.run_file(path, name, "1.0", &mut global.data),
-                        (_, None) => Err("global runtime is not initialized"),
-                        _ => Err("executable manager is unavailable"),
+                        (_, None) => Err(String::from("global runtime is not initialized")),
+                        _ => Err(String::from("executable manager is unavailable")),
                     }
                 };
                 match launch_result {
                     Ok(pid) => {
                         message!("\n", "started executable '{}' as pid {}", name, pid);
-                        // The stepped app scheduler and window renderer run in the dashboard.
-                        unsafe { show_dashboard_ui(package_manager); }
+                        if let Some(dash_ref) = parent_dashboard_ref {
+                            // The stepped app scheduler and window renderer run in the dashboard.
+                            unsafe {
+                                if let Some(global) = GLOBALENV.as_mut() {
+                                    if !global.data.active_apps.is_empty() {
+                                        dash_ref.active_apps = core::mem::take(&mut global.data.active_apps);
+                                        dash_ref.focused_process_idx = global.data.focused_process_idx;
+                                        dash_ref.selected_app_idx = global.data.selected_app_idx;
+                                        dash_ref.selected_process_idx = global.data.selected_process_idx;
+                                        dash_ref.app_window_position = global.data.app_window_position;
+                                    }
+                                }
+                            }
+                        }
                     }
                     Err(error) => hpvm_error!("exec", "failed to execute '{}': {}", path, error),
                 }
@@ -442,18 +454,18 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
             if command.len() < 5 {
                 message!("\n", "Usage: hpx-pack [app|background] [image.bin] [out.hpx] [step] [state-size] [draw] [input] [width] [height] [image.bin.hrel]");
             } else {
-                let result = (|| -> Result<(), &'static str> {
+                let result = (|| -> Result<(), String> {
                     let kind = match command[1] {
                         "app" => crate::tools::hpx_pack::KIND_APP,
                         "background" => crate::tools::hpx_pack::KIND_BACKGROUND,
-                        _ => return Err("kind must be app or background"),
+                        _ => return Err(String::from("kind must be app or background")),
                     };
-                    let image = FileSystem::read_file(command[2])?;
-                    let parse_arg = |idx: usize, default: u32| -> Result<u32, &'static str> {
+                    let image = FileSystem::read_file(command[2]).map_err(|e| String::from(e))?;
+                    let parse_arg = |idx: usize, default: u32| -> Result<u32, String> {
                         command.get(idx).map(|v| crate::tools::hpx_pack::parse_u32(v)).unwrap_or(Ok(default))
                     };
                     let imports = if let Some(path) = command.get(10) {
-                        let sidecar = FileSystem::read_file(path)?;
+                        let sidecar = FileSystem::read_file(path).map_err(|e| String::from(e))?;
                         crate::tools::hpx_pack::decode_imports(&sidecar, image.len())?
                     } else { Vec::new() };
                     let packed = crate::tools::hpx_pack::pack_with_imports(&image, crate::tools::hpx_pack::PackOptions {
@@ -466,7 +478,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                         height: parse_arg(9, 480)?,
                     }, &imports)?;
                     let _ = FileSystem::remove(command[3]);
-                    FileSystem::write_to_file_bytes(command[3], &packed, 'w')?;
+                    FileSystem::write_to_file_bytes(command[3], &packed, 'w').map_err(|e| String::from(e))?;
                     Ok(())
                 })();
                 match result {
@@ -480,7 +492,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
             if command.len() < 2 {
                 message!("\n", "Usage: cc [source.c] [output.o]");
             } else {
-                let result = (|| -> Result<(), &'static str> {
+                let result = (|| -> Result<(), String> {
                     let source = FileSystem::read_file_to_string(command[1])?;
                     let object = crate::tools::c_compiler::compile_to_object(&source)?;
                     let output = command.get(2).copied().unwrap_or("output.o");
@@ -499,7 +511,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
             if command.len() < 3 {
                 message!("\n", "Usage: hpx-link [input.o|input.asm ...] [image.bin]");
             } else {
-                let result = (|| -> Result<(), &'static str> {
+                let result = (|| -> Result<(), String> {
                     let output = command[command.len() - 1];
                     let mut modules = Vec::new();
                     for path in &command[1..command.len() - 1] {
@@ -508,7 +520,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                             let object = crate::tools::c_object::decode(&bytes)?;
                             modules.push(object.assembly);
                         } else {
-                            modules.push(String::from(core::str::from_utf8(&bytes).map_err(|_| "assembly input must be UTF-8")?));
+                            modules.push(String::from(core::str::from_utf8(&bytes).map_err(|_| String::from("assembly input must be UTF-8"))?));
                         }
                     }
                     let module_refs: Vec<&str> = modules.iter().map(String::as_str).collect();
@@ -1007,7 +1019,10 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                 dashboard.app_window_position = global.data.app_window_position;
             }
         }
+        GLOBAL_SYNC_STATE = Some(VectorSyncState::new(dashboard.active_apps.len()));
     }
+
+
 
     LOGGING_SILENCED = true;
     dashboard.refresh_storage();
@@ -1093,6 +1108,22 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
     loop {
         unsafe { crate::hpvmlog::BUSY_TSC = 0; }
         tick_disk_executables();
+        unsafe {
+            if let Some(global) = GLOBALENV.as_mut() {
+                if !global.data.active_apps.is_empty() {
+                    for app_ctx in core::mem::take(&mut global.data.active_apps) {
+                        if !dashboard.active_apps.iter().any(|a| a.pid == app_ctx.pid) {
+                            dashboard.active_apps.push(app_ctx);
+                        }
+                    }
+                    if let Some(idx) = global.data.focused_process_idx {
+                        dashboard.focused_process_idx = Some(idx.min(dashboard.active_apps.len().saturating_sub(1)));
+                    }
+                    dashboard.selected_app_idx = global.data.selected_app_idx.min(dashboard.active_apps.len().saturating_sub(1));
+                    dashboard.selected_process_idx = global.data.selected_process_idx;
+                }
+            }
+        }
         let frame_start_tsc = unsafe { core::arch::x86_64::_rdtsc() };
 
         // update non-blocking audio
@@ -1100,7 +1131,7 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
 
         frame_count += 1;
 
-        let now = uefi::runtime::get_time().unwrap();
+        let now = runtime::get_time().unwrap();
 
         // Check if 1 second has passed (simplistic check)
         if now.second() != last_second_time.second() {
@@ -1207,6 +1238,11 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
             dashboard.refresh_storage();
             dashboard.refresh_devices();
             last_refresh = 0;
+        }
+        unsafe {
+            if let Some(gss) = GLOBAL_SYNC_STATE.as_mut() {
+                gss.sync(&mut dashboard, &mut GLOBALENV.as_mut().unwrap());
+            }
         }
 
         let draw_tsc_begin = unsafe { core::arch::x86_64::_rdtsc() };
@@ -1329,11 +1365,21 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
                 }
                 break;
             }
+            unsafe {
+                if let Some(gss) = GLOBAL_SYNC_STATE.as_mut() {
+                    gss.sync(&mut dashboard, &mut GLOBALENV.as_mut().unwrap());
+                }
+            }
         }
 
         unsafe {
             if let Some(env) = GLOBALENV.as_mut() {
                 dashboard = env.data.pull_from_ui_thru(dashboard);
+            }
+        }
+        unsafe {
+            if let Some(gss) = GLOBAL_SYNC_STATE.as_mut() {
+                gss.sync(&mut dashboard, &mut GLOBALENV.as_mut().unwrap());
             }
         }
 

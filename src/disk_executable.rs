@@ -6,7 +6,7 @@
 use alloc::{boxed::Box, string::{String, ToString}, sync::Arc, vec, vec::Vec};
 use core::{alloc::Layout, ffi::c_void, mem::transmute, ptr::NonNull};
 use core::sync::atomic::{AtomicBool, Ordering};
-use crate::{env::{Application, Background, BackgroundSteppedApplicationContext, BackgroundTask, GlobalEnvironmentData, Runnable, SpinLock, SteppedApplicationContext}, filesystem::FileSystem};
+use crate::{env::{Application, Background, BackgroundSteppedApplicationContext, BackgroundTask, GlobalEnvironmentData, Runnable, SpinLock, SteppedApplicationContext}, filesystem::FileSystem, vdebug_autoprefix};
 use crate::ui::pixel_graphics::PixelGraphics;
 
 pub const HPX_MAGIC: [u8; 4] = *b"HPX1";
@@ -19,6 +19,7 @@ pub const KIND_STEPPED_BACKGROUND: u16 = 2;
 enum PluginDrawCommand {
     Text(usize, usize, String, u32),
     FillRect(usize, usize, usize, usize, u32),
+    DrawLine(usize, usize, usize, usize, u32),
 }
 
 static PLUGIN_DRAW_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -42,6 +43,7 @@ pub(crate) fn flush_plugin_frame_draw(pg: &mut PixelGraphics) {
         match command {
             PluginDrawCommand::Text(x, y, text, color) => pg.draw_text(x, y, &text, color),
             PluginDrawCommand::FillRect(x, y, width, height, color) => pg.fill_rect(x, y, width, height, color),
+            PluginDrawCommand::DrawLine(x0, y0, x1, y1, color) => pg.draw_line(x0 , y0, x1, y1, color),
         }
     }
 }
@@ -76,6 +78,7 @@ pub struct PluginHostApi {
     pub play_tone: unsafe extern "C" fn(u32, u64),
     pub mute: unsafe extern "C" fn(),
     pub sleep_ms: unsafe extern "C" fn(u64),
+    pub draw_line: unsafe extern "C" fn(usize, usize, usize, usize, u32),
 }
 
 #[repr(C)]
@@ -112,6 +115,7 @@ static HOST_API: PluginHostApi = PluginHostApi {
     abi_version: HPX_HOST_API_VERSION,
     draw_text: host_draw_text,
     fill_rect: host_fill_rect,
+    draw_line: host_draw_line,
     read_file: host_read_file,
     write_file: host_write_file,
     allocate: host_allocate,
@@ -244,6 +248,10 @@ unsafe extern "C" fn host_fill_rect(x: usize, y: usize, w: usize, h: usize, colo
     if !PLUGIN_DRAW_ACTIVE.load(Ordering::Acquire) { return; }
     PLUGIN_DRAW_COMMANDS.lock().push(PluginDrawCommand::FillRect(x, y, w, h, color));
 }
+unsafe extern "C" fn host_draw_line(x0: usize, y0: usize, x1: usize, y1: usize, color: u32) {
+    if !PLUGIN_DRAW_ACTIVE.load(Ordering::Acquire) { return; }
+    PLUGIN_DRAW_COMMANDS.lock().push(PluginDrawCommand::DrawLine(x0, y0, x1, y1, color));
+}
 unsafe extern "C" fn host_read_file(path: *const u8, path_len: usize, out: *mut u8, capacity: usize) -> i64 {
     if path.is_null() || path_len == 0 || path_len > 4096 { return -1; }
     let Ok(path) = core::str::from_utf8(unsafe { core::slice::from_raw_parts(path, path_len) }) else { return -1; };
@@ -260,16 +268,49 @@ unsafe extern "C" fn host_write_file(path: *const u8, path_len: usize, data: *co
     FileSystem::write_to_file_bytes(path, bytes, 'w').map(|_| 0).unwrap_or(-1)
 }
 unsafe extern "C" fn host_allocate(size: usize, alignment: usize) -> *mut c_void {
-    let Some(alignment) = alignment.max(core::mem::align_of::<usize>()).checked_next_power_of_two() else { return core::ptr::null_mut(); };
-    let Ok(layout) = Layout::from_size_align(size.max(1), alignment) else { return core::ptr::null_mut(); };
-    unsafe { alloc::alloc::alloc(layout).cast() }
+    let align = alignment.max(core::mem::align_of::<usize>()).next_power_of_two();
+    let header_size = core::mem::size_of::<usize>().max(align);
+    let total_size = match size.checked_add(header_size) {
+        Some(s) => s.max(1),
+        None => {
+            vdebug_autoprefix!(4, "host_allocate: Size overflow (size={}, align={})", size, align);
+            return core::ptr::null_mut();
+        }
+    };
+
+    let Ok(layout) = Layout::from_size_align(total_size, align) else {
+        vdebug_autoprefix!(4, "host_allocate: Invalid Layout(total_size={}, align={})", total_size, align);
+        return core::ptr::null_mut();
+    };
+
+    let ptr = unsafe { alloc::alloc::alloc(layout) };
+    if ptr.is_null() {
+        vdebug_autoprefix!(4, "host_allocate: UEFI Allocator OOM for total_size={}, align={}", total_size, align);
+        return core::ptr::null_mut();
+    }
+
+    // Store total allocation size in the header offset
+    unsafe {
+        *(ptr as *mut usize) = total_size;
+        ptr.add(header_size).cast()
+    }
 }
-unsafe extern "C" fn host_deallocate(ptr: *mut c_void, size: usize, alignment: usize) {
+
+unsafe extern "C" fn host_deallocate(ptr: *mut c_void, _size: usize, alignment: usize) {
     if ptr.is_null() { return; }
-    if let Some(alignment) = alignment.max(core::mem::align_of::<usize>()).checked_next_power_of_two() {
-      if let Ok(layout) = Layout::from_size_align(size.max(1), alignment) {
-        unsafe { alloc::alloc::dealloc(ptr.cast(), layout); }
-      }
+
+    let align = alignment.max(core::mem::align_of::<usize>()).next_power_of_two();
+    let header_size = core::mem::size_of::<usize>().max(align);
+
+    unsafe {
+        let raw_ptr = (ptr as *mut u8).sub(header_size);
+        let total_size = *(raw_ptr as *const usize);
+
+        if let Ok(layout) = Layout::from_size_align(total_size, align) {
+            alloc::alloc::dealloc(raw_ptr, layout);
+        } else {
+            vdebug_autoprefix!(4, "host_deallocate: Invalid Layout on free(total_size={}, align={})", total_size, align);
+        }
     }
 }
 
@@ -384,20 +425,20 @@ impl DiskExecutableManager {
     pub const fn new() -> Self { Self { image_pages: Vec::new(), background_tasks: Vec::new() } }
 
     /// Load a `.hpx` file, inspect its header kind, and start it as an app or task.
-    pub fn run_file(&mut self, path: &str, name: &str, version: &str, runtime: &mut GlobalEnvironmentData) -> Result<usize, &'static str> {
-        let bytes = FileSystem::read_file(path)?;
-        let header = HpxHeader::parse(&bytes)?;
+    pub fn run_file(&mut self, path: &str, name: &str, version: &str, runtime: &mut GlobalEnvironmentData) -> Result<usize, String> {
+        let bytes = FileSystem::read_file(path).map_err(|e| String::from(e))?;
+        let header = HpxHeader::parse(&bytes).map_err(|e| String::from(e))?;
         let image_start = header.header_size as usize;
-        let image_end = image_start.checked_add(header.image_size as usize).ok_or("HPX image size overflow")?;
-        let image_bytes = bytes.get(image_start..image_end).ok_or("truncated HPX image")?;
+        let image_end = image_start.checked_add(header.image_size as usize).ok_or_else(|| String::from("HPX image size overflow"))?;
+        let image_bytes = bytes.get(image_start..image_end).ok_or_else(|| String::from("truncated HPX image"))?;
         let imports = crate::tools::hpx_pack::decode_imports(&bytes[image_end..], image_bytes.len())?;
         let resolved_imports: Vec<(usize, usize)> = imports.iter().map(|import| {
-            let address = crate::micro_c_externs::resolve_import(&import.symbol).ok_or("HPX imports an unsupported HPVMx function")?;
+            let address = crate::micro_c_externs::resolve_import(&import.symbol).ok_or_else(|| String::from("HPX imports an unsupported HPVMx function"))?;
             Ok((import.patch_offset as usize, address))
-        }).collect::<Result<_, &'static str>>()?;
+        }).collect::<Result<_, String>>()?;
         let pages = (image_bytes.len() + 4095) / 4096;
-        let allocation = uefi::boot::allocate_pages(uefi::boot::AllocateType::AnyPages, uefi::boot::MemoryType::LOADER_CODE, pages).map_err(|_| "could not allocate executable pages")?;
-        let image_ptr = NonNull::new(allocation.as_ptr().cast::<u8>()).ok_or("UEFI returned a null executable image")?;
+        let allocation = uefi::boot::allocate_pages(uefi::boot::AllocateType::AnyPages, uefi::boot::MemoryType::LOADER_CODE, pages).map_err(|_| String::from("could not allocate executable pages"))?;
+        let image_ptr = NonNull::new(allocation.as_ptr().cast::<u8>()).ok_or_else(|| String::from("UEFI returned a null executable image"))?;
         unsafe { core::ptr::copy_nonoverlapping(image_bytes.as_ptr(), image_ptr.as_ptr(), image_bytes.len()); }
         for (offset, address) in resolved_imports {
             unsafe { core::ptr::write_unaligned(image_ptr.as_ptr().add(offset).cast::<u64>(), address as u64); }
@@ -430,7 +471,7 @@ impl DiskExecutableManager {
                 self.background_tasks.push(context);
                 Ok(pid)
             }
-            _ => Err("unknown HPX kind"),
+            _ => Err(String::from("unknown HPX kind")),
         }
     }
 

@@ -19,6 +19,10 @@ panic = "abort"
 [profile.release]
 panic = "abort"
 
+[package.metadata.release]
+pre-release-replacements = [
+    { file = "README.md", search = "latest_version-\\d+\\.\\d+\\.\\d+-blue", replace = "latest_version-{{version}}-blue" }
+]
 
 
 [dependencies]

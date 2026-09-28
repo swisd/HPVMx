@@ -2,19 +2,35 @@
 
 A bare-metal (+BIOS & EFI) hardware provisioning and virtualization manager written in Rust. HPVMx provides a complete environment for managing virtual machines, exploring storage, and developing software on bare metal.
 
-![](https://img.shields.io/badge/latest_version-1.16.3-blue)\
+![](https://img.shields.io/badge/latest_version-1.18.9-blue)\
 ![](https://img.shields.io/badge/supported_version*-1.15.1-green)\
 [![build](https://github.com/swisd/HPVMx/actions/workflows/rust.yml/badge.svg)](https://github.com/swisd/HPVMx/actions/workflows/rust.yml)
 > *supported version is the oldest verion that does not have to be updated to the newest version
 
-## Key Features
+##  Features
 
-- **Hypervisor Dashboard**: Full VM lifecycle management with save/restore capabilities.
-- **Storage Explorer**: Comprehensive file system management (create, rename, copy, move, delete).
-- **Network Stack**: SNP-based networking with ping, LAN scanning, and an integrated HTTP management listener.
-- **Package Manager**: Registry-based package management with dependency verification and updates.
-- **Micro-C Toolchain**: A built-in C-to-Assembly compiler and IDE (`MicroIDE`) for bare-metal development.
-- **Settings Registry**: Dynamic environment configuration through a structured settings UI.
+- **Hypervisor Dashboard** 
+
+[//]: # (Full VM lifecycle management with save/restore capabilities.)
+[//]: # (- **Storage Explorer**: )
+
+[//]: # (Comprehensive file system management &#40;create, rename, copy, move, delete&#41;.)
+- **Full Networking**
+
+[//]: # (SNP-based networking with ping, LAN scanning, and an integrated HTTP management listener.)
+- **Package Manager** 
+
+[//]: # (Registry-based package management with dependency verification and updates.)
+- **Integrated Micro-C Toolchain** 
+
+
+- **Integrated C Compiler**
+
+[//]: # (A built-in C-to-Assembly compiler and IDE &#40;`MicroIDE`&#41; for bare-metal development.)
+
+[//]: # (- **Settings Registry**: )
+[//]: # (Dynamic environment configuration through a structured settings UI.)
+
 
 ## Getting Started
 

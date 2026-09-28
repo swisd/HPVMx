@@ -118,7 +118,7 @@ use ui::DashboardUI;
 use types::*;
 use crate::paging::PagingManager;
 use crate::rng::XorShiftRng;
-use crate::ui::DashboardTab;
+use crate::ui::{DashboardTab, VectorSyncState};
 use pm::PackageManager;
 use crate::env::{GlobalEnvironment, GlobalEnvironmentData};
 use crate::page::{Pagefile, PagefileHeader};
@@ -138,7 +138,7 @@ static mut PAGEFILE: Pagefile = Pagefile { header: PagefileHeader::DefaultHeader
 
 static mut MOUSE: Option<ScopedProtocol<Pointer>> = None;
 
-
+static mut GLOBAL_SYNC_STATE: Option<VectorSyncState> = Some(VectorSyncState::new(0));
 
 static REG_HIVE_PATHS: [&str; 3] = [
     "/reg/hive/hive0.xdb", // Primary hive
@@ -168,7 +168,7 @@ pub unsafe extern "C" fn wcslen(mut s: *const u16) -> usize {
 #[entry]
 fn main() -> Status {
     uefi::helpers::init().unwrap();
-    crate::vdebug!("UEFI", "init uefi helpers");
+    vdebug!("UEFI", "init uefi helpers");
     hpvmlog::init_log_buffer();
 
     // FIXED: Using addr_of_mut! to avoid static_mut_refs errors
@@ -435,7 +435,7 @@ fn main() -> Status {
         let command = command.split(" ").collect::<Vec<&str>>();
         let parts = command.clone();
 
-        terminal::cmd(command, &parts, body, &mut PACKAGE_MANAGER);
+        terminal::cmd(command, &parts, body, &mut PACKAGE_MANAGER, None);
 
     }
 

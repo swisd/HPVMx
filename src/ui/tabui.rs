@@ -2669,7 +2669,7 @@ pub mod console {
                                 let command_parts = command.split(' ').collect::<Vec<&str>>();
                                 let parts = command_parts.clone();
 
-                                terminal::cmd(command_parts, &parts, body, &mut ui.package_manager);
+                                terminal::cmd(command_parts, &parts, body, &mut ui.package_manager, None);
                                 ui.command_history.push(command);
                                 ui.history_idx = None;
                             }
@@ -2762,7 +2762,7 @@ pub mod console {
             const HEIGHT: usize = 600;
             const MARGIN: usize = 16;
 
-            pg.draw_text(x + 20, y + 20, "Hypervisor Real-time Log", 0x00FF00);
+            pg.draw_text(x + 20, y + 20, "Hypervisor Global Console", 0x00FF00);
             let logs = crate::hpvmlog::get_logs();
             pg.draw_log_viewer(x + MARGIN, y + 50, WIDTH - MARGIN * 2, HEIGHT - 135 - MARGIN * 8, &logs, 0, 0);
 
@@ -2809,7 +2809,7 @@ pub mod console {
                                 let parts = command_parts.clone();
                                 let body = command_parts.clone();
                                 let mut package_manager = PackageManager::new();
-                                crate::terminal::cmd(command_parts, &parts, body, &mut package_manager);
+                                terminal::cmd(command_parts, &parts, body, &mut package_manager, None);
                                 self.command_history.push(command);
                             }
                             self.history_idx = None;
@@ -2828,7 +2828,7 @@ pub mod console {
     }
 
     impl AppInfo for X_Console {
-        fn name(&self) -> &str { "Console" }
+        fn name(&self) -> &str { "Global Console" }
         fn version(&self) -> &str { "1.0.0" }
         fn icon(&self) -> [u32; 1024] { crate::ui::pixel_graphics::icons::COM_PORT_32_ICON_DATA }
         fn dimensions(&self) -> (usize, usize) { (800, 600) }

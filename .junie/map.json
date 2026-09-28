@@ -1,6 +1,6 @@
 {
   "project_name": "HPVMx",
-  "last_updated_by_junie": "2026-08-24",
+  "last_updated_by_junie": "2026-09-27",
   "files": {
     "Cargo.toml": {
       "path": "Cargo.toml",
@@ -10526,6 +10526,50 @@
       "objects": {},
       "dependencies": []
     },
+    "src/tools/c_compiler.rs": {
+      "path": "src/tools/c_compiler.rs",
+      "purpose": "Standalone C compiler frontend for compiling C source files into HPVMx objects with sizeof support, vdebug_autoprefix error logging at source, and qualified cast type support.",
+      "key_regions": [
+        {
+          "lines": "1-778",
+          "description": "Tokenization, preprocessing, AST translation, expression translation, sizeof evaluation, source-level error reporting, and qualified cast types."
+        }
+      ],
+      "objects": {
+        "compile_to_object": {
+          "type": "pub fn",
+          "args": {
+            "source": "&str"
+          },
+          "returns": "Result<Vec<u8>, String>"
+        },
+        "compile_to_assembly": {
+          "type": "pub fn",
+          "args": {
+            "source": "&str"
+          },
+          "returns": "Result<String, String>"
+        },
+        "is_cast_type": {
+          "type": "pub fn",
+          "args": {
+            "token": "&str"
+          },
+          "returns": "bool"
+        },
+        "evaluate_sizeof": {
+          "type": "fn",
+          "args": {
+            "inner": "&[String]"
+          },
+          "returns": "Result<usize, String>"
+        }
+      },
+      "dependencies": [
+        "src/tools/c_backend.rs",
+        "src/tools/c_object.rs"
+      ]
+    },
     "src/tools/dsk.rs": {
       "path": "src/tools/dsk.rs",
       "purpose": "Dsk implementation and runtime definitions for tools subsystem.",
@@ -16542,6 +16586,48 @@
       },
       "dependencies": [
         "src/ui/tabui.rs"
+      ]
+    },
+    "examples/hpx_obj_viewer.c": {
+      "path": "examples/hpx_obj_viewer.c",
+      "purpose": "3D model viewer for .obj files with MineCrap controls, written in C as an HPVMx executable.",
+      "key_regions": [
+        {
+          "lines": "1-374",
+          "description": "HPX 3D object viewer application implementing parsing, rendering, and MineCrap camera controls"
+        }
+      ],
+      "objects": {
+        "hpx_step": {
+          "type": "uint32_t",
+          "args": {
+            "host": "const HpxHostApi*",
+            "opaque": "void*"
+          },
+          "returns": "uint32_t"
+        },
+        "hpx_draw": {
+          "type": "void",
+          "args": {
+            "host": "const HpxHostApi*",
+            "opaque": "void*",
+            "x": "size_t",
+            "y": "size_t"
+          },
+          "returns": "void"
+        },
+        "hpx_input": {
+          "type": "void",
+          "args": {
+            "host": "const HpxHostApi*",
+            "opaque": "void*",
+            "packed_key": "uint32_t"
+          },
+          "returns": "void"
+        }
+      },
+      "dependencies": [
+        "examples/hpx_v1.h"
       ]
     }
   }

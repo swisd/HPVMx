@@ -1,7 +1,13 @@
 //! On-device HPX v1 packer. Kept separate from the compiler so compiled images
 //! can be packaged independently and the file format can be reused by apps.
 
-use alloc::vec::Vec;
+use alloc::{string::{String, ToString}, vec::Vec};
+use crate::vdebug_autoprefix;
+
+fn err_str(msg: &str) -> String {
+    vdebug_autoprefix!(12, "HPX pack error [Advanced Debug]: {}", msg);
+    msg.to_string()
+}
 
 pub const HEADER_SIZE: usize = 40;
 pub const KIND_APP: u16 = 1;
@@ -25,20 +31,20 @@ pub struct PackOptions {
 }
 
 /// Create an HPX v1 file from a position-independent x86-64 image.
-pub fn pack(image: &[u8], options: PackOptions) -> Result<Vec<u8>, &'static str> {
+pub fn pack(image: &[u8], options: PackOptions) -> Result<Vec<u8>, String> {
     pack_with_imports(image, options, &[])
 }
 
-pub fn pack_with_imports(image: &[u8], options: PackOptions, imports: &[ImportRelocation]) -> Result<Vec<u8>, &'static str> {
-    if image.is_empty() || image.len() > MAX_IMAGE_SIZE { return Err("image size must be between 1 byte and 64 MiB"); }
-    if options.state_size as usize > MAX_STATE_SIZE { return Err("state size exceeds 16 MiB"); }
-    if !matches!(options.kind, KIND_APP | KIND_BACKGROUND) { return Err("unknown HPX executable kind"); }
-    if options.step_offset as usize >= image.len() { return Err("step callback offset is outside the image"); }
-    if options.draw_offset != 0 && options.draw_offset as usize >= image.len() { return Err("draw callback offset is outside the image"); }
-    if options.input_offset != 0 && options.input_offset as usize >= image.len() { return Err("input callback offset is outside the image"); }
-    if options.kind == KIND_APP && (options.width == 0 || options.height == 0) { return Err("app dimensions must be nonzero"); }
+pub fn pack_with_imports(image: &[u8], options: PackOptions, imports: &[ImportRelocation]) -> Result<Vec<u8>, String> {
+    if image.is_empty() || image.len() > MAX_IMAGE_SIZE { return Err(err_str("image size must be between 1 byte and 64 MiB")); }
+    if options.state_size as usize > MAX_STATE_SIZE { return Err(err_str("state size exceeds 16 MiB")); }
+    if !matches!(options.kind, KIND_APP | KIND_BACKGROUND) { return Err(err_str("unknown HPX executable kind")); }
+    if options.step_offset as usize >= image.len() { return Err(err_str("step callback offset is outside the image")); }
+    if options.draw_offset != 0 && options.draw_offset as usize >= image.len() { return Err(err_str("draw callback offset is outside the image")); }
+    if options.input_offset != 0 && options.input_offset as usize >= image.len() { return Err(err_str("input callback offset is outside the image")); }
+    if options.kind == KIND_APP && (options.width == 0 || options.height == 0) { return Err(err_str("app dimensions must be nonzero")); }
 
-    let image_size = u32::try_from(image.len()).map_err(|_| "image size does not fit HPX header")?;
+    let image_size = u32::try_from(image.len()).map_err(|_| err_str("image size does not fit HPX header"))?;
     let mut file = Vec::with_capacity(HEADER_SIZE + image.len());
     file.extend_from_slice(b"HPX1");
     file.extend_from_slice(&1u16.to_le_bytes());
@@ -60,14 +66,14 @@ pub fn pack_with_imports(image: &[u8], options: PackOptions, imports: &[ImportRe
 }
 
 /// Serialize import fixups for the HPX trailer and the separate `.hrel` sidecar.
-pub fn encode_imports(imports: &[ImportRelocation]) -> Result<Vec<u8>, &'static str> {
-    if imports.len() > 4096 { return Err("too many imported functions"); }
+pub fn encode_imports(imports: &[ImportRelocation]) -> Result<Vec<u8>, String> {
+    if imports.len() > 4096 { return Err(err_str("too many imported functions")); }
     let mut out = Vec::new();
     out.extend_from_slice(&RELOCATION_MAGIC);
     out.extend_from_slice(&(imports.len() as u32).to_le_bytes());
     for reloc in imports {
         if reloc.symbol.is_empty() || reloc.symbol.len() > 128 || !reloc.symbol.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-            return Err("invalid import symbol in relocation table");
+            return Err(err_str("invalid import symbol in relocation table"));
         }
         out.extend_from_slice(&reloc.patch_offset.to_le_bytes());
         out.extend_from_slice(&(reloc.symbol.len() as u16).to_le_bytes());
@@ -77,37 +83,37 @@ pub fn encode_imports(imports: &[ImportRelocation]) -> Result<Vec<u8>, &'static 
 }
 
 /// Read an HPR1 relocation block and validate each 64-bit patch site.
-pub fn decode_imports(data: &[u8], image_size: usize) -> Result<Vec<ImportRelocation>, &'static str> {
+pub fn decode_imports(data: &[u8], image_size: usize) -> Result<Vec<ImportRelocation>, String> {
     if data.is_empty() { return Ok(Vec::new()); }
-    if data.len() < 8 || data[..4] != RELOCATION_MAGIC { return Err("invalid HPX relocation trailer"); }
+    if data.len() < 8 || data[..4] != RELOCATION_MAGIC { return Err(err_str("invalid HPX relocation trailer")); }
     let count = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
-    if count > 4096 { return Err("too many HPX import relocations"); }
+    if count > 4096 { return Err(err_str("too many HPX import relocations")); }
     let mut cursor = 8usize;
     let mut imports = Vec::with_capacity(count);
     for _ in 0..count {
-        let offset_end = cursor.checked_add(6).ok_or("relocation table overflow")?;
-        let header = data.get(cursor..offset_end).ok_or("truncated relocation table")?;
+        let offset_end = cursor.checked_add(6).ok_or_else(|| err_str("relocation table overflow"))?;
+        let header = data.get(cursor..offset_end).ok_or_else(|| err_str("truncated relocation table"))?;
         let offset = u32::from_le_bytes(header[..4].try_into().unwrap());
         let name_len = u16::from_le_bytes(header[4..6].try_into().unwrap()) as usize;
         cursor = offset_end;
-        let end = cursor.checked_add(name_len).ok_or("relocation name overflow")?;
-        let bytes = data.get(cursor..end).ok_or("truncated relocation symbol")?;
-        let symbol = core::str::from_utf8(bytes).map_err(|_| "relocation symbol is not UTF-8")?;
-        if image_size < 8 || offset as usize > image_size - 8 { return Err("relocation patch lies outside image"); }
-        if symbol.is_empty() || symbol.len() > 128 || !symbol.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') { return Err("invalid relocation symbol"); }
+        let end = cursor.checked_add(name_len).ok_or_else(|| err_str("relocation name overflow"))?;
+        let bytes = data.get(cursor..end).ok_or_else(|| err_str("truncated relocation symbol"))?;
+        let symbol = core::str::from_utf8(bytes).map_err(|_| err_str("relocation symbol is not UTF-8"))?;
+        if image_size < 8 || offset as usize > image_size - 8 { return Err(err_str("relocation patch lies outside image")); }
+        if symbol.is_empty() || symbol.len() > 128 || !symbol.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') { return Err(err_str("invalid relocation symbol")); }
         imports.push(ImportRelocation { patch_offset: offset, symbol: alloc::string::String::from(symbol) });
         cursor = end;
     }
-    if cursor != data.len() { return Err("extra bytes after relocation table"); }
+    if cursor != data.len() { return Err(err_str("extra bytes after relocation table")); }
     Ok(imports)
 }
 
 /// Parse decimal or `0x`-prefixed integers used by the shell pack command.
-pub fn parse_u32(value: &str) -> Result<u32, &'static str> {
+pub fn parse_u32(value: &str) -> Result<u32, String> {
     let parsed = if let Some(hex) = value.strip_prefix("0x").or_else(|| value.strip_prefix("0X")) {
-        u32::from_str_radix(hex, 16).map_err(|_| "invalid hexadecimal number")?
+        u32::from_str_radix(hex, 16).map_err(|_| err_str("invalid hexadecimal number"))?
     } else {
-        value.parse::<u32>().map_err(|_| "invalid decimal number")?
+        value.parse::<u32>().map_err(|_| err_str("invalid decimal number"))?
     };
     Ok(parsed)
 }

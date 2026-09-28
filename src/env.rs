@@ -125,13 +125,15 @@ pub struct GlobalEnvironment {
     // pub processor_count: EnvironmentVariable,
     pub os_version: VersionGroup,
     pub data: GlobalEnvironmentData,
+    pub version: usize,
 }
 
 impl GlobalEnvironment {
     pub fn new() -> GlobalEnvironment {
         GlobalEnvironment {
             os_version: VersionGroup::from_env(),
-            data: GlobalEnvironmentData::new()
+            data: GlobalEnvironmentData::new(),
+            version: 0,
         }
     }
 }
@@ -1022,7 +1024,7 @@ impl GlobalEnvironmentData {
         self.editor = ui.editor.clone();
         self.package_manager = ui.package_manager.clone();
         self.iter = ui.iter.clone();
-        self.active_apps = ui.active_apps.clone();
+        // self.active_apps = ui.active_apps.clone();
         self.focused_process_idx = ui.focused_process_idx.clone();
         self.app_window_position = ui.app_window_position.clone();
         self.ctrl_mode = ui.ctrl_mode.clone();

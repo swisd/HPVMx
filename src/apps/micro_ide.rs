@@ -104,7 +104,7 @@ impl MicroIdeApp {
                 }
             }
             SourceLanguage::C => {
-                let result = (|| -> Result<(String, Vec<u8>), &'static str> {
+                let result = (|| -> Result<(String, Vec<u8>), String> {
                     let asm = crate::tools::c_compiler::compile_to_assembly(&self.source)?;
                     let object = crate::tools::c_object::encode(&asm)?;
                     Ok((asm, object))

@@ -2,7 +2,13 @@
 //! embedded x86-64 backend. External HPVMx imports are recorded as relocations
 //! and resolved by the disk loader at application load time.
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, string::{String, ToString}, vec::Vec};
+use crate::vdebug_autoprefix;
+
+fn err_str(msg: &str) -> String {
+    vdebug_autoprefix!(12, "x64 linker error [Advanced Debug]: {}", msg);
+    msg.to_string()
+}
 
 const MAX_IMAGE: usize = 64 * 1024 * 1024;
 
@@ -11,7 +17,7 @@ enum Op {
     Push(String), Pop(String), Mov(String, String), Add(String, String), Sub(String, String),
     Imul(String, String), Idiv(String), Cmp(String, String), Setcc(u8), Movzx(String, String),
     And(String, String), Or(String, String), Xor(String, String), Not(String), Shift(String, u8),
-    Cqo, Call(String), Je(String), Jmp(String), Ret,
+    Cqo, Call(String), Je(String), Jmp(String), LeaRip(String), Data(u64), Ret,
 }
 
 #[derive(Clone)]
@@ -32,7 +38,7 @@ fn split_operands(text: &str) -> Vec<String> {
     text.split(',').map(|part| String::from(part.trim())).collect()
 }
 
-fn parse(source: &str) -> Result<Vec<Node>, &'static str> {
+fn parse(source: &str) -> Result<Vec<Node>, String> {
     let mut nodes = Vec::new();
     let mut skip_start = false;
     for raw in source.lines() {
@@ -42,7 +48,7 @@ fn parse(source: &str) -> Result<Vec<Node>, &'static str> {
             if label == "_start" { skip_start = true; continue; }
             if skip_start && label.starts_with('.') { continue; }
             if skip_start { skip_start = false; }
-            if label.starts_with('.') { return Err("local labels are not supported by the flat linker"); }
+            if label.starts_with('.') { return Err(err_str("local labels are not supported by the flat linker")); }
             nodes.push(Node::Label(String::from(label)));
             continue;
         }
@@ -70,16 +76,18 @@ fn parse(source: &str) -> Result<Vec<Node>, &'static str> {
             "setl" => Op::Setcc(0x9c), "setle" => Op::Setcc(0x9e),
             "setg" => Op::Setcc(0x9f), "setge" => Op::Setcc(0x9d),
             "movzx" if operands.len() == 2 => Op::Movzx(operands[0].clone(), operands[1].clone()),
+            "lea" if operands.len() == 2 && operands[0] == "rax" && operands[1].starts_with("[rel ") && operands[1].ends_with(']') => Op::LeaRip(String::from(operands[1][5..operands[1].len()-1].trim())),
+            "dq" if operands.len() == 1 => Op::Data(parse_imm(&operands[0]).ok_or_else(|| err_str("invalid data value"))? as u64),
             "cqo" => Op::Cqo,
             "call" if operands.len() == 1 => Op::Call(operands[0].clone()),
             "je" if operands.len() == 1 => Op::Je(operands[0].clone()),
             "jmp" if operands.len() == 1 => Op::Jmp(operands[0].clone()),
             "ret" => Op::Ret,
-            _ => return Err("assembly contains an instruction outside the built-in linker subset"),
+            _ => return Err(err_str("assembly contains an instruction outside the built-in linker subset")),
         };
         nodes.push(Node::Instruction(op));
     }
-    if nodes.is_empty() { return Err("assembly contains no linkable functions"); }
+    if nodes.is_empty() { return Err(err_str("assembly contains no linkable functions")); }
     Ok(nodes)
 }
 
@@ -87,6 +95,8 @@ fn instruction_size(op: &Op) -> usize {
     match op {
         Op::Push(r) | Op::Pop(r) => if reg(r).map(|r| r >= 8).unwrap_or(false) { 2 } else { 1 },
         Op::Cqo | Op::Ret => 1,
+        Op::LeaRip(_) => 7,
+        Op::Data(_) => 8,
         Op::Setcc(_) => 3,
         Op::Movzx(_, _) => 4,
         Op::Call(_) => 12,
@@ -105,107 +115,176 @@ fn instruction_size(op: &Op) -> usize {
     }
 }
 
-fn reg(name: &str) -> Option<u8> {
-    Some(match name.trim() {
-        "rax" => 0, "rcx" => 1, "rdx" => 2, "rbx" => 3,
-        "rsp" => 4, "rbp" => 5, "rsi" => 6, "rdi" => 7,
-        "r8" => 8, "r9" => 9, "r10" => 10, "r11" => 11,
-        "r12" => 12, "r13" => 13, "r14" => 14, "r15" => 15,
-        _ => return None,
-    })
+fn reg(r: &str) -> Option<u8> {
+    match r {
+        "rax" | "al" => Some(0), "rcx" | "cl" => Some(1), "rdx" | "dl" => Some(2), "rbx" | "bl" => Some(3),
+        "rsp" | "spl" => Some(4), "rbp" | "bpl" => Some(5), "rsi" | "sil" => Some(6), "rdi" | "dil" => Some(7),
+        "r8" | "r8b" => Some(8), "r9" | "r9b" => Some(9), "r10" | "r10b" => Some(10), "r11" | "r11b" => Some(11),
+        "r12" | "r12b" => Some(12), "r13" | "r13b" => Some(13), "r14" | "r14b" => Some(14), "r15" | "r15b" => Some(15),
+        _ => None,
+    }
 }
 
 fn parse_imm(text: &str) -> Option<i64> {
-    let text = text.trim();
     if let Some(hex) = text.strip_prefix("0x") { i64::from_str_radix(hex, 16).ok() }
     else { text.parse().ok() }
 }
 
 fn parse_mem(text: &str) -> Option<(u8, i32)> {
-    let inner = text.trim().strip_prefix('[')?.strip_suffix(']')?.trim();
-    for (idx, c) in inner.char_indices().skip(1) {
-        if c == '+' || c == '-' {
-            let base = reg(inner[..idx].trim())?;
-            let amount = parse_imm(&inner[idx + 1..])? as i32;
-            return Some((base, if c == '-' { -amount } else { amount }));
-        }
+    if !text.starts_with('[') || !text.ends_with(']') { return None; }
+    let inner = text[1..text.len() - 1].trim();
+    if let Some(reg_idx) = reg(inner) {
+        return Some((reg_idx, 0));
     }
-    Some((reg(inner)?, 0))
+    if let Some((lhs, rhs)) = inner.split_once('+') {
+        let base = reg(lhs.trim())?;
+        let disp = parse_imm(rhs.trim())? as i32;
+        return Some((base, disp));
+    }
+    if let Some((lhs, rhs)) = inner.split_once('-') {
+        let base = reg(lhs.trim())?;
+        let disp = -(parse_imm(rhs.trim())? as i32);
+        return Some((base, disp));
+    }
+    None
 }
 
-fn rex(out: &mut Vec<u8>, reg_field: u8, base_field: u8) {
-    let value = 0x48 | ((reg_field >> 3) << 2) | (base_field >> 3);
-    out.push(value);
-}
-
-fn modrm_reg(out: &mut Vec<u8>, reg_field: u8, rm: u8) { out.push(0xc0 | ((reg_field & 7) << 3) | (rm & 7)); }
-
-fn modrm_mem(out: &mut Vec<u8>, reg_field: u8, base: u8, disp: i32) {
-    let low = base & 7;
-    let mode = if disp == 0 && low != 5 { 0 } else if (-128..=127).contains(&disp) { 1 } else { 2 };
-    out.push((mode << 6) | ((reg_field & 7) << 3) | if low == 4 { 4 } else { low });
-    if low == 4 { out.push(0x24 | low); }
-    if mode == 1 { out.push(disp as i8 as u8); }
-    else if mode == 2 { out.extend_from_slice(&disp.to_le_bytes()); }
-}
-
-fn encode_rm_reg(out: &mut Vec<u8>, opcode: &[u8], rm: &str, source: u8) -> Result<(), &'static str> {
-    let (base, disp, is_mem, dest_reg) = if let Some((base, disp)) = parse_mem(rm) { (base, disp, true, 0) }
-        else { let r = reg(rm).ok_or("invalid x86 register")?; (r, 0, false, r) };
-    rex(out, source, base);
-    out.extend_from_slice(opcode);
-    if is_mem { modrm_mem(out, source, base, disp); }
-    else { modrm_reg(out, source, dest_reg); }
-    Ok(())
-}
-
-fn encode_instruction(op: &Op, pc: usize, labels: &hashbrown::HashMap<String, usize>, out: &mut Vec<u8>, imports: &mut Vec<ImportRelocation>) -> Result<(), &'static str> {
+fn encode_instruction(op: &Op, pc: usize, labels: &hashbrown::HashMap<String, usize>, out: &mut Vec<u8>, imports: &mut Vec<ImportRelocation>) -> Result<(), String> {
     match op {
-        Op::Push(r) => { let r = reg(r).ok_or("invalid push register")?; if r >= 8 { out.push(0x41); } out.push(0x50 + (r & 7)); }
-        Op::Pop(r) => { let r = reg(r).ok_or("invalid pop register")?; if r >= 8 { out.push(0x41); } out.push(0x58 + (r & 7)); }
+        Op::Push(r) => {
+            let id = reg(r).ok_or_else(|| err_str("invalid push register"))?;
+            if id >= 8 { out.push(0x41); }
+            out.push(0x50 + (id & 7));
+        }
+        Op::Pop(r) => {
+            let id = reg(r).ok_or_else(|| err_str("invalid pop register"))?;
+            if id >= 8 { out.push(0x41); }
+            out.push(0x58 + (id & 7));
+        }
         Op::Mov(dst, src) => {
-            if let Some(value) = parse_imm(src) {
-                let r = reg(dst).ok_or("immediate mov destination must be a register")?;
-                rex(out, 0, r); out.push(0xb8 + (r & 7)); out.extend_from_slice(&value.to_le_bytes());
+            if let Some(imm) = parse_imm(src) {
+                let id = reg(dst).ok_or_else(|| err_str("invalid mov destination register"))?;
+                out.extend_from_slice(&[0x48 + ((id >> 3) & 1), 0xb8 + (id & 7)]);
+                out.extend_from_slice(&imm.to_le_bytes());
             } else if let Some((base, disp)) = parse_mem(dst) {
-                let src = reg(src).ok_or("memory mov source must be a register")?;
-                rex(out, src, base); out.push(0x89); modrm_mem(out, src, base, disp);
+                let src_id = reg(src).ok_or_else(|| err_str("invalid mov source register"))?;
+                let low = base & 7;
+                out.extend_from_slice(&[0x48 | ((src_id >> 3) & 1), 0x89 | ((src_id & 7) << 3)]);
+                if low == 4 {
+                    out.extend_from_slice(&[0x24]);
+                } else if low == 5 && disp == 0 {
+                    out.extend_from_slice(&[0x45, 0x00]);
+                    return Ok(());
+                }
+                out.push(base);
+                if disp != 0 || low == 5 {
+                    if (-128..=127).contains(&disp) {
+                        out.push(disp as u8);
+                    } else {
+                        out.extend_from_slice(&disp.to_le_bytes());
+                    }
+                }
             } else if let Some((base, disp)) = parse_mem(src) {
-                let dst = reg(dst).ok_or("memory mov destination must be a register")?;
-                rex(out, dst, base); out.push(0x8b); modrm_mem(out, dst, base, disp);
+                let dst_id = reg(dst).ok_or_else(|| err_str("invalid mov destination register"))?;
+                let low = base & 7;
+                out.extend_from_slice(&[0x48 | ((dst_id >> 3) & 1), 0x8b | ((dst_id & 7) << 3)]);
+                if low == 4 {
+                    out.extend_from_slice(&[0x24]);
+                } else if low == 5 && disp == 0 {
+                    out.extend_from_slice(&[0x45, 0x00]);
+                    return Ok(());
+                }
+                out.push(base);
+                if disp != 0 || low == 5 {
+                    if (-128..=127).contains(&disp) {
+                        out.push(disp as u8);
+                    } else {
+                        out.extend_from_slice(&disp.to_le_bytes());
+                    }
+                }
             } else {
-                let dst = reg(dst).ok_or("invalid mov destination")?;
-                let src = reg(src).ok_or("invalid mov source")?;
-                encode_rm_reg(out, &[0x89], &format!("{}", reg_name(dst)?), src)?;
+                let src_id = reg(src).ok_or_else(|| err_str("invalid mov source register"))?;
+                let dst_id = reg(dst).ok_or_else(|| err_str("invalid mov destination register"))?;
+                out.extend_from_slice(&[0x48 | ((src_id >> 3) << 2) | ((dst_id >> 3) & 1), 0x89, 0xc0 | ((src_id & 7) << 3) | (dst_id & 7)]);
             }
         }
-        Op::Add(dst, src) | Op::Sub(dst, src) | Op::Cmp(dst, src) => {
-            let group = match op { Op::Add(_, _) => 0, Op::Sub(_, _) => 5, _ => 7 };
-            let opcode = match op { Op::Add(_, _) => 0x01, Op::Sub(_, _) => 0x29, _ => 0x39 };
-            if let Some(value) = parse_imm(src) {
-                let dst = reg(dst).ok_or("immediate arithmetic destination must be a register")?;
-                rex(out, 0, dst); out.push(0x81); modrm_reg(out, group, dst); out.extend_from_slice(&(value as i32).to_le_bytes());
+        Op::Add(dst, src) => {
+            let dst_id = reg(dst).ok_or_else(|| err_str("invalid add destination register"))?;
+            if let Some(imm) = parse_imm(src) {
+                out.extend_from_slice(&[0x48 | ((dst_id >> 3) & 1), 0x81, 0xc0 | (dst_id & 7)]);
+                out.extend_from_slice(&(imm as i32).to_le_bytes());
             } else {
-                let src = reg(src).ok_or("arithmetic source must be a register")?;
-                encode_rm_reg(out, &[opcode], dst, src)?;
+                let src_id = reg(src).ok_or_else(|| err_str("invalid add source register"))?;
+                out.extend_from_slice(&[0x48 | ((src_id >> 3) << 2) | ((dst_id >> 3) & 1), 0x01, 0xc0 | ((src_id & 7) << 3) | (dst_id & 7)]);
             }
         }
-        Op::Imul(dst, src) => { let dst = reg(dst).ok_or("invalid imul destination")?; let src = reg(src).ok_or("invalid imul source")?; rex(out, dst, src); out.extend_from_slice(&[0x0f, 0xaf]); modrm_reg(out, dst, src); }
-        Op::Idiv(src) => { let src = reg(src).ok_or("idiv source must be a register")?; rex(out, 7, src); out.push(0xf7); modrm_reg(out, 7, src); }
-        Op::And(dst, src) | Op::Or(dst, src) | Op::Xor(dst, src) => {
-            let dst = reg(dst).ok_or("invalid bitwise destination")?;
-            let src = reg(src).ok_or("invalid bitwise source")?;
-            let opcode = match op { Op::And(_, _) => 0x21, Op::Or(_, _) => 0x09, _ => 0x31 };
-            rex(out, src, dst); out.push(opcode); modrm_reg(out, src, dst);
+        Op::Sub(dst, src) => {
+            let dst_id = reg(dst).ok_or_else(|| err_str("invalid sub destination register"))?;
+            if let Some(imm) = parse_imm(src) {
+                out.extend_from_slice(&[0x48 | ((dst_id >> 3) & 1), 0x81, 0xe8 | (dst_id & 7)]);
+                out.extend_from_slice(&(imm as i32).to_le_bytes());
+            } else {
+                let src_id = reg(src).ok_or_else(|| err_str("invalid sub source register"))?;
+                out.extend_from_slice(&[0x48 | ((src_id >> 3) << 2) | ((dst_id >> 3) & 1), 0x29, 0xc0 | ((src_id & 7) << 3) | (dst_id & 7)]);
+            }
         }
-        Op::Not(dst) => { let dst = reg(dst).ok_or("invalid not destination")?; rex(out, 0, dst); out.push(0xf7); modrm_reg(out, 2, dst); }
-        Op::Shift(dst, ext) => { let dst = reg(dst).ok_or("invalid shift destination")?; rex(out, 0, dst); out.push(0xd3); modrm_reg(out, *ext, dst); }
-        Op::Setcc(code) => { out.extend_from_slice(&[0x0f, *code, 0xc0]); }
+        Op::Imul(dst, src) => {
+            let dst_id = reg(dst).ok_or_else(|| err_str("invalid imul destination register"))?;
+            let src_id = reg(src).ok_or_else(|| err_str("invalid imul source register"))?;
+            out.extend_from_slice(&[0x48 | ((src_id >> 3) << 2) | ((dst_id >> 3) & 1), 0x0f, 0xaf, 0xc0 | ((dst_id & 7) << 3) | (src_id & 7)]);
+        }
+        Op::Idiv(src) => {
+            let src_id = reg(src).ok_or_else(|| err_str("invalid idiv source register"))?;
+            out.extend_from_slice(&[0x48 | ((src_id >> 3) & 1), 0xf7, 0xf8 | (src_id & 7)]);
+        }
+        Op::Cmp(dst, src) => {
+            let dst_id = reg(dst).ok_or_else(|| err_str("invalid cmp destination register"))?;
+            if let Some(imm) = parse_imm(src) {
+                out.extend_from_slice(&[0x48 | ((dst_id >> 3) & 1), 0x81, 0xf8 | (dst_id & 7)]);
+                out.extend_from_slice(&(imm as i32).to_le_bytes());
+            } else {
+                let src_id = reg(src).ok_or_else(|| err_str("invalid cmp source register"))?;
+                out.extend_from_slice(&[0x48 | ((src_id >> 3) << 2) | ((dst_id >> 3) & 1), 0x39, 0xc0 | ((src_id & 7) << 3) | (dst_id & 7)]);
+            }
+        }
+        Op::And(dst, src) => {
+            let dst_id = reg(dst).ok_or_else(|| err_str("invalid and destination register"))?;
+            let src_id = reg(src).ok_or_else(|| err_str("invalid and source register"))?;
+            out.extend_from_slice(&[0x48 | ((src_id >> 3) << 2) | ((dst_id >> 3) & 1), 0x21, 0xc0 | ((src_id & 7) << 3) | (dst_id & 7)]);
+        }
+        Op::Or(dst, src) => {
+            let dst_id = reg(dst).ok_or_else(|| err_str("invalid or destination register"))?;
+            let src_id = reg(src).ok_or_else(|| err_str("invalid or source register"))?;
+            out.extend_from_slice(&[0x48 | ((src_id >> 3) << 2) | ((dst_id >> 3) & 1), 0x09, 0xc0 | ((src_id & 7) << 3) | (dst_id & 7)]);
+        }
+        Op::Xor(dst, src) => {
+            let dst_id = reg(dst).ok_or_else(|| err_str("invalid xor destination register"))?;
+            let src_id = reg(src).ok_or_else(|| err_str("invalid xor source register"))?;
+            out.extend_from_slice(&[0x48 | ((src_id >> 3) << 2) | ((dst_id >> 3) & 1), 0x31, 0xc0 | ((src_id & 7) << 3) | (dst_id & 7)]);
+        }
+        Op::Not(dst) => {
+            let dst_id = reg(dst).ok_or_else(|| err_str("invalid not destination register"))?;
+            out.extend_from_slice(&[0x48 | ((dst_id >> 3) & 1), 0xf7, 0xd0 | (dst_id & 7)]);
+        }
+        Op::Shift(dst, amt) => {
+            let dst_id = reg(dst).ok_or_else(|| err_str("invalid shift destination register"))?;
+            let subop = match amt { 4 => 0xe0, 5 => 0xe8, 7 => 0xf8, _ => return Err(err_str("invalid shift amount")) };
+            out.extend_from_slice(&[0x48 | ((dst_id >> 3) & 1), 0xd3, subop | (dst_id & 7)]);
+        }
+        Op::Setcc(code) => {
+            out.extend_from_slice(&[0x0f, *code, 0xc0]);
+        }
         Op::Movzx(dst, src) => {
-            if dst != "rax" || src != "al" { return Err("movzx linker subset currently supports movzx rax, al only"); }
+            if dst != "rax" || src != "al" { return Err(err_str("movzx linker subset currently supports movzx rax, al only")); }
             out.extend_from_slice(&[0x48, 0x0f, 0xb6, 0xc0]);
         }
         Op::Cqo => out.extend_from_slice(&[0x48, 0x99]),
+        Op::LeaRip(label) => {
+            let target = *labels.get(label).ok_or_else(|| err_str("address target label is undefined"))?;
+            out.extend_from_slice(&[0x48, 0x8d, 0x05]);
+            out.extend_from_slice(&((target as i64 - (pc as i64 + 7)) as i32).to_le_bytes());
+        }
+        Op::Data(value) => out.extend_from_slice(&value.to_le_bytes()),
         Op::Call(symbol) => {
             if let Some(target) = labels.get(symbol) {
                 out.push(0xe8);
@@ -213,7 +292,7 @@ fn encode_instruction(op: &Op, pc: usize, labels: &hashbrown::HashMap<String, us
                 out.extend_from_slice(&(disp as i32).to_le_bytes());
                 out.extend_from_slice(&[0x90; 7]);
             } else {
-                if !known_import(symbol) { return Err("unresolved symbol in call; only HPVMx hpx_* imports are linkable"); }
+                if !known_import(symbol) { return Err(err_str("unresolved symbol in call; only HPVMx hpx_* imports are linkable")); }
                 out.extend_from_slice(&[0x48, 0xb8]);
                 let patch_offset = out.len() as u32;
                 out.extend_from_slice(&0u64.to_le_bytes());
@@ -222,7 +301,7 @@ fn encode_instruction(op: &Op, pc: usize, labels: &hashbrown::HashMap<String, us
             }
         }
         Op::Je(label) | Op::Jmp(label) => {
-            let target = *labels.get(label).ok_or("branch target label is undefined")?;
+            let target = *labels.get(label).ok_or_else(|| err_str("branch target label is undefined"))?;
             match op {
                 Op::Je(_) => { out.extend_from_slice(&[0x0f, 0x84]); let disp = target as i64 - (pc as i64 + 6); out.extend_from_slice(&(disp as i32).to_le_bytes()); }
                 _ => { out.push(0xe9); let disp = target as i64 - (pc as i64 + 5); out.extend_from_slice(&(disp as i32).to_le_bytes()); }
@@ -233,8 +312,8 @@ fn encode_instruction(op: &Op, pc: usize, labels: &hashbrown::HashMap<String, us
     Ok(())
 }
 
-fn reg_name(id: u8) -> Result<&'static str, &'static str> {
-    Ok(match id { 0 => "rax", 1 => "rcx", 2 => "rdx", 3 => "rbx", 4 => "rsp", 5 => "rbp", 6 => "rsi", 7 => "rdi", 8 => "r8", 9 => "r9", _ => return Err("invalid register") })
+fn reg_name(id: u8) -> Result<&'static str, String> {
+    Ok(match id { 0 => "rax", 1 => "rcx", 2 => "rdx", 3 => "rbx", 4 => "rsp", 5 => "rbp", 6 => "rsi", 7 => "rdi", 8 => "r8", 9 => "r9", _ => return Err(err_str("invalid register")) })
 }
 
 fn known_import(name: &str) -> bool {
@@ -252,19 +331,19 @@ fn known_import(name: &str) -> bool {
 
 /// Assemble/link the backend's flat Win64 instruction stream and export HPX
 /// callbacks by their conventional names. Kernel imports remain relocatable.
-pub fn link(assembly: &str) -> Result<LinkedImage, &'static str> {
+pub fn link(assembly: &str) -> Result<LinkedImage, String> {
     let nodes = parse(assembly)?;
     let mut labels = hashbrown::HashMap::new();
     let mut pc = 0usize;
     for node in &nodes {
         match node {
             Node::Label(name) => {
-                if labels.insert(name.clone(), pc).is_some() { return Err("duplicate symbol in linked modules"); }
+                if labels.insert(name.clone(), pc).is_some() { return Err(err_str("duplicate symbol in linked modules")); }
             }
-            Node::Instruction(op) => { pc = pc.checked_add(instruction_size(op)).ok_or("linked image size overflow")?; }
+            Node::Instruction(op) => { pc = pc.checked_add(instruction_size(op)).ok_or_else(|| err_str("linked image size overflow"))?; }
         }
     }
-    if pc == 0 || pc > MAX_IMAGE { return Err("linked image is empty or exceeds 64 MiB"); }
+    if pc == 0 || pc > MAX_IMAGE { return Err(err_str("linked image is empty or exceeds 64 MiB")); }
     let mut image = Vec::with_capacity(pc);
     let mut imports = Vec::new();
     for node in &nodes {
@@ -273,9 +352,9 @@ pub fn link(assembly: &str) -> Result<LinkedImage, &'static str> {
             encode_instruction(op, here, &labels, &mut image, &mut imports)?;
         }
     }
-    if image.len() != pc { return Err("internal linker size mismatch"); }
-    let callback = |name: &str| -> Result<u32, &'static str> {
-        labels.get(name).copied().and_then(|v| u32::try_from(v).ok()).ok_or("required hpx_step callback is missing")
+    if image.len() != pc { return Err(err_str("internal linker size mismatch")); }
+    let callback = |name: &str| -> Result<u32, String> {
+        labels.get(name).copied().and_then(|v| u32::try_from(v).ok()).ok_or_else(|| err_str("required hpx_step callback is missing"))
     };
     Ok(LinkedImage {
         image,
@@ -287,8 +366,8 @@ pub fn link(assembly: &str) -> Result<LinkedImage, &'static str> {
 }
 
 /// Link relocatable assembly sections from C objects and Micro-C `.asm` files.
-pub fn link_modules(modules: &[&str]) -> Result<LinkedImage, &'static str> {
-    if modules.is_empty() { return Err("link requires at least one input module"); }
+pub fn link_modules(modules: &[&str]) -> Result<LinkedImage, String> {
+    if modules.is_empty() { return Err(err_str("link requires at least one input module")); }
     let mut combined = String::new();
     for (index, module) in modules.iter().enumerate() {
         let mut local_labels = hashbrown::HashMap::<String, String>::new();
@@ -309,7 +388,7 @@ pub fn link_modules(modules: &[&str]) -> Result<LinkedImage, &'static str> {
                 if let Some(mapped) = local_labels.get(label) { combined.push_str(mapped); combined.push(':'); }
                 else { combined.push_str(line); }
             } else if trimmed.starts_with("je ") || trimmed.starts_with("jmp ") {
-                let (mnemonic, target) = trimmed.split_once(' ').ok_or("invalid branch instruction")?;
+                let (mnemonic, target) = trimmed.split_once(' ').ok_or_else(|| err_str("invalid branch instruction"))?;
                 combined.push_str("    "); combined.push_str(mnemonic); combined.push(' ');
                 combined.push_str(local_labels.get(target).map(String::as_str).unwrap_or(target));
             } else { combined.push_str(line); }

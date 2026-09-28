@@ -7,7 +7,7 @@
 pub static mut DASH_BACK_ENABLED: bool = false;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use crate::{hpvm_error, hpvm_info, hpvm_log, vdebug, TSC_PER_US, MOUSE};
+use crate::{hpvm_error, hpvm_info, hpvm_log, vdebug, TSC_PER_US, MOUSE, GLOBALENV, GLOBAL_SYNC_STATE};
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -32,8 +32,14 @@ use crate::{handle_vm_command, hpvm_warn, message, terminal};
 use crate::pm::{Package, PackageManager, PackageType};
 use pixel_graphics::{PixelGraphics, TreeViewNode, icons};
 use crate::apps::error::ErrorApp;
-use crate::env::{Application, SteppedApplicationContext, WindowState, XSteppedApplicationContext};
+use crate::env::{Application, GlobalEnvironment, SteppedApplicationContext, WindowState, XSteppedApplicationContext};
 use crate::input::ScanCodeV2;
+
+#[derive(Clone, Debug)]
+pub struct VectorSyncState {
+    last_dashboard_version: usize,
+    last_global_version: usize,
+}
 
 #[derive(Clone, Debug)]
 pub struct FileEntry {
@@ -157,6 +163,7 @@ pub struct DashboardUI {
     pub selected_cvm_idx: usize,
     pub cvm_action_idx: usize,
     pub selected_arch_node: usize,
+    pub version: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -507,6 +514,49 @@ pub struct SystemResources {
     pub frame_ms: usize,
 }
 
+impl VectorSyncState {
+    pub const fn new(initial_len: usize) -> Self {
+        Self {
+            last_dashboard_version: initial_len,
+            last_global_version: initial_len,
+        }
+    }
+
+    pub fn sync(&mut self, dashboard: &mut DashboardUI, global_env: &mut GlobalEnvironment) {
+        let dash_modified = dashboard.version != self.last_dashboard_version;
+        let global_modified = global_env.version != self.last_global_version;
+
+        match (dash_modified, global_modified) {
+            (true, false) => {
+                // Only Dashboard changed (added or removed)
+                global_env.data.active_apps.clear();
+                global_env.data.active_apps.extend_from_slice(&dashboard.active_apps);
+                global_env.version = dashboard.version; // Sync versions
+            }
+            (false, true) => {
+                // Only GlobalEnv changed
+                dashboard.active_apps.clear();
+                dashboard.active_apps.extend_from_slice(&global_env.data.active_apps);
+                dashboard.version = global_env.version; // Sync versions
+            }
+            (true, true) => {
+                // Conflict: Both changed in the same cycle.
+                // You can decide who wins here (e.g., Dashboard wins):
+                global_env.data.active_apps.clear();
+                global_env.data.active_apps.extend_from_slice(&dashboard.active_apps);
+                global_env.version = dashboard.version;
+            }
+            (false, false) => {
+                // Nothing changed
+            }
+        }
+
+        // Update trackers to current versions
+        self.last_dashboard_version = dashboard.version;
+        self.last_global_version = global_env.version;
+    }
+}
+
 impl DashboardUI {
     pub fn new(package_manager: PackageManager) -> Self {
         let cores = crate::hardware::cpu::core_count().max(1);
@@ -680,6 +730,7 @@ impl DashboardUI {
             selected_cvm_idx: 0,
             cvm_action_idx: 0,
             selected_arch_node: 0,
+            version: 0,
         };
         ui.ensure_tab_app(DashboardTab::Overview);
         ui
@@ -790,7 +841,9 @@ impl DashboardUI {
 
         let parts = command_parts.clone();
         let body = command_parts.clone();
-        terminal::cmd(command_parts, &parts, body, &mut self.package_manager);
+        let mut lpm = self.package_manager.clone();
+        terminal::cmd(command_parts, &parts, body, &mut lpm, Some(self));
+        self.package_manager = lpm;
         self.command_history.push(command.to_string());
         self.history_idx = None;
         self.term_buf.clear();
@@ -871,6 +924,9 @@ impl DashboardUI {
 
             // Draw background
             pg.clear(0x222222);
+            if let Some(gss) = GLOBAL_SYNC_STATE.as_mut() {
+                gss.sync(self, &mut GLOBALENV.as_mut().unwrap());
+            }
 
             // Draw header
             // pg.fill_rect(0, 0, width, 32, 0x608080); // Cyan-ish
@@ -922,6 +978,9 @@ impl DashboardUI {
             // for app_ctx in self.active_apps.iter_mut() {
             //     app_ctx.step(None);
             // }
+
+
+
             if !DASH_BACK_ENABLED {
                 // assumes wxga+ resolution of 1440x900
                 pg.draw_icon(0, 0, 1440, 1440, &crate::backgrounds::win_snowtree::ICON_DATA);
@@ -2091,6 +2150,7 @@ impl DashboardUI {
                 }
 
 
+
                 // Present the complete dashboard and all windows in one copy.
                 pg.flip();
             // }
@@ -2804,13 +2864,13 @@ impl DashboardUI {
                 let command = vec!["help", topic];
                 let parts = command.clone();
                 let body = command.clone();
-                terminal::cmd(command, &parts, body, package_manager);
+                terminal::cmd(command, &parts, body, package_manager, None);
             };
 
             let run_simple = |command: Vec<&'static str>, package_manager: &mut PackageManager| {
                 let parts = command.clone();
                 let body = command.clone();
-                terminal::cmd(command, &parts, body, package_manager);
+                terminal::cmd(command, &parts, body, package_manager, None);
             };
 
             let selected_vm_id = self.get_selected_vm_id().map(|id| id.to_string());
@@ -4752,8 +4812,9 @@ impl DashboardUI {
                                         if !command.is_empty() {
                                             let command_parts = command.split(" ").collect::<Vec<&str>>();
                                             let parts = command_parts.clone();
-
-                                            terminal::cmd(command_parts, &parts, body, &mut self.package_manager);
+                                            let mut lpm = self.package_manager.clone();
+                                            terminal::cmd(command_parts, &parts, body, &mut lpm, Some(self));
+                                            self.package_manager = lpm;
                                             self.command_history.push(command);
                                             self.history_idx = None;
                                         } else {
@@ -5102,6 +5163,12 @@ impl DashboardUI {
                 }
                 _ => {}
             }
+
+            unsafe {
+                if let Some(gss) = GLOBAL_SYNC_STATE.as_mut() {
+                    gss.sync(self, &mut GLOBALENV.as_mut().unwrap());
+                }
+            }
         }
 
         pub fn exit_requested(&self) -> bool {
@@ -5114,37 +5181,38 @@ impl DashboardUI {
 
         pub fn ui_error_with_detail(&mut self, typ: usize, detail: Option<&str>) {
             let types: &[(&str, &str)] = &[
-                ("Generic", "Generic Error"),
-                ("Invalid", ""),
-                ("AccessDenied", ""),
-                ("NotFound", ""),
-                ("OutOfMemBounds", ""),
-                ("Overflow", ""),
-                ("SegFault", ""),
-                ("Lookup", ""),
-                ("RuntimeProblem", ""),
-                ("OutOfMemory", ""),
-                ("PathNotFound", ""),
-                ("BadEnvironment", ""),
-                ("WriteProtect", ""),
-                ("BadCommand", ""),
-                ("CRC", ""),
-                ("DiskReadFault", ""),
-                ("DiskWriteFault", ""),
-                ("NetTxFault", ""),
-                ("NetRxFault", ""),
-                ("DeviceBusy", ""),
-                ("BadSector", ""),
-                ("BadDevice", ""),
-                ("WrongOperation", "The operation was incorrect"),
-                ("CpuFault", ""),
-                ("InvalidFormat", ""),
-                ("SystemFile", "The file is of the system"),
-                ("ActiveFile", "The file is in use"),
-                ("StorageUnavailable", "The filesystem protocol is unavailable"),
-                ("DirectoryOpen", "The directory could not be opened"),
-                ("FileReadFault", "The file could not be read"),
-                ("EditorUnavailable", "The editor has no active file"),
+                ("Generic", "Generic Error"),                                     // 0
+                ("Invalid", ""),                                                  // 1
+                ("AccessDenied", ""),                                             // 2
+                ("NotFound", ""),                                                 // 3
+                ("OutOfMemBounds", ""),                                           // 4
+                ("Overflow", ""),                                                 // 5
+                ("SegFault", ""),                                                 // 6
+                ("Lookup", ""),                                                   // 7
+                ("RuntimeProblem", ""),                                           // 8
+                ("OutOfMemory", ""),                                              // 9
+                ("PathNotFound", ""),                                             // 10
+                ("BadEnvironment", ""),                                           // 11
+                ("WriteProtect", ""),                                             // 12
+                ("BadCommand", ""),                                               // 13
+                ("CRC", ""),                                                      // 14
+                ("DiskReadFault", ""),                                            // 15
+                ("DiskWriteFault", ""),                                           // 16
+                ("NetTxFault", ""),                                               // 17
+                ("NetRxFault", ""),                                               // 18
+                ("DeviceBusy", ""),                                               // 19
+                ("BadSector", ""),                                                // 20
+                ("BadDevice", ""),                                                // 21
+                ("WrongOperation", "The operation was incorrect"),                // 22
+                ("CpuFault", ""),                                                 // 23
+                ("InvalidFormat", ""),                                            // 24
+                ("SystemFile", "The file is of the system"),                      // 25
+                ("ActiveFile", "The file is in use"),                             // 26
+                ("StorageUnavailable", "The filesystem protocol is unavailable"), // 27
+                ("DirectoryOpen", "The directory could not be opened"),           // 28
+                ("FileReadFault", "The file could not be read"),                  // 29
+                ("EditorUnavailable", "The editor has no active file"),           // 30
+                ("LocalExecutableRuntimeError", "\nExecutable runtime error: "),  // 31
             ];
 
             let (name, default_detail) = types.get(typ).copied().unwrap_or(types[0]);
