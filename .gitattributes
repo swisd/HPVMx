@@ -2,3 +2,4 @@
 *.xml linguist-detectable=true
 .idea/* linguist-vendored
 *.sh linguist-detectable=false
+*.html linguist-detectable=true
