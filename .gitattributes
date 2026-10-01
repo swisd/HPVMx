@@ -1,3 +1,4 @@
 *.micro linguist-language=C
 *.xml linguist-detectable=true
 .idea/* linguist-vendored
+*.sh linguist-detectable=false
