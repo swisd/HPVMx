@@ -238,7 +238,6 @@ unsafe extern "C" fn host_beep(frequency: u32) { crate::devices::audio::beep(fre
 unsafe extern "C" fn host_play_tone(frequency: u32, duration_ms: u64) { crate::devices::audio::play_tone_nb(frequency, duration_ms); }
 unsafe extern "C" fn host_mute() { crate::devices::audio::mute(); }
 unsafe extern "C" fn host_sleep_ms(milliseconds: u64) { crate::devices::timer::sleep_ms(milliseconds); }
-
 unsafe extern "C" fn host_draw_text(x: usize, y: usize, bytes: *const u8, len: usize, color: u32) {
     if !PLUGIN_DRAW_ACTIVE.load(Ordering::Acquire) || bytes.is_null() || len > 4096 { return; }
     let Ok(text) = core::str::from_utf8(unsafe { core::slice::from_raw_parts(bytes, len) }) else { return; };
@@ -295,7 +294,6 @@ unsafe extern "C" fn host_allocate(size: usize, alignment: usize) -> *mut c_void
         ptr.add(header_size).cast()
     }
 }
-
 unsafe extern "C" fn host_deallocate(ptr: *mut c_void, _size: usize, alignment: usize) {
     if ptr.is_null() { return; }
 

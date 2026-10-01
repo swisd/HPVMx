@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package internal;
+
+service RequestProcessor {
+  rpc Process(IPCRequest) returns (IPCResponse);
+}
+
+enum Environment {
+  ENVIRONMENT_UNSPECIFIED = 0;
+  ENVIRONMENT_VM = 1;
+  ENVIRONMENT_CONTAINER = 2;
+  ENVIRONMENT_CVM = 3;
+}
+
+enum CommandAction {
+  COMMAND_ACTION_UNSPECIFIED = 0;
+  COMMAND_ACTION_START = 1;
+  COMMAND_ACTION_STOP = 2;
+  COMMAND_ACTION_RESTART = 3;
+  COMMAND_ACTION_CREATE = 4;
+  COMMAND_ACTION_DELETE = 5;
+  COMMAND_ACTION_TERMINAL = 6;
+  COMMAND_ACTION_LOAD_ISO = 7;
+}
+
+message IPCRequest {
+  string request_id = 1;
+  string tid = 2;
+  string instance_uuid = 3;
+  string client_token = 4;
+  string verification_id = 5;
+  Environment environment = 6;
+  CommandAction action = 7;
+  oneof action_payload {
+    VmConfig config = 8;
+    TerminalPayload terminal = 9;
+    string iso_path = 10;
+  }
+  map<string, string> extra_data = 11;
+}
+
+message IPCResponse {
+  string request_id = 1;
+  string tid = 2;
+  string instance_uuid = 3;
+  uint32 vm_id = 4;
+  bytes output = 5;
+  string error = 6;
+  bool success = 7;
+}
+
+message VmConfig {
+  uint32 cpu_cores = 1;
+  uint64 memory_size_mb = 2;
+  uint64 storage_size_mb = 3;
+  repeated PortMapping port_mappings = 4;
+  CustomOsConfig custom_os = 5;
+  map<string, string> metadata = 6;
+  string assigned_ip = 7;
+}
+
+message PortMapping {
+  uint32 host_port = 1;
+  uint32 guest_port = 2;
+}
+
+message CustomOsConfig {
+  string os_type = 1;
+  string os_version = 2;
+  string bootloader = 3;
+  string kernel_path = 4;
+  string initrd_path = 5;
+  string cmdline_args = 6;
+  bool virtio_enabled = 7;
+}
+
+message TerminalPayload {
+  string session_id = 1;
+  bytes data = 2;
+}

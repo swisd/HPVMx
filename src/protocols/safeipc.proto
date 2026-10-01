@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package internal.safe;
+
+service SendCommandIPCToKernel {
+  rpc Dispatch(VDispatchKernelCommand) returns (KernelIPC);
+  rpc Heartbeat(SafeHeartbeatRequest) returns (SafeHeartbeatResponse);
+}
+
+enum KernelCommand {
+  KERNEL_COMMAND_UNSPECIFIED = 0;
+  KERNEL_COMMAND_CREATE = 1;
+  KERNEL_COMMAND_START = 2;
+  KERNEL_COMMAND_STOP = 3;
+  KERNEL_COMMAND_RESTART = 4;
+  KERNEL_COMMAND_DELETE = 5;
+  KERNEL_COMMAND_TERMINAL = 6;
+  KERNEL_COMMAND_LOAD_ISO = 7;
+}
+
+message VDispatchKernelCommand {
+  uint32 version = 1;
+  uint64 checksum = 2;
+  string metadata = 3;
+  uint32 flags = 4;
+  string command = 5;
+  uint32 priority = 6;
+  string content = 7;
+  bytes sdata = 8;
+  bytes pdata = 9;
+  string request_id = 10;
+  string tid = 11;
+  string instance_uuid = 12;
+  KernelCommand action = 13;
+  bytes capability = 14;
+  uint64 sequence = 15;
+  bytes nonce = 16;
+  uint64 issued_at_unix_ms = 17;
+  bytes auth_tag = 18;
+}
+
+message KernelIPC {
+  uint32 version = 1;
+  uint64 checksum = 2;
+  string metadata = 3;
+  uint32 flags = 4;
+  string command = 5;
+  uint32 priority = 6;
+  string content = 7;
+  bytes sdata = 8;
+  bytes pdata = 9;
+  string request_id = 10;
+  bool success = 11;
+  string error = 12;
+  bytes output = 13;
+  uint64 sequence = 14;
+  bytes auth_tag = 15;
+}
+
+message SafeHeartbeatRequest {
+  uint32 version = 1;
+  string tid = 2;
+  string instance_uuid = 3;
+  bytes capability = 4;
+  uint64 sequence = 5;
+  bytes nonce = 6;
+  uint64 issued_at_unix_ms = 7;
+  bytes auth_tag = 8;
+}
+
+message SafeHeartbeatResponse {
+  uint32 version = 1;
+  string tid = 2;
+  string instance_uuid = 3;
+  bool online = 4;
+  bool read_only = 5;
+  uint64 sequence = 6;
+  bytes nonce = 7;
+  bytes auth_tag = 8;
+}

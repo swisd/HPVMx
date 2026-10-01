@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 
 pub type OSVersion = u32;
 
+#[derive(Clone)]
 pub struct Version {
     major: u32,
     minor: u32,
@@ -14,6 +15,7 @@ pub struct Version {
 
 }
 
+#[derive(Clone)]
 pub struct EarlyVersion {
     ver_type: String,
     major: Option<u32>,
@@ -21,11 +23,13 @@ pub struct EarlyVersion {
     patch: Option<u32>,
 }
 
+#[derive(Clone)]
 pub struct BuildName {
     build_number: String,
     abbreviated_name: String,
 }
 
+#[derive(Clone)]
 pub struct VersionGroup {
     version: Version,
     build_name: BuildName,

@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package external;
+
+service VmService {
+  rpc Execute(VmActionRequest) returns (VmActionResponse);
+  rpc Terminal(stream TerminalFrame) returns (stream TerminalFrame);
+}
+
+enum Environment {
+  ENVIRONMENT_UNSPECIFIED = 0;
+  ENVIRONMENT_VM = 1;
+  ENVIRONMENT_CONTAINER = 2;
+  ENVIRONMENT_CVM = 3;
+}
+
+enum VmAction {
+  VM_ACTION_UNSPECIFIED = 0;
+  VM_ACTION_CREATE = 1;
+  VM_ACTION_START = 2;
+  VM_ACTION_STOP = 3;
+  VM_ACTION_RESTART = 4;
+  VM_ACTION_DELETE = 5;
+  VM_ACTION_TERMINAL = 6;
+  VM_ACTION_LOAD_ISO = 7;
+}
+
+message VmIdentity {
+  string tid = 1;
+  string instance_uuid = 2;
+}
+
+message VmActionRequest {
+  string request_id = 1;
+  VmIdentity identity = 2;
+  string client_token = 3;
+  string verification_id = 4;
+  Environment environment = 5;
+  VmAction action = 6;
+  oneof action_payload {
+    VmConfig config = 7;
+    TerminalInput terminal = 8;
+    string iso_path = 9;
+  }
+  map<string, string> extra_data = 10;
+}
+
+message VmActionResponse {
+  string request_id = 1;
+  VmIdentity identity = 2;
+  uint32 vm_id = 3;
+  bool success = 4;
+  string error = 5;
+  bytes output = 6;
+}
+
+message VmConfig {
+  uint32 cpu_cores = 1;
+  uint64 memory_size_mb = 2;
+  uint64 storage_size_mb = 3;
+  repeated PortMapping port_mappings = 4;
+  CustomOsConfig custom_os = 5;
+  map<string, string> metadata = 6;
+  string assigned_ip = 7;
+}
+
+message PortMapping {
+  uint32 host_port = 1;
+  uint32 guest_port = 2;
+}
+
+message CustomOsConfig {
+  string os_type = 1;
+  string os_version = 2;
+  string bootloader = 3;
+  string kernel_path = 4;
+  string initrd_path = 5;
+  string cmdline_args = 6;
+  bool virtio_enabled = 7;
+}
+
+message TerminalInput {
+  string session_id = 1;
+  bytes data = 2;
+}
+
+message TerminalFrame {
+  string request_id = 1;
+  VmIdentity identity = 2;
+  string session_id = 3;
+  bytes data = 4;
+}

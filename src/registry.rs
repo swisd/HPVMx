@@ -1,10 +1,12 @@
 use alloc::string::{String, ToString};
-use alloc::vec;
+use alloc::{format, vec};
 use alloc::vec::Vec;
 use core::fmt::Write;
 
 use crate::filesystem::FileSystem;
 use crate::ui::UiSettings;
+use crate::vdebug_autoprefix;
+use crate::version::{BuildName, Version, VersionGroup};
 
 pub const DEFAULT_SYSTEM_REG_PATH: &str = "/SYSTEM.REG";
 pub const DEFAULT_DEVICE_REG_PATH: &str = "/DEVICES.REG";
@@ -14,6 +16,7 @@ const HEADER: &str = "HPVMX Registry Version 1";
 #[derive(Clone)]
 pub struct SuperHive {
     pub name: String,
+    pub version: VersionGroup,
     pub hives: Vec<Hive>,
 }
 
@@ -63,6 +66,7 @@ pub fn load_system_registry(path: &str, settings: &mut UiSettings) -> Result<(),
 pub fn save_device_registry(path: &str) -> Result<(), &'static str> {
     let super_hive = SuperHive {
         name: String::from("HPVMx"),
+        version: VersionGroup::new(Version::new(1,0,0, false, None, None), BuildName::new("0".parse().unwrap(), "base".parse().unwrap())),
         hives: vec![Hive {
             name: String::from("Hardware"),
             data: vec![Registry {
@@ -82,6 +86,7 @@ pub fn load_device_registry(path: &str) -> Result<(), &'static str> {
 fn build_system_hive(settings: &UiSettings) -> SuperHive {
     SuperHive {
         name: String::from("HPVMx"),
+        version: VersionGroup::new(Version::new(1,0,0, false, None, None), BuildName::new("0".parse().unwrap(), "base".parse().unwrap())),
         hives: vec![
             Hive {
                 name: String::from("System"),
@@ -330,4 +335,58 @@ fn unquote_value(value: &str) -> String {
         }
     }
     out
+}
+
+
+impl SuperHive {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            version: VersionGroup::new(Version::new(1, 0, 0, false, None, None), BuildName::new("0".parse().unwrap(), "base".parse().unwrap())),
+            hives: vec![],
+        }
+    }
+    pub fn construct(&mut self, hive_tree: Vec<Hive>) {
+        if self.hives.is_empty() {
+            self.hives.extend(hive_tree);
+        } else {
+            vdebug_autoprefix!("superhive has already been constructed (hives not empty)")
+        }
+    }
+    pub fn get_hives(&self) -> Vec<Hive> {
+        self.hives.clone()
+    }
+    pub fn append_hive(&mut self, hive: Hive) {
+        self.hives.push(hive)
+    }
+    pub fn remove_hive_by_id(&mut self, id: usize) {
+        self.hives.remove(id);
+    }
+    pub fn remove_hive_by_name(&mut self, name: &str) -> Result<(), String> {
+        let mut h_idx = 0;
+        for hive in &mut self.hives {
+            if hive.name == name {
+                self.hives.remove(h_idx);
+                return Ok(());
+            }
+            h_idx += 1;
+        }
+        Err(format!("could not find hive with name {name}"))
+    }
+}
+
+impl Hive {
+
+}
+
+impl Registry {
+
+}
+
+impl DataGroup {
+
+}
+
+impl Pair {
+    
 }
