@@ -49,6 +49,7 @@ mod c_stems;
 mod registry;
 mod dls;
 mod backgrounds;
+#[cfg(feature = "xmlui")]
 mod xmlui;
 mod multipar;
 mod string_utils;
@@ -61,6 +62,9 @@ mod localmodules;
 mod xdb;
 pub mod externals;
 pub mod disk_executable;
+#[cfg(feature = "crypt")]
+mod crypto;
+mod neural;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -1068,7 +1072,7 @@ pub unsafe fn init_mouse_deep_scan() -> Option<ScopedProtocol<Pointer>> {
                 vdebug!("usbhid", "Handle [{}]: Reset result {:?}", i, r);
                 #[allow(irrefutable_let_patterns)]
                 if let mode = mouse.mode() {
-                    vdebug!("usbhid", "Handle [{}]: Res X={}", i, mode.resolution[0]);
+                    vdebug!("usbhid", "Handle [{}]: Res X={}, Y={}, Z={}", i, /*mode.resolution_x, mode.resolution_y, mode.resolution_z*/ mode.resolution[0], mode.resolution[1], mode.resolution[2]);
                 }
                 return Some(mouse)
             }

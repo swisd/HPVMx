@@ -2,8 +2,8 @@
 //! Translates virtual addresses/sectors to physical ones.
 //! Abstraction layer that prevents a VM from seeing or touching the host's actual memory or disk structure.
 
-use alloc::vec::Vec;
 use crate::vdebug_autoprefix;
+use alloc::vec::Vec;
 
 pub struct MemoryMapping {
     pub gpa: u64,
@@ -34,13 +34,29 @@ impl ResourceMapper {
     }
 
     pub fn add_memory_mapping(&mut self, gpa: u64, hpa: u64, size: usize) {
-        vdebug_autoprefix!("ResourceMapper: VM {} memory mapping GPA 0x{:x} -> HPA 0x{:x} ({} bytes)", self.vm_id, gpa, hpa, size);
+        vdebug_autoprefix!(
+            "ResourceMapper: VM {} memory mapping GPA 0x{:x} -> HPA 0x{:x} ({} bytes)",
+            self.vm_id,
+            gpa,
+            hpa,
+            size
+        );
         self.memory_mappings.push(MemoryMapping { gpa, hpa, size });
     }
 
     pub fn add_disk_mapping(&mut self, guest_sector: u64, host_vhd_offset: u64, size_sectors: u64) {
-        vdebug_autoprefix!("ResourceMapper: VM {} disk mapping sector {} -> host offset {} ({} sectors)", self.vm_id, guest_sector, host_vhd_offset, size_sectors);
-        self.disk_mappings.push(DiskMapping { guest_sector, host_vhd_offset, size_sectors });
+        vdebug_autoprefix!(
+            "ResourceMapper: VM {} disk mapping sector {} -> host offset {} ({} sectors)",
+            self.vm_id,
+            guest_sector,
+            host_vhd_offset,
+            size_sectors
+        );
+        self.disk_mappings.push(DiskMapping {
+            guest_sector,
+            host_vhd_offset,
+            size_sectors,
+        });
     }
 
     pub fn get_memory_mappings(&self) -> &[MemoryMapping] {

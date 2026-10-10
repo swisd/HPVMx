@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "HPVMx"
-version = "1.18.8"
+version = "1.40.0"
 dependencies = [
  "bincode",
  "bitflags",
@@ -14,6 +14,8 @@ dependencies = [
  "hashbrown",
  "libm",
  "log",
+ "num-integer",
+ "num-traits",
  "ordered-float",
  "postcard",
  "raw-cpuid",
@@ -261,6 +263,15 @@ name = "micromath"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
+
+[[package]]
+name = "num-integer"
+version = "0.1.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "num-traits"

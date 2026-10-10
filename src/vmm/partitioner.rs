@@ -17,9 +17,7 @@ pub struct HardwarePartitioner {
 
 impl HardwarePartitioner {
     pub fn new() -> Self {
-        Self {
-            units: Vec::new(),
-        }
+        Self { units: Vec::new() }
     }
 
     /// Carve out a new Silicon unit for a VM.

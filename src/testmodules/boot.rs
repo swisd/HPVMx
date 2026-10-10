@@ -4,25 +4,27 @@
 //! kernel loading, environment initialization, VMM/CVM initialization,
 //! hosting gateway bootstrap, and VM Guard heartbeat state machines.
 
+use crate::env::{get_global_var, set_global_var};
+use crate::hosting::interface::{HostVmBackend, HostVmError};
+use crate::hosting::lut::{CidLut, ClientDataLut, InstanceLut, PortLut};
+use crate::hosting::rqproc::{RequestProcessor, RequestResult};
+use crate::hosting::types::{
+    ClientData, CommandAction, ConfigPayload, EnvironmentType, IPCHeader, IPCMessage,
+    InstancePayload,
+};
+use crate::hosting::vmdispatch::{GuardError, HeartbeatSource, SmRingBuf, VmGuard, VmPort};
+use crate::ui::tabui::virtualization::X_Virtualization;
+use crate::ui::{ContainerDisplayInfo, CvmDisplayInfo, DashboardTab, DashboardUI, VirtSubTab};
+use crate::vdebug_autoprefix;
+use crate::vmm::container::{ContainerResources, ContainerSpec, ContainerState};
+use crate::vmm::cvm::{ContainerVirtualMachine, CvmState};
+use crate::vmm::cvm_kernel::CvmProcessState;
+use crate::vmm::cvmbus::CvmBusMessage;
+use crate::vmm::interface::{PortIoInterface, PortOwner};
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
-use crate::vdebug_autoprefix;
-use crate::env::{get_global_var, set_global_var};
-use crate::hosting::lut::{CidLut, ClientDataLut, InstanceLut, PortLut};
-use crate::hosting::rqproc::{RequestProcessor, RequestResult};
-use crate::hosting::types::{
-    ClientData, CommandAction, ConfigPayload, EnvironmentType, IPCHeader, IPCMessage, InstancePayload,
-};
-use crate::hosting::vmdispatch::{GuardError, HeartbeatSource, SmRingBuf, VmGuard, VmPort};
-use crate::hosting::interface::{HostVmBackend, HostVmError};
-use crate::vmm::container::{ContainerResources, ContainerSpec, ContainerState};
-use crate::vmm::cvm::{ContainerVirtualMachine, CvmState};
-use crate::vmm::cvmbus::CvmBusMessage;
-use crate::vmm::interface::{PortIoInterface, PortOwner};
-use crate::ui::{DashboardTab, DashboardUI, VirtSubTab, ContainerDisplayInfo, CvmDisplayInfo};
-use crate::ui::tabui::virtualization::X_Virtualization;
 
 /// Mock HostVmBackend for testing startup/boot hosting components.
 struct MockBootVmBackend {
@@ -42,12 +44,18 @@ impl MockBootVmBackend {
 impl HostVmBackend for MockBootVmBackend {
     fn create(&mut self, instance_uuid: &str, config: &ConfigPayload) -> Result<u32, HostVmError> {
         if config.cpu_cores == 0 || config.memory_size == 0 {
-            return Err(HostVmError::InvalidConfiguration("CPU and memory must be non-zero"));
+            return Err(HostVmError::InvalidConfiguration(
+                "CPU and memory must be non-zero",
+            ));
         }
         let id = self.next_id;
         self.next_id += 1;
         self.created_vms.insert(instance_uuid.to_string(), id);
-        vdebug_autoprefix!("MockBootVmBackend: Created VM {} for UUID {}", id, instance_uuid);
+        vdebug_autoprefix!(
+            "MockBootVmBackend: Created VM {} for UUID {}",
+            id,
+            instance_uuid
+        );
         Ok(id)
     }
 
@@ -67,7 +75,11 @@ impl HostVmBackend for MockBootVmBackend {
     }
 
     fn load_iso(&mut self, vm_id: u32, iso_path: &str) -> Result<(), HostVmError> {
-        vdebug_autoprefix!("MockBootVmBackend: Loaded ISO '{}' into VM {}", iso_path, vm_id);
+        vdebug_autoprefix!(
+            "MockBootVmBackend: Loaded ISO '{}' into VM {}",
+            iso_path,
+            vm_id
+        );
         Ok(())
     }
 
@@ -135,21 +147,61 @@ pub fn test_boot_cvm_and_containers() -> bool {
     let container_id = match service_res {
         Ok(Some(id)) => id,
         _ => {
-            vdebug_autoprefix!("test_boot_cvm_and_containers: Failed to create container via CVMBus");
+            vdebug_autoprefix!(
+                "test_boot_cvm_and_containers: Failed to create container via CVMBus"
+            );
             return false;
         }
     };
 
     // Start container via CVMBus
-    cvm.kernel.bus.send(CvmBusMessage::StartContainer(container_id));
+    cvm.kernel
+        .bus
+        .send(CvmBusMessage::StartContainer(container_id));
     if let Err(e) = cvm.kernel.service_one() {
-        vdebug_autoprefix!("test_boot_cvm_and_containers: Failed to start container via CVMBus: {:?}", e);
+        vdebug_autoprefix!(
+            "test_boot_cvm_and_containers: Failed to start container via CVMBus: {:?}",
+            e
+        );
         return false;
     }
 
-    let running = cvm.kernel.containers.get(container_id).map(|c| c.state) == Some(ContainerState::Running);
+    let running =
+        cvm.kernel.containers.get(container_id).map(|c| c.state) == Some(ContainerState::Running);
     if !running {
         vdebug_autoprefix!("test_boot_cvm_and_containers: Container not running");
+        return false;
+    }
+
+    if cvm
+        .execute_container(container_id, "echo cvm-container-ready")
+        .is_err()
+        || cvm
+            .drain_container_terminal(container_id, 64)
+            .ok()
+            .as_deref()
+            != Some(b"cvm-container-ready\n".as_slice())
+    {
+        vdebug_autoprefix!("test_boot_cvm_and_containers: CVM container command failed");
+        return false;
+    }
+
+    let process_id = match cvm.load_process(
+        container_id,
+        &[0x01, 0, 0, b'o', 0x02, 0, 0, 1, 0, 0x03, 0],
+        64,
+    ) {
+        Ok(process_id) => process_id,
+        Err(_) => return false,
+    };
+    if cvm.run_next_process().ok() != Some(Some((process_id, CvmProcessState::Exited(0))))
+        || cvm
+            .drain_container_terminal(container_id, 1)
+            .ok()
+            .as_deref()
+            != Some(b"o".as_slice())
+    {
+        vdebug_autoprefix!("test_boot_cvm_and_containers: CVM process runtime failed");
         return false;
     }
 
@@ -216,7 +268,10 @@ pub fn test_boot_hosting_luts() -> bool {
         vdebug_autoprefix!("test_boot_hosting_luts: ClientDataLut token verification failed");
         return false;
     }
-    if client_data_lut.get_by_verification_id("verif-key-777").is_none() {
+    if client_data_lut
+        .get_by_verification_id("verif-key-777")
+        .is_none()
+    {
         vdebug_autoprefix!("test_boot_hosting_luts: ClientDataLut verif_id verification failed");
         return false;
     }
@@ -240,14 +295,18 @@ pub fn test_boot_vmguard_lifecycle() -> bool {
     // Provide only VS heartbeat
     let _ = guard.heartbeat(HeartbeatSource::VisualizationServer, "vs-token-1", 200);
     if guard.authorize_mutation(200).is_ok() {
-        vdebug_autoprefix!("test_boot_vmguard_lifecycle: Guard should be ReadOnly with only VS heartbeat");
+        vdebug_autoprefix!(
+            "test_boot_vmguard_lifecycle: Guard should be ReadOnly with only VS heartbeat"
+        );
         return false;
     }
 
     // Provide IS heartbeat -> should become writable
     let _ = guard.heartbeat(HeartbeatSource::IdentityServer, "is-token-1", 250);
     if guard.authorize_mutation(300).is_err() {
-        vdebug_autoprefix!("test_boot_vmguard_lifecycle: Guard should be Writable after VS + IS heartbeats");
+        vdebug_autoprefix!(
+            "test_boot_vmguard_lifecycle: Guard should be Writable after VS + IS heartbeats"
+        );
         return false;
     }
 
@@ -298,12 +357,20 @@ pub fn test_boot_vmport_gateway() -> bool {
     match resp {
         crate::hosting::vmdispatch::VmPortResponse::Accepted(res) => {
             if res.instance_uuid != "0001.a1b2-c3d4-e5f6" || res.vm_id != 1 {
-                vdebug_autoprefix!(12, "test_boot_vmport_gateway: Unexpected RequestResult {:?}", res);
+                vdebug_autoprefix!(
+                    12,
+                    "test_boot_vmport_gateway: Unexpected RequestResult {:?}",
+                    res
+                );
                 return false;
             }
         }
         crate::hosting::vmdispatch::VmPortResponse::Rejected(err) => {
-            vdebug_autoprefix!(12, "test_boot_vmport_gateway: Request was unexpectedly rejected: {:?}", err);
+            vdebug_autoprefix!(
+                12,
+                "test_boot_vmport_gateway: Request was unexpectedly rejected: {:?}",
+                err
+            );
             return false;
         }
     }
@@ -329,8 +396,15 @@ pub fn test_boot_vmport_gateway() -> bool {
     }
 
     let queued_resp = port.process_queued_ipc(1600);
-    if !matches!(queued_resp, Some(crate::hosting::vmdispatch::VmPortResponse::Accepted(_))) {
-        vdebug_autoprefix!(12, "test_boot_vmport_gateway: Queued IPC processing failed: {:?}", queued_resp);
+    if !matches!(
+        queued_resp,
+        Some(crate::hosting::vmdispatch::VmPortResponse::Accepted(_))
+    ) {
+        vdebug_autoprefix!(
+            12,
+            "test_boot_vmport_gateway: Queued IPC processing failed: {:?}",
+            queued_resp
+        );
         return false;
     }
 
@@ -344,28 +418,44 @@ pub fn test_boot_port_io_interface() -> bool {
 
     let mut port_io = PortIoInterface::new(PortOwner::Vm(1));
     if port_io.register_port(0x3F8, 1, true).is_err() {
-        vdebug_autoprefix!(12, "test_boot_port_io_interface: Failed to register COM1 port");
+        vdebug_autoprefix!(
+            12,
+            "test_boot_port_io_interface: Failed to register COM1 port"
+        );
         return false;
     }
     if port_io.register_port(0x60, 1, false).is_err() {
-        vdebug_autoprefix!(12, "test_boot_port_io_interface: Failed to register read-only keyboard port");
+        vdebug_autoprefix!(
+            12,
+            "test_boot_port_io_interface: Failed to register read-only keyboard port"
+        );
         return false;
     }
 
     if port_io.write(0x3F8, &[0x41]).is_err() {
-        vdebug_autoprefix!(12, "test_boot_port_io_interface: Failed to write to COM1 port");
+        vdebug_autoprefix!(
+            12,
+            "test_boot_port_io_interface: Failed to write to COM1 port"
+        );
         return false;
     }
 
     let com1_val = port_io.read(0x3F8, 1);
     if com1_val != Ok(vec![0x41]) {
-        vdebug_autoprefix!(12, "test_boot_port_io_interface: COM1 read mismatch: {:?}", com1_val);
+        vdebug_autoprefix!(
+            12,
+            "test_boot_port_io_interface: COM1 read mismatch: {:?}",
+            com1_val
+        );
         return false;
     }
 
     // Ensure write to read-only port is rejected
     if port_io.write(0x60, &[0xFF]).is_ok() {
-        vdebug_autoprefix!(12, "test_boot_port_io_interface: Read-only port accepted write unexpectedly");
+        vdebug_autoprefix!(
+            12,
+            "test_boot_port_io_interface: Read-only port accepted write unexpectedly"
+        );
         return false;
     }
 
@@ -381,22 +471,34 @@ pub fn test_boot_virtualization_ui() -> bool {
     let mut tab = VirtSubTab::VMs;
     tab = tab.next();
     if tab != VirtSubTab::Containers {
-        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Next after VMs should be Containers");
+        vdebug_autoprefix!(
+            12,
+            "test_boot_virtualization_ui: Next after VMs should be Containers"
+        );
         return false;
     }
     tab = tab.next();
     if tab != VirtSubTab::CVMs {
-        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Next after Containers should be CVMs");
+        vdebug_autoprefix!(
+            12,
+            "test_boot_virtualization_ui: Next after Containers should be CVMs"
+        );
         return false;
     }
     tab = tab.next();
     if tab != VirtSubTab::Architecture {
-        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Next after CVMs should be Architecture");
+        vdebug_autoprefix!(
+            12,
+            "test_boot_virtualization_ui: Next after CVMs should be Architecture"
+        );
         return false;
     }
     tab = tab.next();
     if tab != VirtSubTab::VMs {
-        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Next after Architecture should cycle back to VMs");
+        vdebug_autoprefix!(
+            12,
+            "test_boot_virtualization_ui: Next after Architecture should cycle back to VMs"
+        );
         return false;
     }
 
@@ -404,11 +506,17 @@ pub fn test_boot_virtualization_ui() -> bool {
     let pm = crate::pm::PackageManager::new();
     let mut ui = DashboardUI::new(pm);
     if ui.virt_subtab != VirtSubTab::VMs {
-        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Default subtab should be VMs");
+        vdebug_autoprefix!(
+            12,
+            "test_boot_virtualization_ui: Default subtab should be VMs"
+        );
         return false;
     }
     if ui.containers.is_empty() || ui.cvms.is_empty() {
-        vdebug_autoprefix!(12, "test_boot_virtualization_ui: Initial container and CVM catalogs should not be empty");
+        vdebug_autoprefix!(
+            12,
+            "test_boot_virtualization_ui: Initial container and CVM catalogs should not be empty"
+        );
         return false;
     }
 
@@ -446,7 +554,10 @@ pub fn test_boot_virtualization_ui() -> bool {
     // Test X_Virtualization App instantiation
     let x_virt = X_Virtualization::new();
     if x_virt.virt_subtab != VirtSubTab::VMs {
-        vdebug_autoprefix!(12, "test_boot_virtualization_ui: X_Virtualization default subtab mismatch");
+        vdebug_autoprefix!(
+            12,
+            "test_boot_virtualization_ui: X_Virtualization default subtab mismatch"
+        );
         return false;
     }
 

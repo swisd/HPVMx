@@ -1,13 +1,16 @@
 //! Virtual Machine abstraction and lifecycle management
 
+use crate::vdebug_autoprefix;
+use crate::vmm::ept::Ept;
+use crate::vmm::hwbus::HwBus;
+use crate::vmm::interface::{PortIoInterface, PortOwner};
+use crate::vmm::io::VirtualDevices;
+use crate::vmm::mapper::ResourceMapper;
+use crate::vmm::vcpu::VirtualCpu;
+use crate::vmm::vmbus::VmBus;
+use crate::vmm::vmcs::{GuestState, HostState};
 use alloc::string::String;
 use alloc::vec::Vec;
-use crate::vmm::vcpu::VirtualCpu;
-use crate::vmm::hwbus::HwBus;
-use crate::vmm::vmbus::VmBus;
-use crate::vmm::mapper::ResourceMapper;
-use crate::vmm::interface::{PortIoInterface, PortOwner};
-use crate::vdebug_autoprefix;
 
 /// Virtual Machine state
 /// Possible execution states for a virtual machine.
@@ -65,6 +68,13 @@ pub struct VirtualMachine {
     pub mapper: ResourceMapper,
     /// Explicit VM port-I/O boundary; host devices are never implicitly exposed.
     pub ports: PortIoInterface,
+    /// Guest page tables used by Intel EPT when VM entry is enabled.
+    pub ept: Option<Ept>,
+    /// Architectural guest/host states are supplied by the boot/CPU backend.
+    pub guest_state: Option<GuestState>,
+    pub host_state: Option<HostState>,
+    /// Emulated devices are private to this VM and never alias host devices.
+    pub devices: Option<VirtualDevices>,
 }
 
 #[allow(dead_code)]
@@ -75,7 +85,13 @@ impl VirtualMachine {
             return Err("Memory and vCPU count must be > 0");
         }
 
-        vdebug_autoprefix!("VirtualMachine: creating VM {} (name='{}', mem={}MB, vcpus={})", id, name, memory_mb, vcpu_count);
+        vdebug_autoprefix!(
+            "VirtualMachine: creating VM {} (name='{}', mem={}MB, vcpus={})",
+            id,
+            name,
+            memory_mb,
+            vcpu_count
+        );
         let mut vcpus = Vec::new();
         for i in 0..vcpu_count {
             vcpus.push(VirtualCpu::new(i));
@@ -93,6 +109,10 @@ impl VirtualMachine {
             hwbus: HwBus::new(id),
             mapper: ResourceMapper::new(id),
             ports: PortIoInterface::new(PortOwner::Vm(id)),
+            ept: None,
+            guest_state: None,
+            host_state: None,
+            devices: None,
         })
     }
 
@@ -108,7 +128,11 @@ impl VirtualMachine {
             return Err("Invalid memory size");
         }
 
-        vdebug_autoprefix!("VirtualMachine: VM {} allocated guest memory at 0x{:x}", self.id, base_addr);
+        vdebug_autoprefix!(
+            "VirtualMachine: VM {} allocated guest memory at 0x{:x}",
+            self.id,
+            base_addr
+        );
         self.guest_memory_base = Some(base_addr);
         Ok(())
     }

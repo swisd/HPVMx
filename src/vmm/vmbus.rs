@@ -2,18 +2,39 @@
 //! All inter-unit communication is serialized and inspected via the VMBUS,
 //! ensuring no "side-door" access to system components.
 
+use crate::vdebug_autoprefix;
 use alloc::collections::VecDeque;
 use alloc::string::String;
 use alloc::vec::Vec;
-use crate::vdebug_autoprefix;
 
 #[derive(Debug, Clone)]
 pub enum VmBusMessage {
-    IoRequest { address: u64, size: usize, write: bool, data: Option<Vec<u8>> },
-    Interrupt { vector: u8 },
-    StorageRequest { sector: u64, count: u32, write: bool, data: Option<Vec<u8>> },
-    InstructionTrace { rip: u64, opcode: u16, mnemonic: String, length: u8 },
-    Call { from: u64, to: u64, target_name: Option<String> },
+    IoRequest {
+        address: u64,
+        size: usize,
+        write: bool,
+        data: Option<Vec<u8>>,
+    },
+    Interrupt {
+        vector: u8,
+    },
+    StorageRequest {
+        sector: u64,
+        count: u32,
+        write: bool,
+        data: Option<Vec<u8>>,
+    },
+    InstructionTrace {
+        rip: u64,
+        opcode: u16,
+        mnemonic: String,
+        length: u8,
+    },
+    Call {
+        from: u64,
+        to: u64,
+        target_name: Option<String>,
+    },
 }
 
 pub struct VmBus {

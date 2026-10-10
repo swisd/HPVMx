@@ -1,26 +1,30 @@
 //! HPVMx Hypervisor - Virtual Machine Monitor subsystem
 
-pub mod vmm;
-pub mod vm;
-pub mod vcpu;
-pub mod memory;
+pub mod bootloader;
+pub mod devices;
 pub mod io;
 pub(crate) mod loader;
-pub  mod bootloader;
+pub mod memory;
 pub mod storage;
-pub mod devices;
+pub mod vcpu;
+pub mod vm;
+pub mod vmm;
 
-pub mod ghm;
-pub mod partitioner;
-pub mod vmbus;
-pub mod hwbus;
-pub mod security;
-pub mod mapper;
-pub mod cvm;
 pub mod container;
-pub mod interface;
+pub mod container_engine;
+pub mod cvm;
 pub mod cvm_kernel;
 pub mod cvmbus;
-pub mod container_engine;
+pub mod ept;
+pub mod ghm;
+pub mod hwbus;
+pub mod interface;
+pub mod mapper;
+pub mod partitioner;
+pub mod scheduler;
+pub mod security;
+pub mod vmbus;
+pub mod vmcs;
+pub mod vmexit;
 
 pub use vmm::HypervisorManager;

@@ -2,12 +2,12 @@
 //! Central gateway for intercepting all VMBUS traffic and managing intrusion response.
 
 use crate::dls::{
-    summarize_hwbus, summarize_vmbus, AnalysisVerdict, DeepSecurityLevel, SoftwareAnalysisMemory,
-    SoftwareAnalysisSample,
+    AnalysisVerdict, DeepSecurityLevel, SoftwareAnalysisMemory, SoftwareAnalysisSample,
+    summarize_hwbus, summarize_vmbus,
 };
+use crate::vdebug_autoprefix;
 use crate::vmm::hwbus::{HwBus, HwBusMessage};
 use crate::vmm::vmbus::{VmBus, VmBusMessage};
-use crate::vdebug_autoprefix;
 
 pub struct DeepLevelSecurity {
     pub policy: DeepSecurityPolicy,
@@ -31,7 +31,10 @@ impl DeepLevelSecurity {
     }
 
     pub fn with_policy(policy: DeepSecurityPolicy) -> Self {
-        vdebug_autoprefix!("DeepLevelSecurity: initialized with policy level {:?}", policy.level);
+        vdebug_autoprefix!(
+            "DeepLevelSecurity: initialized with policy level {:?}",
+            policy.level
+        );
         Self {
             policy,
             memory: SoftwareAnalysisMemory::new(),
@@ -71,7 +74,10 @@ impl DeepLevelSecurity {
         self.learn_from_sample(sample.clone());
 
         if violations || matches!(sample.verdict, AnalysisVerdict::FailStop) {
-            vdebug_autoprefix!("DeepLevelSecurity: VMBUS violation detected on VM {}", bus.vm_id);
+            vdebug_autoprefix!(
+                "DeepLevelSecurity: VMBUS violation detected on VM {}",
+                bus.vm_id
+            );
             Err("VMBUS security policy violation detected")
         } else {
             Ok(sample)
@@ -102,7 +108,10 @@ impl DeepLevelSecurity {
         self.learn_from_sample(sample.clone());
 
         if violations || matches!(sample.verdict, AnalysisVerdict::FailStop) {
-            vdebug_autoprefix!("DeepLevelSecurity: HWBUS violation detected on VM {}", bus.vm_id);
+            vdebug_autoprefix!(
+                "DeepLevelSecurity: HWBUS violation detected on VM {}",
+                bus.vm_id
+            );
             Err("HWBUS security policy violation detected")
         } else {
             Ok(sample)
@@ -117,9 +126,7 @@ impl DeepLevelSecurity {
 
     fn is_authorized(&self, message: &VmBusMessage) -> bool {
         match message {
-            VmBusMessage::IoRequest { address, .. } => {
-                !crate::dls::is_restricted_io_port(*address)
-            }
+            VmBusMessage::IoRequest { address, .. } => !crate::dls::is_restricted_io_port(*address),
             VmBusMessage::Interrupt { vector } => {
                 if matches!(self.policy.level, DeepSecurityLevel::Lab) {
                     true
@@ -130,16 +137,18 @@ impl DeepLevelSecurity {
             VmBusMessage::StorageRequest { count, write, .. } => {
                 !(*write && *count > self.max_storage_write_sectors())
             }
-            VmBusMessage::InstructionTrace { opcode, mnemonic, .. } => {
+            VmBusMessage::InstructionTrace {
+                opcode, mnemonic, ..
+            } => {
                 if matches!(self.policy.level, DeepSecurityLevel::Lab) {
                     true
                 } else {
                     !crate::dls::is_suspicious_instruction(*opcode, mnemonic)
                 }
             }
-            VmBusMessage::Call { to, target_name, .. } => {
-                !crate::dls::is_restricted_call(*to, target_name.as_deref())
-            }
+            VmBusMessage::Call {
+                to, target_name, ..
+            } => !crate::dls::is_restricted_call(*to, target_name.as_deref()),
         }
     }
 
@@ -155,16 +164,18 @@ impl DeepLevelSecurity {
             HwBusMessage::DmaRequest { bytes, .. } => {
                 matches!(self.policy.level, DeepSecurityLevel::Lab) || *bytes <= 1024 * 1024
             }
-            HwBusMessage::InstructionTrace { opcode, mnemonic, .. } => {
+            HwBusMessage::InstructionTrace {
+                opcode, mnemonic, ..
+            } => {
                 if matches!(self.policy.level, DeepSecurityLevel::Lab) {
                     true
                 } else {
                     !crate::dls::is_suspicious_instruction(*opcode, mnemonic)
                 }
             }
-            HwBusMessage::Call { to, target_name, .. } => {
-                !crate::dls::is_restricted_call(*to, target_name.as_deref())
-            }
+            HwBusMessage::Call {
+                to, target_name, ..
+            } => !crate::dls::is_restricted_call(*to, target_name.as_deref()),
         }
     }
 
@@ -193,13 +204,22 @@ impl AutolyticProtocol {
     /// Phase 1: Detection
     /// Triggered by a GHM boundary violation or a software-induced crash.
     pub fn detect_violation(vm_id: u32, error_code: u32) {
-        crate::message!("\n", "ALERT: AUTOLYTIC VIOLATION DETECTED FOR VM {} (CODE: {:#X})", vm_id, error_code);
+        crate::message!(
+            "\n",
+            "ALERT: AUTOLYTIC VIOLATION DETECTED FOR VM {} (CODE: {:#X})",
+            vm_id,
+            error_code
+        );
         Self::trigger_fail_stop(vm_id, error_code);
     }
 
     /// Phase 2: System Hibernation
     fn trigger_fail_stop(vm_id: u32, _error_code: u32) {
-        crate::message!("\n", "FAIL-STOP: TERMINATING VM {}, CLEARING CACHES, AND RESETTING HARDWARE", vm_id);
+        crate::message!(
+            "\n",
+            "FAIL-STOP: TERMINATING VM {}, CLEARING CACHES, AND RESETTING HARDWARE",
+            vm_id
+        );
         // 1. Terminate the VM Unit (handled by HypervisorManager)
         // 2. Clear volatile states (simplified representation)
         // 3. Reset hardware to known-good state.
@@ -208,7 +228,12 @@ impl AutolyticProtocol {
     /// Phase 3: Forensic Deep Scan
     /// Performs a Deep Scan of the VM's VHD while the system is in a restricted state.
     pub fn forensic_scan(vhd_path: &str, error_code: u32) -> bool {
-        crate::message!("\n", "FORENSIC: SCANNING {} FOR ERROR PATTERNS ({:#X})", vhd_path, error_code);
+        crate::message!(
+            "\n",
+            "FORENSIC: SCANNING {} FOR ERROR PATTERNS ({:#X})",
+            vhd_path,
+            error_code
+        );
         // Heuristic Matching: Correlates the GHM error code with code patterns found in the VHD.
         // Persistence Check: Looks for loops or payloads designed to trigger repeated hardware faults.
         true // Assume malicious for simulation
@@ -217,7 +242,11 @@ impl AutolyticProtocol {
     /// Phase 4: Decommissioning & Zeroing
     pub fn decommissioning_and_zeroing(vm_id: u32) {
         crate::message!("\n", "DECOMMISSIONING: PERMANENTLY RETIRING VM {}", vm_id);
-        crate::message!("\n", "ZEROING: WIPING MEMORY AND DISK SECTORS ALLOCATED TO VM {}", vm_id);
+        crate::message!(
+            "\n",
+            "ZEROING: WIPING MEMORY AND DISK SECTORS ALLOCATED TO VM {}",
+            vm_id
+        );
         // 1. Permanent retirement of the VM.
         // 2. Zeroing specific sectors and memory regions.
     }

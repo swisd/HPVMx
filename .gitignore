@@ -7,3 +7,5 @@ boot.vhd
 !/web/disk.vhd
 /web/qemu-wasm/
 /web/noVNC-1.7.0/
+/.junie
+/.idea

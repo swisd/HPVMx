@@ -10,7 +10,7 @@
     <include source="path" />
 
     <!-- either micro-c or a custom scripting language -->
-    <subscript name="testscript" type="module">
+    <subscript name="testscript" type="module" language="micro-c">
         fn add(a, b) {
             return a + b;
         }

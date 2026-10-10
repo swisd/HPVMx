@@ -6,9 +6,9 @@ use alloc::vec::Vec;
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct MemoryPage {
-    pub gpa: u64,           // Guest physical address
-    pub hpa: u64,           // Host physical address
-    pub size: usize,        // Page size in bytes
+    pub gpa: u64,    // Guest physical address
+    pub hpa: u64,    // Host physical address
+    pub size: usize, // Page size in bytes
     pub writable: bool,
     pub executable: bool,
 }

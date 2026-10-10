@@ -1,10 +1,11 @@
 //! CVM-internal bus (CVMBus). It is separate from VMBUS so container traffic cannot
 //! inject VM or host-hardware bus operations.
 
-use alloc::collections::VecDeque;
-use alloc::vec::Vec;
-use crate::vmm::container::{ContainerId, ContainerSpec};
 use crate::vdebug_autoprefix;
+use crate::vmm::container::{ContainerId, ContainerSpec};
+use alloc::collections::VecDeque;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 #[derive(Debug, Clone)]
 pub enum CvmBusMessage {
@@ -12,20 +13,38 @@ pub enum CvmBusMessage {
     StartContainer(ContainerId),
     StopContainer(ContainerId),
     DeleteContainer(ContainerId),
-    PortWrite { container_id: ContainerId, port: u16, data: Vec<u8> },
+    ExecContainer {
+        container_id: ContainerId,
+        command: String,
+    },
+    PortWrite {
+        container_id: ContainerId,
+        port: u16,
+        data: Vec<u8>,
+    },
 }
 
-pub struct CvmBus { pub cvm_id: u32, queue: VecDeque<CvmBusMessage> }
+pub struct CvmBus {
+    pub cvm_id: u32,
+    queue: VecDeque<CvmBusMessage>,
+}
 
 impl CvmBus {
     pub fn new(cvm_id: u32) -> Self {
         vdebug_autoprefix!("CvmBus: initialized for CVM {}", cvm_id);
-        Self { cvm_id, queue: VecDeque::new() }
+        Self {
+            cvm_id,
+            queue: VecDeque::new(),
+        }
     }
     pub fn send(&mut self, message: CvmBusMessage) {
         vdebug_autoprefix!("CvmBus: queued message for CVM {}", self.cvm_id);
         self.queue.push_back(message);
     }
-    pub fn receive(&mut self) -> Option<CvmBusMessage> { self.queue.pop_front() }
-    pub fn pending(&self) -> usize { self.queue.len() }
+    pub fn receive(&mut self) -> Option<CvmBusMessage> {
+        self.queue.pop_front()
+    }
+    pub fn pending(&self) -> usize {
+        self.queue.len()
+    }
 }

@@ -1,7 +1,8 @@
 //! Virtual CPU management
 
-use bitflags::bitflags;
+use crate::hardware::cpu::vmx::{GuestRegisters, VmxGuestFpuState};
 use crate::vdebug_autoprefix;
+use bitflags::bitflags;
 
 bitflags! {
     /// vCPU execution flags
@@ -24,6 +25,8 @@ pub struct VirtualCpu {
     pub rsp: u64,
     pub rbp: u64,
     pub interrupt_pending: bool,
+    pub registers: GuestRegisters,
+    pub fpu_state: VmxGuestFpuState,
 }
 
 #[allow(dead_code)]
@@ -38,6 +41,8 @@ impl VirtualCpu {
             rsp: 0,
             rbp: 0,
             interrupt_pending: false,
+            registers: GuestRegisters::default(),
+            fpu_state: VmxGuestFpuState::new(),
         }
     }
 

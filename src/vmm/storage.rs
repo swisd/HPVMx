@@ -30,14 +30,10 @@ pub enum DiskType {
 #[allow(dead_code)]
 impl StorageManager {
     pub fn new() -> Self {
-        Self {
-            disks: Vec::new(),
-        }
+        Self { disks: Vec::new() }
     }
 
-    pub fn attach_disk(&mut self, vm_id: u32, image_path: &str, size_mb: u32)
-                       -> Result<u32, &str>
-    {
+    pub fn attach_disk(&mut self, vm_id: u32, image_path: &str, size_mb: u32) -> Result<u32, &str> {
         let disk = VirtualDisk {
             id: self.disks.len() as u32,
             vm_id,
