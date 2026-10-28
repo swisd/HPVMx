@@ -1084,8 +1084,33 @@ static HEADER_VAL_11: &str = "HHTTP/1.1";
 
 fn build_http_response(method: &str, path: &str, body: &[u8]) -> Vec<u8> {
     let (status_line, content_type, response_body): (&str, &str, Vec<u8>) = if path == "/" || path == "/index.html" {
-        let html = "<!DOCTYPE html>\n<html><head><title>HPVMx UEFI Server</title></head>\n<body>\n<h1>HPVMx UEFI Server</h1>\n<p>Status: OK</p>\n<p>Available endpoints:</p>\n<ul>\n<li><code>GET /</code> - This page</li>\n<li><code>GET /status</code> - System status</li>\n<li><code>POST /echo</code> - Echo back posted data</li>\n<li><code>PATCH /config</code> - Update configuration</li>\n</ul>\n</body></html>";
-        (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "text/html", html.as_bytes().to_vec())
+        // Build dynamic overview page mirroring the OS dashboard overview tab
+        let hostname = crate::SYSTEMNAME;
+        let cpu_cores = crate::hardware::cpu::core_count().max(1);
+        let total_mem_mb = crate::get_total_physical_memory_mb();
+        let version = unsafe {
+            if let Some(ver) = crate::VERSION_DATA.as_ref() {
+                ver.format_to_string()
+            } else {
+                String::from("unknown")
+            }
+        };
+        let (time_str, uptime_secs) = if let Ok(time) = uefi::runtime::get_time() {
+            let ts = format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                time.year(), time.month(), time.day(),
+                time.hour(), time.minute(), time.second());
+            // Approximate uptime from tick counter
+            let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
+            (ts, state.httpd_poll_tick / 1000)
+        } else {
+            (String::from("N/A"), 0)
+        };
+        let html = format!(
+            "<!DOCTYPE html>\n<html><head><meta charset='utf-8'><title>{} - HPVMx Overview</title>\n<style>\nbody {{ background: #1a1a1a; color: #cccccc; font-family: monospace; margin: 0; padding: 20px; }}\nh1 {{ color: #00ff00; border-bottom: 1px solid #333; padding-bottom: 10px; }}\nh2 {{ color: #00cc88; margin-top: 20px; }}\n.hostname {{ color: #0088cc; font-size: 14px; }}\n.grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 15px 0; }}\n.card {{ background: #2a2a2a; border: 1px solid #333; border-radius: 6px; padding: 15px; text-align: center; }}\n.card .value {{ color: #ffffff; font-size: 24px; font-weight: bold; }}\n.card .label {{ color: #888888; font-size: 12px; margin-top: 5px; }}\n.bar {{ background: #333; border-radius: 3px; height: 8px; margin-top: 5px; overflow: hidden; }}\n.bar-fill {{ height: 100%; border-radius: 3px; }}\ntable {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}\nth, td {{ text-align: left; padding: 6px 10px; border-bottom: 1px solid #333; }}\nth {{ color: #aaaaaa; }}\nfooter {{ margin-top: 30px; color: #666; font-size: 12px; border-top: 1px solid #333; padding-top: 10px; }}\n</style></head>\n<body>\n<h1>HPVMx System Overview</h1>\n<p class='hostname'>{}</p>\n\n<h2>Resource Usage</h2>\n<div class='grid'>\n  <div class='card'><div class='value'>{}</div><div class='label'>CPU Cores</div></div>\n  <div class='card'><div class='value'>{} MB</div><div class='label'>Total Memory</div></div>\n  <div class='card'><div class='value'>{}</div><div class='label'>Uptime (s)</div></div>\n  <div class='card'><div class='value'>{}</div><div class='label'>Time</div></div>\n</div>\n\n<h2>System Information</h2>\n<table>\n  <tr><th>Property</th><th>Value</th></tr>\n  <tr><td>OS</td><td>HPVMx UEFI</td></tr>\n  <tr><td>Version</td><td>{}</td></tr>\n  <tr><td>Hostname</td><td>{}</td></tr>\n  <tr><td>CPU Cores</td><td>{}</td></tr>\n  <tr><td>Total Memory</td><td>{} MB</td></tr>\n  <tr><td>Time</td><td>{}</td></tr>\n  <tr><td>Uptime</td><td>{} seconds</td></tr>\n</table>\n\n<h2>Available Endpoints</h2>\n<table>\n  <tr><th>Method</th><th>Path</th><th>Description</th></tr>\n  <tr><td>GET</td><td>/</td><td>This overview page</td></tr>\n  <tr><td>GET</td><td>/status</td><td>System status (JSON)</td></tr>\n  <tr><td>POST</td><td>/echo</td><td>Echo back posted data</td></tr>\n  <tr><td>PATCH</td><td>/config</td><td>Update configuration</td></tr>\n</table>\n\n<footer>{} &copy; 2026 HPVMx Project</footer>\n</body></html>",
+            hostname, hostname, cpu_cores, total_mem_mb, uptime_secs, time_str,
+            version, hostname, cpu_cores, total_mem_mb, time_str, uptime_secs, version
+        );
+        (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "text/html", html.into_bytes())
     } else if path == "/status" {
         let html = "<!DOCTYPE html>\n<html><head><title>HPVMx Status</title></head>\n<body>\n<h1>System Status</h1>\n<p>HPVMx UEFI Server is running.</p>\n<p>Network: Active</p>\n</body></html>";
         (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "text/html", html.as_bytes().to_vec())

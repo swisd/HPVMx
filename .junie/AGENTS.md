@@ -47,3 +47,7 @@ You are required to maintain a standalone application structure database located
   }
 }
 ```
+
+## 3. Versioning
+
+Make sure to bump the patch version after every update/modification turn in cargo.toml

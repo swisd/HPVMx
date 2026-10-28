@@ -5376,7 +5376,8 @@
             "path": "&str",
             "body": "&[u8]"
           },
-          "returns": "Vec<u8>"
+          "returns": "Vec<u8>",
+          "note": "Root page (GET /) now returns dynamic HTML overview mirroring the OS dashboard: hostname, CPU cores, total memory, uptime, time/date, version string, and endpoint table. Styled with dark theme CSS matching the dashboard appearance. Other endpoints (/status, /echo, /config) remain unchanged."
         },
         "handle_httpd": {
           "type": "fn",
