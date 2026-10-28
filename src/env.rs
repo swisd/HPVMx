@@ -299,6 +299,165 @@ impl<'a, T> Drop for SpinLockGuard<'a, T> {
     }
 }
 
+
+/// A single tracked lock entry in the global lock registry.
+#[derive(Debug)]
+pub struct TrackedLockEntry {
+    /// Unique identifier for this lock (e.g., a pointer address or name).
+    pub lock_id: usize,
+    /// Whether this lock is currently being accessed (held).
+    pub being_accessed: AtomicBool,
+}
+
+impl TrackedLockEntry {
+    pub fn new(lock_id: usize) -> Self {
+        Self {
+            lock_id,
+            being_accessed: AtomicBool::new(false),
+        }
+    }
+
+    /// Returns `true` if the lock is currently being accessed.
+    pub fn is_being_accessed(&self) -> bool {
+        self.being_accessed.load(Ordering::SeqCst)
+    }
+
+    /// Mark this lock as being accessed.
+    pub fn mark_accessing(&self) {
+        self.being_accessed.store(true, Ordering::SeqCst);
+    }
+
+    /// Mark this lock as no longer being accessed.
+    pub fn mark_released(&self) {
+        self.being_accessed.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Global registry of tracked locks — stores lock ID and being_accessed state.
+/// Protected by a simple spinlock on the Vec itself.
+pub struct LockRegistry {
+    entries: alloc::vec::Vec<TrackedLockEntry>,
+}
+
+impl LockRegistry {
+    pub const fn new() -> Self {
+        Self {
+            entries: alloc::vec::Vec::new(),
+        }
+    }
+
+    /// Register a new lock with the given ID. Returns the index in the registry.
+    pub fn register(&mut self, lock_id: usize) -> usize {
+        let idx = self.entries.len();
+        self.entries.push(TrackedLockEntry::new(lock_id));
+        idx
+    }
+
+    /// Get a reference to a tracked lock entry by its registry index.
+    pub fn get(&self, idx: usize) -> Option<&TrackedLockEntry> {
+        self.entries.get(idx)
+    }
+
+    /// Get a mutable reference to a tracked lock entry by its registry index.
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut TrackedLockEntry> {
+        self.entries.get_mut(idx)
+    }
+
+    /// Check if any lock is currently being accessed.
+    pub fn any_accessing(&self) -> bool {
+        self.entries.iter().any(|e| e.is_being_accessed())
+    }
+
+    /// Count how many locks are currently being accessed.
+    pub fn accessing_count(&self) -> usize {
+        self.entries.iter().filter(|e| e.is_being_accessed()).count()
+    }
+
+    /// Get the total number of registered locks.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Check if the registry is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+use core::sync::atomic::AtomicBool as AtomicBoolImport;
+use core::cell::UnsafeCell as UnsafeCellImport;
+
+/// Global lock registry instance, protected by a spinlock.
+static LOCK_REGISTRY_LOCK: AtomicBoolImport = AtomicBoolImport::new(false);
+static mut LOCK_REGISTRY_DATA: UnsafeCellImport<LockRegistry> = UnsafeCellImport::new(LockRegistry::new());
+
+/// Acquire the global lock registry for reading/writing.
+/// Spins until the lock is acquired.
+fn lock_registry_lock() {
+    while LOCK_REGISTRY_LOCK.swap(true, Ordering::Acquire) {
+        core::hint::spin_loop();
+    }
+}
+
+/// Release the global lock registry.
+fn lock_registry_unlock() {
+    LOCK_REGISTRY_LOCK.store(false, Ordering::Release);
+}
+
+/// Register a new lock in the global registry. Returns the registry index.
+pub fn register_tracked_lock(lock_id: usize) -> usize {
+    lock_registry_lock();
+    let idx = unsafe { (*LOCK_REGISTRY_DATA.get()).register(lock_id) };
+    lock_registry_unlock();
+    idx
+}
+
+/// Get a snapshot of whether a lock is being accessed.
+pub fn is_lock_being_accessed(registry_idx: usize) -> bool {
+    lock_registry_lock();
+    let result = unsafe {
+        (*LOCK_REGISTRY_DATA.get()).get(registry_idx)
+            .map(|e| e.is_being_accessed())
+            .unwrap_or(false)
+    };
+    lock_registry_unlock();
+    result
+}
+
+/// Mark a lock as being accessed.
+pub fn mark_lock_accessing(registry_idx: usize) {
+    lock_registry_lock();
+    if let Some(entry) = unsafe { (*LOCK_REGISTRY_DATA.get()).get(registry_idx) } {
+        entry.mark_accessing();
+    }
+    lock_registry_unlock();
+}
+
+/// Mark a lock as released.
+pub fn mark_lock_released(registry_idx: usize) {
+    lock_registry_lock();
+    if let Some(entry) = unsafe { (*LOCK_REGISTRY_DATA.get()).get(registry_idx) } {
+        entry.mark_released();
+    }
+    lock_registry_unlock();
+}
+
+/// Get the number of locks currently being accessed.
+pub fn locks_accessing_count() -> usize {
+    lock_registry_lock();
+    let count = unsafe { (*LOCK_REGISTRY_DATA.get()).accessing_count() };
+    lock_registry_unlock();
+    count
+}
+
+/// Get the total number of registered locks.
+pub fn tracked_locks_count() -> usize {
+    lock_registry_lock();
+    let count = unsafe { (*LOCK_REGISTRY_DATA.get()).len() };
+    lock_registry_unlock();
+    count
+}
+
 fn dummy_raw_waker() -> RawWaker {
     fn no_op(_: *const ()) {}
     fn clone(p: *const ()) -> RawWaker {
@@ -781,6 +940,10 @@ pub struct GlobalEnvironmentData {
     pub package_action_idx: usize,
     pub selected_network_action_idx: usize,
     pub network_target: String,
+    pub static_ip_input: String,
+    pub static_gw_input: String,
+    pub static_mask_input: String,
+    pub static_input_focus: usize,
     pub selected_settings_category_idx: usize,
     pub selected_settings_idx: usize,
     pub settings: UiSettings,
@@ -879,6 +1042,10 @@ impl GlobalEnvironmentData {
         package_action_idx: 0,
         selected_network_action_idx: 0,
         network_target: String::from("127.0.0.1"),
+        static_ip_input: String::new(),
+        static_gw_input: String::new(),
+        static_mask_input: String::from("255.255.255.0"),
+        static_input_focus: 0,
         selected_settings_category_idx: 0,
         selected_settings_idx: 0,
         settings: UiSettings {
@@ -971,6 +1138,10 @@ impl GlobalEnvironmentData {
         self.package_action_idx = ui.package_action_idx;
         self.selected_network_action_idx = ui.selected_network_action_idx;
         self.network_target = ui.network_target;
+        self.static_ip_input = ui.static_ip_input;
+        self.static_gw_input = ui.static_gw_input;
+        self.static_mask_input = ui.static_mask_input;
+        self.static_input_focus = ui.static_input_focus;
         self.selected_settings_idx = ui.selected_settings_idx;
         self.settings = ui.settings;
         self.status_line = ui.status_line;
@@ -1034,6 +1205,10 @@ impl GlobalEnvironmentData {
         self.package_action_idx = ui.package_action_idx.clone();
         self.selected_network_action_idx = ui.selected_network_action_idx.clone();
         self.network_target = ui.network_target.clone();
+        self.static_ip_input = ui.static_ip_input.clone();
+        self.static_gw_input = ui.static_gw_input.clone();
+        self.static_mask_input = ui.static_mask_input.clone();
+        self.static_input_focus = ui.static_input_focus.clone();
         self.selected_settings_idx = ui.selected_settings_idx.clone();
         self.settings = ui.settings.clone();
         self.status_line = ui.status_line.clone();
@@ -1654,6 +1829,10 @@ impl XSteppedApplicationContext {
                 if let Some(network) = self.application.inner.as_any().downcast_ref::<X_Network>() {
                     ui.selected_network_action_idx = network.selected_network_action_idx;
                     ui.network_target = network.network_target.clone();
+                    ui.static_ip_input = network.static_ip_input.clone();
+                    ui.static_gw_input = network.static_gw_input.clone();
+                    ui.static_mask_input = network.static_mask_input.clone();
+                    ui.static_input_focus = network.static_input_focus;
                 }
             }
             crate::ui::DashboardTab::Console => {
@@ -1794,6 +1973,10 @@ impl XSteppedApplicationContext {
                 if let Some(net) = ctx.application.inner.as_any_mut().downcast_mut::<X_Network>() {
                     net.selected_network_action_idx = ui.selected_network_action_idx;
                     net.network_target = ui.network_target.clone();
+                    net.static_ip_input = ui.static_ip_input.clone();
+                    net.static_gw_input = ui.static_gw_input.clone();
+                    net.static_mask_input = ui.static_mask_input.clone();
+                    net.static_input_focus = ui.static_input_focus;
                 }
             }
             crate::ui::DashboardTab::Devices => {

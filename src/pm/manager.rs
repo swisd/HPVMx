@@ -10,11 +10,11 @@ use crate::filesystem::FileSystem;
 use serde::{Deserialize, Serialize};
 use uefi::proto::media::file::File;
 use crate::{hpvm_info, message};
-use crate::types::{VersionString, BYTEARRAY};
+use crate::types::{VersionString};
 
 static VERSION: &str = "0.3.2";
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct UUID(BYTEARRAY);
+pub struct UUID([u8;16]);
 
 #[derive(Clone)]
 pub struct PackageManager {

@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 use core::sync::atomic::{AtomicBool, Ordering};
-use crate::Color;
+use crate::{vdebug_autoprefix, Color};
 use crate::hpvm_log;
 use crate::hpvm_info;
 use crate::hpvm_warn;
@@ -68,25 +68,24 @@ pub fn link_up() -> bool {
 
 /// Transmit a raw Ethernet frame via SNP (best-effort).
 pub fn tx(frame: &[u8]) -> Result<(), &'static str> {
+    crate::vdebug!("NETHW", "TX called, frame size: {} bytes", frame.len());
     unsafe {
         if let Some(ref snp_scoped) = OWNED_SNP {
             let snp = &**snp_scoped;
 
-            // 1. Send the frame
-            // transmit() returns Result<()>
+            crate::vdebug!("NETHW", "TX: SNP available, calling transmit");
             if snp.transmit(0, frame, None, None, None).is_err() {
+                crate::vdebug!("NETHW", "TX: hardware rejected packet");
                 return Err("tx hardware rejected packet");
             }
 
-            // 2. Poll for the recycled buffer
-            // VirtualBox's virtual NIC needs this to "acknowledge" the packet is sent
+            crate::vdebug!("NETHW", "TX: transmit accepted, waiting for buffer recycle");
             let mut timeout = 1000000;
             while timeout > 0 {
-                // In 0.36.1, this is the specialized method for tx cleanup
                 if let Ok(maybe_buf) = snp.get_recycled_transmit_buffer_status() {
-                    // maybe_buf is Option<NonNull<u8>>
                     if maybe_buf.is_some() {
-                        return Ok(()); // Hardware is done; slot is free
+                        crate::vdebug!("NETHW", "TX: buffer recycled after {} iterations", 1000000 - timeout);
+                        return Ok(());
                     }
                 }
 
@@ -94,7 +93,25 @@ pub fn tx(frame: &[u8]) -> Result<(), &'static str> {
                 core::hint::spin_loop();
             }
 
+            crate::vdebug!("NETHW", "TX: timeout waiting for buffer recycle");
             Err("tx timeout: hardware didn't return buffer")
+        } else {
+            crate::vdebug!("NETHW", "TX: FAILED - no SNP protocol");
+            Err("no snp")
+        }
+    }
+}
+
+/// Set receive filters on the SNP interface.
+/// On bridged LANs, promiscuous mode ensures we receive broadcast DHCP responses.
+pub fn set_receive_filters(promiscuous: bool) -> Result<(), &'static str> {
+    unsafe {
+        if let Some(ref snp_scoped) = OWNED_SNP {
+            let snp = &**snp_scoped;
+            let filters = ReceiveFlags::UNICAST | ReceiveFlags::BROADCAST;
+            let _ = snp.receive_filters(filters, ReceiveFlags::empty(), promiscuous, None);
+            crate::vdebug!("NETHW", "Receive filters set: promiscuous={}", promiscuous);
+            Ok(())
         } else {
             Err("no snp")
         }
@@ -103,10 +120,22 @@ pub fn tx(frame: &[u8]) -> Result<(), &'static str> {
 
 /// Receive a raw Ethernet frame into the provided buffer. Returns length if a packet was received.
 pub fn rx(buf: &mut [u8]) -> Result<usize, &'static str> {
-    let Some(snp) = snp_open() else { return Err("no snp"); };
-    match snp.receive(buf, None, None, None, None) {
-        Ok(sz) => Ok(sz),
-        Err(_) => Err("rx none"),
+    unsafe {
+        if let Some(ref snp_scoped) = OWNED_SNP {
+            let snp = &**snp_scoped;
+            match snp.receive(buf, None, None, None, None) {
+                Ok(sz) => {
+                    Ok(sz)
+                },
+                Err(_) => {
+                    // NOT_READY is the normal state when no packet is in the buffer
+                    Err("rx none")
+                },
+            }
+        } else {
+            crate::vdebug!("NETHW", "RX: FAILED - no SNP protocol available");
+            Err("no snp")
+        }
     }
 }
 
@@ -114,41 +143,58 @@ pub fn rx(buf: &mut [u8]) -> Result<usize, &'static str> {
 /// Returns Ok if at least one device was started and initialized.
 pub fn init() -> Result<(), &'static str> {
     if is_initialized() && get_info().is_some() {
+        vdebug_autoprefix!(11, "Network already initialized");
         return Ok(());
     }
 
+    vdebug_autoprefix!(11, "Searching for network adapters...");
     let handles = match boot::locate_handle_buffer(SearchType::ByProtocol(&SimpleNetwork::GUID)) {
         Ok(buf) => buf,
         Err(_) => {
-            hpvm_warn!("NETHW", "net-hw: no SNP handles present");
+            vdebug_autoprefix!(12, "No SNP handles present - no network adapter detected by UEFI");
             return Err("no nic found");
         }
     };
+    vdebug_autoprefix!(11, "Found {} SNP handle(s)", handles.as_slice().len());
 
     for &h in handles.as_slice().iter() {
+        vdebug_autoprefix!(9, "Attempting to open SNP protocol on handle {:?}", h);
         let Ok(snp_scoped) = boot::open_protocol_exclusive::<SimpleNetwork>(h) else {
+            vdebug_autoprefix!(14, "Failed to open SNP protocol exclusively on handle {:?}", h);
             continue;
         };
+        vdebug_autoprefix!(11, "SNP protocol opened successfully");
 
         let snp = &*snp_scoped;
         let mode = snp.mode();
+        vdebug_autoprefix!(9, "NIC state: {:?}, media present: {}", mode.state, bool::from(mode.media_present));
 
         match mode.state {
-            NetworkState::STOPPED => { // EfiSimpleNetworkStopped
-                if snp.start().is_err() { continue; }
+            NetworkState::STOPPED => {
+                vdebug_autoprefix!(9, "NIC is STOPPED, calling start()");
+                if snp.start().is_err() {
+                    vdebug_autoprefix!(14, "NIC start() failed");
+                    continue;
+                }
+                vdebug_autoprefix!(11, "NIC start() succeeded");
             }
-            NetworkState::STARTED => {} // EfiSimpleNetworkStarted - Ready to initialize
+            NetworkState::STARTED => {
+                vdebug_autoprefix!(9, "NIC is STARTED, ready to initialize");
+            }
             _ => {
-                // If already initialized (state 2), reset it to be safe
+                vdebug_autoprefix!(9, "NIC already initialized, resetting for safety");
                 let _ = snp.reset(false);
             }
         }
 
+        vdebug_autoprefix!(9, "Calling SNP initialize()");
         if let Err(e) = snp.initialize(0, 0) {
-            hpvm_warn!("NETHW", "SNP init failed on handle {:?}: {:?}", h, e);
+            vdebug_autoprefix!(14, "SNP initialize() failed: {:?}", e);
             continue;
         }
+        vdebug_autoprefix!(11, "SNP initialize() succeeded");
 
+        vdebug_autoprefix!(9, "Setting receive filters (UNICAST + BROADCAST)");
         let _ = snp.receive_filters(
             ReceiveFlags::UNICAST | ReceiveFlags::BROADCAST,
             ReceiveFlags::empty(),
@@ -156,10 +202,32 @@ pub fn init() -> Result<(), &'static str> {
             None     // No hardware MAC list needed
         ).map_err(|_| "Failed to set receive filters")?;
 
-        let mode = snp.mode(); // Refresh mode after init
+        // Wait for the link to come up - virtual NICs (especially VirtualBox) may need time
+        // to establish the connection after initialize(). Retry up to 5 seconds.
+        vdebug_autoprefix!(9, "Waiting for link to come up (up to 5 seconds)...");
+        let mut mode = snp.mode();
+        let mut retries = 0;
+        while !bool::from(mode.media_present) && retries < 50 {
+            uefi::boot::stall(core::time::Duration::from_millis(100));
+            mode = snp.mode();
+            retries += 1;
+        }
+        if !bool::from(mode.media_present) {
+            vdebug_autoprefix!(14, "Link still down after {} retries - continuing anyway, link may come up later", retries);
+        } else {
+            vdebug_autoprefix!(10, "Link came up after {} retries", retries);
+        }
         let mac_len = (mode.hw_address_size as usize).min(32);
         let mut mac = [0u8; 32];
         mac[..mac_len].copy_from_slice(&mode.current_address.0[..mac_len]);
+
+        // Log the link status before moving snp_scoped
+        let link_is_up = bool::from(mode.media_present);
+        if link_is_up {
+            vdebug_autoprefix!(10, "Link UP");
+        } else {
+            vdebug_autoprefix!(14, "Link DOWN - packets may not be received");
+        }
 
         // 5. Global State Update
         unsafe {
@@ -167,7 +235,7 @@ pub fn init() -> Result<(), &'static str> {
                 mac,
                 mac_len,
                 mtu: mode.max_packet_size,
-                media_present: mode.media_present.into(),
+                media_present: link_is_up,
                 state: 2,
             });
 
@@ -176,9 +244,12 @@ pub fn init() -> Result<(), &'static str> {
         }
 
         NET_INITIALIZED.store(true, Ordering::SeqCst);
+        hpvm_info!("NETHW", "Network hardware initialized successfully - MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         return Ok(());
     }
 
+    hpvm_error!("NETHW", "No usable NIC found after trying all handles");
     Err("no usable nic")
 }
 

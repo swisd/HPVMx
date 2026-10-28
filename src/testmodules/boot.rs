@@ -567,9 +567,6 @@ pub fn test_boot_virtualization_ui() -> bool {
 
 /// Master Runner for all Startup/Boot OS tests.
 pub fn run_all_boot_tests() -> bool {
-    vdebug_autoprefix!(11, "========================================");
-    vdebug_autoprefix!(11, "STARTING HPVMx STARTUP & BOOT OS TESTS");
-    vdebug_autoprefix!(11, "========================================");
 
     let mut all_passed = true;
 
@@ -596,9 +593,9 @@ pub fn run_all_boot_tests() -> bool {
     }
 
     if all_passed {
-        vdebug_autoprefix!(10, ">>> ALL STARTUP & BOOT OS TESTS PASSED <<<");
+        vdebug_autoprefix!(10, "all startup/boot tests passed");
     } else {
-        vdebug_autoprefix!(12, ">>> SOME STARTUP & BOOT OS TESTS FAILED <<<");
+        vdebug_autoprefix!(12, "some startup/boot tests passed");
     }
 
     all_passed

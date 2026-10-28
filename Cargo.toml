@@ -1,6 +1,6 @@
 [package]
 name = "HPVMx"
-version = "1.40.0"
+version = "1.41.61"
 edition = "2024"
 
 [[bin]]
@@ -14,6 +14,10 @@ default = []
 x4 = []
 xmlui = []
 crypt = []
+# Enable dedicated AP (Application Processor) poll worker for network stack.
+# When disabled (default), the BSP runs network polling via a fast timer instead.
+# Enable this only if the global lock registry and MP services are stable.
+net-multicore = []
 
 [profile.dev]
 panic = "abort"
@@ -56,4 +60,16 @@ ordered-float = { version = "5.5.0", default-features = false }
 serde-big-array = "0.5.1"
 bincode = { version = "2.0.0-rc.3", features = ["alloc", "serde"], default-features = false }
 num-traits = { version = "0.2.15", default-features = false }
-num-integer = { version = "0.1.47", default-features = false }
+spin = "0.10.0"
+
+# protobuf/rpc
+# protoc = "3.0.0-alpha.5"
+# google-protobuf = "0.37.0-rc.1"
+# protoc-gen-rust-grpc = "0.9.0"
+# grpc = "0.9.0"
+# grpc-protobuf = "0.9.0"
+prost = { version = "0.14.4", default-features = false, features = ["derive"] }
+
+
+[build-dependencies]
+prost-build = "0.14.4"

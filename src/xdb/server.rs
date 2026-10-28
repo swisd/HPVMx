@@ -232,15 +232,20 @@ impl DbServer {
                 }
             },
             Command::CreateTable { name, table_id, columns } => {
-                let new_table = Table {
-                    name: name.clone(),
-                    columns,
-                    data: BTreeMap::new(),
-                    next_serial: 1,
-                    header: TableHeader { name, table_id, row_count: 0 },
-                };
-                self.manager.create_table(new_table);
-                "TABLE CREATED\r\n".to_string()
+                // Only create the table if it doesn't already exist — preserves saved data across reboots
+                if self.manager.cache.entries.contains_key(&table_id) {
+                    "TABLE EXISTS\r\n".to_string()
+                } else {
+                    let new_table = Table {
+                        name: name.clone(),
+                        columns,
+                        data: alloc::collections::BTreeMap::new(),
+                        next_serial: 1,
+                        header: TableHeader { name, table_id, row_count: 0 },
+                    };
+                    self.manager.create_table(new_table);
+                    "TABLE CREATED\r\n".to_string()
+                }
             },
             Command::AlterTableAdd { table_id, column } => {
                 self.manager.add_column(table_id, column.name, column.data_type);

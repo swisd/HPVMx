@@ -14,6 +14,7 @@ use crate::x4::types::{ExecutionCoordinator, RenderContextBlock, ShaderManager, 
 pub mod pipeline;
 pub mod buffer;
 mod lane;
+mod types;
 
 pub unsafe fn OnShaderManagerModuleExit() -> i64 {
     // Capture your cleanup hook and cast/transmute it to match the expected exit signature

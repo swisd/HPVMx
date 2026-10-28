@@ -7,7 +7,7 @@
 pub static mut DASH_BACK_ENABLED: bool = false;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use crate::{hpvm_error, hpvm_info, hpvm_log, vdebug, TSC_PER_US, MOUSE, GLOBALENV, GLOBAL_SYNC_STATE};
+use crate::{hpvm_error, hpvm_info, hpvm_log, vdebug, TSC_PER_US, MOUSE, GLOBALENV, GLOBAL_SYNC_STATE, run_polling};
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -28,12 +28,13 @@ pub mod graphics3d;
 pub mod tabui;
 pub use qt::*;
 
-use crate::{handle_vm_command, hpvm_warn, message, terminal};
+use crate::{hpvm_warn, message, terminal};
 use crate::pm::{Package, PackageManager, PackageType};
 use pixel_graphics::{PixelGraphics, TreeViewNode, icons};
 use crate::apps::error::ErrorApp;
 use crate::env::{Application, GlobalEnvironment, SteppedApplicationContext, WindowState, XSteppedApplicationContext};
 use crate::input::ScanCodeV2;
+use crate::terminal::{handle_vm_command, handle_vmm_command};
 
 #[derive(Clone, Debug)]
 pub struct VectorSyncState {
@@ -130,6 +131,10 @@ pub struct DashboardUI {
     pub package_action_idx: usize,
     pub selected_network_action_idx: usize,
     pub network_target: String,
+    pub static_ip_input: String,
+    pub static_gw_input: String,
+    pub static_mask_input: String,
+    pub static_input_focus: usize,
     pub selected_settings_category_idx: usize,
     pub selected_settings_idx: usize,
     pub settings: UiSettings,
@@ -627,6 +632,10 @@ impl DashboardUI {
             package_action_idx: 0,
             selected_network_action_idx: 0,
             network_target: String::from("127.0.0.1"),
+            static_ip_input: String::new(),
+            static_gw_input: String::new(),
+            static_mask_input: String::from("255.255.255.0"),
+            static_input_focus: 0,
             selected_settings_category_idx: 0,
             selected_settings_idx: 0,
             settings: UiSettings {
@@ -1113,6 +1122,21 @@ impl DashboardUI {
                             pg.draw_text(x, y, &alloc::format!("Target: {}", self.network_target), 0xCCCCCC);
                             y += 28;
 
+                            pg.draw_text(x, y, "Static IP Config (UP/DOWN to focus, type to edit):", 0x00FFFF);
+                            y += 22;
+                            let ip_color = if self.static_input_focus == 0 { 0xFFFFFF } else { 0xCCCCCC };
+                            let ip_prefix = if self.static_input_focus == 0 { ">> " } else { "   " };
+                            pg.draw_text(x, y, &alloc::format!("{}IP:   {}", ip_prefix, self.static_ip_input), ip_color);
+                            y += 20;
+                            let gw_color = if self.static_input_focus == 1 { 0xFFFFFF } else { 0xCCCCCC };
+                            let gw_prefix = if self.static_input_focus == 1 { ">> " } else { "   " };
+                            pg.draw_text(x, y, &alloc::format!("{}GW:   {}", gw_prefix, self.static_gw_input), gw_color);
+                            y += 20;
+                            let mask_color = if self.static_input_focus == 2 { 0xFFFFFF } else { 0xCCCCCC };
+                            let mask_prefix = if self.static_input_focus == 2 { ">> " } else { "   " };
+                            pg.draw_text(x, y, &alloc::format!("{}Mask: {}", mask_prefix, self.static_mask_input), mask_color);
+                            y += 30;
+
                             pg.draw_text(x, y, "Traffic Monitor (10s):", 0x00FFFF);
                             y += 20;
                             pg.draw_text(x, y, &alloc::format!("RX: {} KB/s", self.resources.net_rx_kbps), 0x00FF00);
@@ -1122,7 +1146,7 @@ impl DashboardUI {
                             pg.draw_line_graph(x + 120, y - 10, 200, 40, &self.resources.net_tx_history, 1024, 0xFF0000, 60);
                             y += 60;
 
-                            let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off"];
+                            let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off", "Static IP"];
                             let mut action_x = x;
                             for (idx, action) in actions.iter().enumerate() {
                                 let is_focused = idx == self.selected_network_action_idx;
@@ -2109,6 +2133,8 @@ impl DashboardUI {
                     app_ctx.ui_time = draw_tsc_end.saturating_sub(draw_tsc_begin) as usize;
                 }
 
+                run_polling();
+
                 // Draw functional UI layers
                 let mut ypos = 0;
                 for (msg, duration) in &mut self.notifications {
@@ -2757,6 +2783,40 @@ impl DashboardUI {
                     crate::devices::net::httpd_stop();
                     self.status_line = String::from("HTTP management server stopped");
                 }
+                6 => {
+                    // Configure static IP from input fields
+                    let ip_str = &self.static_ip_input;
+                    let gw_str = &self.static_gw_input;
+                    let mask_str = &self.static_mask_input;
+                    
+                    if let Some(ip) = crate::devices::net::parse_ip(ip_str) {
+                        if let Some(gw) = crate::devices::net::parse_ip(gw_str) {
+                            if let Some(mask) = crate::devices::net::parse_ip(mask_str) {
+                                crate::devices::net_stack::set_static_ip(ip, gw, mask);
+                                // Save to file for persistence
+                                if let Err(e) = crate::devices::net::save_network_config(ip_str, gw_str, mask_str) {
+                                    self.status_line = format!("Static IP set but save failed: {}", e);
+                                } else {
+                                    self.status_line = format!("Static IP saved: {}.{}.{}.{} / GW {}.{}.{}.{} / MASK {}.{}.{}.{} (re-init to apply)", 
+                                        ip[0], ip[1], ip[2], ip[3],
+                                        gw[0], gw[1], gw[2], gw[3],
+                                        mask[0], mask[1], mask[2], mask[3]);
+                                }
+                            } else {
+                                self.status_line = String::from("Invalid subnet mask format");
+                            }
+                        } else {
+                            self.status_line = String::from("Invalid gateway format");
+                        }
+                    } else {
+                        // Show current static IP config
+                        let (ip, gw, mask) = crate::devices::net_stack::get_static_ip_config();
+                        self.status_line = format!("Static: {}.{}.{}.{} / GW {}.{}.{}.{} / MASK {}.{}.{}.{}", 
+                            ip[0], ip[1], ip[2], ip[3],
+                            gw[0], gw[1], gw[2], gw[3],
+                            mask[0], mask[1], mask[2], mask[3]);
+                    }
+                }
                 _ => {}
             }
         }
@@ -2894,33 +2954,33 @@ impl DashboardUI {
                 "VM: Create New VM" => self.set_tab(DashboardTab::CreateVM),
                 "VM: Start Selected VM" => {
                     if let Some(id) = selected_vm_id.as_deref() {
-                        crate::handle_vm_command(&["vm", "start", id]);
+                        handle_vm_command(&["vm", "start", id]);
                     } else {
                         self.ui_error_with_detail(1, Some("No VM selected"));
                     }
                 }
                 "VM: Stop Selected VM" => {
                     if let Some(id) = selected_vm_id.as_deref() {
-                        crate::handle_vm_command(&["vm", "stop", id]);
+                        handle_vm_command(&["vm", "stop", id]);
                     } else {
                         self.ui_error_with_detail(1, Some("No VM selected"));
                     }
                 }
                 "VM: Delete Selected VM" => {
                     if let Some(id) = selected_vm_id.as_deref() {
-                        crate::handle_vm_command(&["vm", "delete", id]);
+                        handle_vm_command(&["vm", "delete", id]);
                     } else {
                         self.ui_error_with_detail(1, Some("No VM selected"));
                     }
                 }
                 "VM: Boot with Media" => {
                     if self.get_selected_vm_id().is_some() {
-                        crate::handle_vm_command(&["vm", "boot"]);
+                        handle_vm_command(&["vm", "boot"]);
                     } else {
                         self.ui_error_with_detail(1, Some("No VM selected"));
                     }
                 }
-                "VM: Simulate Violation" => crate::handle_vm_command(&["vm", "simulate-violation"]),
+                "VM: Simulate Violation" => handle_vm_command(&["vm", "simulate-violation"]),
                 "Resources: View CPU/Memory" => self.set_tab(DashboardTab::Resources),
                 "Storage: Browse Files" => self.set_tab(DashboardTab::Storage),
                 "Storage: Refresh Drives" | "System: Refresh Storage" => {
@@ -3060,8 +3120,8 @@ impl DashboardUI {
                     self.editor = Some(TextEditor::new(String::from("untitled.txt"), Vec::new()));
                     self.selected_tab = DashboardTab::Editor;
                 }
-                "VMM: Show Statistics" => crate::handle_vmm_command(&["vmm", "info"]),
-                "VMM: Advanced Stats" => crate::handle_vmm_command(&["vmm", "info-adv"]),
+                "VMM: Show Statistics" => handle_vmm_command(&["vmm", "info"]),
+                "VMM: Advanced Stats" => handle_vmm_command(&["vmm", "info-adv"]),
                 "System: Refresh All" => {
                     self.refresh_storage();
                     self.refresh_devices();
@@ -4409,10 +4469,41 @@ impl DashboardUI {
                 DashboardTab::Network => {
                     match key {
                         Key::Printable(c) => {
-                            match char::from(c) {
+                            let ch = char::from(c);
+                            match ch {
                                 '\r' | '\n' => self.execute_network_action(),
                                 '+' | '=' => self.network_target = String::from("192.168.1.1"),
                                 '-' | '_' => self.network_target = String::from("127.0.0.1"),
+                                // Allow typing digits and dots into focused static IP field
+                                '0'..='9' | '.' => {
+                                    match self.static_input_focus {
+                                        0 => {
+                                            if self.static_ip_input.len() < 15 {
+                                                self.static_ip_input.push(ch);
+                                            }
+                                        }
+                                        1 => {
+                                            if self.static_gw_input.len() < 15 {
+                                                self.static_gw_input.push(ch);
+                                            }
+                                        }
+                                        2 => {
+                                            if self.static_mask_input.len() < 15 {
+                                                self.static_mask_input.push(ch);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                // Backspace to delete last character
+                                _ if ch as u32 == 8 => {
+                                    match self.static_input_focus {
+                                        0 => { self.static_ip_input.pop(); }
+                                        1 => { self.static_gw_input.pop(); }
+                                        2 => { self.static_mask_input.pop(); }
+                                        _ => {}
+                                    }
+                                }
                                 _ => {}
                             }
                         }
@@ -4420,7 +4511,19 @@ impl DashboardUI {
                             self.selected_network_action_idx = self.selected_network_action_idx.saturating_sub(1);
                         }
                         Key::Special(ScanCode::RIGHT) => {
-                            self.selected_network_action_idx = (self.selected_network_action_idx + 1).min(5);
+                            self.selected_network_action_idx = (self.selected_network_action_idx + 1).min(6);
+                        }
+                        Key::Special(ScanCode::UP) => {
+                            // Move focus up
+                            if self.static_input_focus > 0 {
+                                self.static_input_focus -= 1;
+                            }
+                        }
+                        Key::Special(ScanCode::DOWN) => {
+                            // Move focus down
+                            if self.static_input_focus < 2 {
+                                self.static_input_focus += 1;
+                            }
                         }
                         _ => {}
                     }

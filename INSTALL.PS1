@@ -1,6 +1,8 @@
 # This script uses native Windows DiskPart to create a bootable VHD
 $env:CC = "clang"
 
+$env:PROTOC = "$env:LOCALAPPDATA\protoc\bin\protoc.exe"
+
 Write-Output "Running Build Script..."
 ./build.bat
 

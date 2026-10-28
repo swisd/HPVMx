@@ -224,9 +224,6 @@ pub enum QtWidgetState {
     Focused,
 }
 
-// =========================================================================
-// PyQt6 / Qt6 Widgets Builders
-// =========================================================================
 
 /// QPushButton - Push Button Widget with Qt6 Fusion styling
 #[derive(Clone, Debug)]

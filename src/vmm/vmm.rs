@@ -21,6 +21,9 @@ use crate::vmm::vmexit;
 use crate::{hardware, hpvm_error, hpvm_info, hpvm_log, vdebug, vdebug_autoprefix};
 use uefi::mem::memory_map::MemoryMap;
 use uefi::proto::console::text::Color;
+use crate::micro_c::CVM;
+use crate::vmm::container::Container;
+use crate::vmm::cvm::ContainerVirtualMachine;
 
 static VM_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -110,6 +113,8 @@ pub struct BootedSystem {
 pub struct HypervisorManager {
     /// Map of VM ID to Virtual Machine instance
     pub(crate) vms: BTreeMap<u32, VirtualMachine>,
+    pub(crate) containers: BTreeMap<u32, Container>,
+    pub(crate) cvms: BTreeMap<u32, ContainerVirtualMachine>,
     /// Hypervisor capabilities
     pub is_initialized: bool,
     pub vm_count: u32,
@@ -126,6 +131,8 @@ impl HypervisorManager {
     pub fn new() -> Self {
         Self {
             vms: BTreeMap::new(),
+            containers: BTreeMap::new(),
+            cvms: BTreeMap::new(),
             is_initialized: false,
             vm_count: 0,
             ghm: GlobalHardwareManager::new(8, 4096), // Example defaults

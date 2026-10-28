@@ -3,6 +3,7 @@
 //! kernel image or another host that provides the same ABI.
 
 use alloc::{alloc::Layout, string::String};
+use alloc::vec::Vec;
 use core::ffi::c_void;
 
 /// Resolve the stable HPVMx C ABI symbols used by relocatable HPX programs.
@@ -44,7 +45,10 @@ pub(crate) fn resolve_import(name: &str) -> Option<usize> {
 pub extern "C" fn hpx_pack_dimensions(width: i64, height: i64) -> i64 {
     ((((height as u32) as u64) << 32) | ((width as u32) as u64)) as i64
 }
-use crate::{devices, filesystem::FileSystem, hardware, ui::pixel_graphics::PixelGraphics};
+
+use crate::{devices, filesystem::FileSystem, hardware, ui::pixel_graphics::PixelGraphics, HYPERVISOR};
+use crate::keys::keyring::{KeyringError, GLOBAL_KEYRING};
+use crate::keys::types::KUID;
 
 unsafe fn c_string<'a>(ptr: *const u8, max_len: usize) -> Option<&'a str> {
     if ptr.is_null() { return None; }
@@ -204,3 +208,29 @@ pub unsafe extern "C" fn hpx_get_global_variable(key: *const u8, out: *mut u8, c
     unsafe { core::ptr::copy_nonoverlapping(value.as_ptr(), out, value.len()); }
     value.len() as i64
 }
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hpx_keyring_set_secret(service: &[u8], name: &[u8], secret: &[u8], caller_uid: KUID) {
+    GLOBAL_KEYRING.lock().set_secret(service, name, secret, caller_uid);
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hpx_keyring_get_secret(service: &[u8], name: &[u8], caller_uid: KUID) -> Result<Vec<u8>, KeyringError> {
+    GLOBAL_KEYRING.lock().get_secret(service, name, caller_uid)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hpx_keyring_delete_secret(service: &[u8], name: &[u8], secret: KUID) {
+    GLOBAL_KEYRING.lock().delete_secret(service, name, secret);
+}
+
+
+// functions for vm/cvm/container management
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hv_fn_1() {
+    let _ = HYPERVISOR.as_ref();
+}
+
+// #[unsafe(no_mangle)]
+// pub unsafe extern "C" fn

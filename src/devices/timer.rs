@@ -1,4 +1,7 @@
-use crate::types::WORDARRAY;
+pub type BYTEARRAY = [u8; 16];
+pub type WORDARRAY = [u16; 8];
+pub type DWORDARRAY = [u32; 4];
+pub type QWORDARRAY = [u64; 2];
 
 pub type Time = WORDARRAY;
 

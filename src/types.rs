@@ -1,7 +1,7 @@
 #![allow(unsafe_code, dead_code, non_camel_case_types, non_snake_case, unused)]
 
 
-
+/*
 //! Core types and traits for the HPVMx system.
 //!
 //! This module defines fundamental structures like points, rectangles,
@@ -284,64 +284,7 @@ pub type Enum = DWORD;
 pub type Boolean = UCHAR;
 
 
-pub static COLOR_BUFFER_BIT: Enum = 0x00004000;
-pub static DEPTH_BUFFER_BIT: Enum = 0x00000100;
-pub static STENCIL_BUFFER_BIT: Enum = 0x00000400;
-pub static COLOR_BUFFER_BIT_MASK: Enum = 0x00004000;
-pub static DEPTH_BUFFER_BIT_MASK: Enum = 0x00000100;
-pub static STENCIL_BUFFER_BIT_MASK: Enum = 0x00000400;
-pub static COLOR_CLEAR_VALUE: Enum = 0x00000000;
-pub static DEPTH_CLEAR_VALUE: f64 = 1.0;
-pub static STENCIL_CLEAR_VALUE: Enum = 0;
-pub static COLOR_WRITE_MASK: Enum = 0x0000000F;
-pub static POINTS: Enum = 0x0000;
-pub static LINES: Enum = 0x0001;
-pub static LINE_LOOP: Enum = 0x0002;
-pub static LINE_STRIP: Enum = 0x0003;
-pub static TRIANGLES: Enum = 0x0004;
-pub static TRIANGLE_STRIP: Enum = 0x0005;
-pub static TRIANGLE_FAN: Enum = 0x0006;
-pub static NEVER: Enum = 0x0200;
-pub static LESS: Enum = 0x0201;
-pub static EQUAL: Enum = 0x0202;
-pub static LEQUAL: Enum = 0x0203;
-pub static GREATER: Enum = 0x0204;
-pub static NOTEQUAL: Enum = 0x0205;
-pub static GEQUAL: Enum = 0x0206;
-pub static ALWAYS: Enum = 0x0207;
-pub static SRC_ALPHA: Enum = 0x0302;
-pub static QUADS: Enum = 0x0007;
-pub static QUAD_STRIP: Enum = 0x0008;
-pub static POLYGON: Enum = 0x0009;
-pub static FRONT: Enum = 0x0404;
-pub static BACK: Enum = 0x0405;
-pub static LEFT: Enum = 0x0406;
-pub static RIGHT: Enum = 0x0407;
-pub static CCW: Enum = 0x0901;
-pub static CW: Enum = 0x0900;
-pub static LINE_WIDTH: Enum = 0x0B21;
-pub static CULL_FACE_MODE: Enum = 0x0B45;
-pub static CULL_FACE_MODE_FRONT: Enum = 0x0B46;
-pub static CULL_FACE_MODE_BACK: Enum = 0x0B47;
-pub static CULL_FACE_MODE_FRONT_AND_BACK: Enum = 0x0B48;
-pub static FRONT_AND_BACK: Enum = 0x0408;
-pub static CULL_FACE: Enum = 0x0B44;
-pub static BLEND: Enum = 0x0BE2;
-pub static DITHER: Enum = 0x0BD0;
-pub static STENCIL_TEST: Enum = 0x0B90;
-pub static DEPTH_TEST: Enum = 0x0B71;
-pub static ZERO: f64 = 0.0;
-pub static ONE: f64 = 1.0;
-pub static SRC_COLOR: Enum = 0x0300;
-pub static BMP: Enum = 0x1A00;
-pub static BMP_RGB: Enum = 0x1A00;
-pub static BMP_RGBA: Enum = 0x1A01;
-pub static BMP_INDEXED: Enum = 0x1A02;
-pub static BMP_RGB_ALPHA: Enum = 0x1A03;
-pub static BMP_RGBA_ALPHA: Enum = 0x1A04;
-pub static BMP_LUMINANCE: Enum = 0x1A06;
-pub static BMP_LUMINANCE_ALPHA: Enum = 0x1A07;
-pub static BMP_ALPHA: Enum = 0x1A08;
+
 
 // Zero all int and float types
 
@@ -565,16 +508,6 @@ pub struct Frame {
     mat: Mat4,
     rect: Rect,
     pair: Pair,
-}
-
-pub struct Error {
-    code: i32,
-    message: String,
-}
-
-pub struct Warning {
-    code: i32,
-    message: String,
 }
 
 pub struct Object {
@@ -1449,7 +1382,10 @@ pub type Synchronous<T> = Vec<Box<Vec<T>>>;
 
 // type DynBoxedVec<T> = BoxedVec<dyn T>;
 
-
+*/
+use alloc::string::String;
+use core::fmt;
+use core::fmt::{Display, Formatter};
 
 pub type VersionString = String;
 
@@ -1478,11 +1414,38 @@ impl<T: AsRef<[u8]> + Copy + PartialEq> Display for Compressed<T> {
     }
 }
 
+pub trait Wait {
+    fn wait(&mut self);
+}
+
+pub trait LateFn: Wait {
+    fn execute(&mut self);
+    fn drop(&mut self);
+}
 
 struct Deferred<F: FnMut()>(F);
 
-impl<F: FnMut()> Drop for Deferred<F> {
+impl<F: FnMut()> Wait for Deferred<F> {
+    fn wait(&mut self) {
+        ;
+    }
+}
+
+impl<F: FnMut()> LateFn for Deferred<F> {
+
+    fn execute(&mut self) {
+        self.0();
+    }
+
     fn drop(&mut self) {
         (self.0)();
     }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Ord, PartialOrd)]
+pub struct _GUID {
+    pub Data1: u32,
+    pub Data2: u16,
+    pub Data3: u16,
+    pub Data4: [u8; 8],
 }

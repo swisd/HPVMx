@@ -26,4 +26,31 @@ fn main() {
     println!("cargo:rustc-env=BUILD_NUMBER={}", count);
 
     println!("cargo:rerun-if-env-changed=FORCE_REBUILD_COUNTER_RANDOM_VAL");
+
+    // 5. Compile protobuf files into Rust structs
+    let proto_dir = Path::new("src/protocols");
+    let out_dir = Path::new("src/network/generated");
+
+    // Create output directory if it doesn't exist
+    fs::create_dir_all(out_dir).expect("Failed to create generated output directory");
+
+    let mut config = prost_build::Config::new();
+    config.out_dir(out_dir);
+    config.include_file("mod.rs");
+    // Use BTreeMap instead of HashMap for no_std compatibility
+    config.btree_map(["."]);
+
+    config.compile_protos(
+        &[
+            proto_dir.join("grpc.proto").to_str().unwrap(),
+            proto_dir.join("ipc.proto").to_str().unwrap(),
+            proto_dir.join("safeipc.proto").to_str().unwrap(),
+        ],
+        &[proto_dir],
+    )
+    .expect("protoc failed to compile .proto files");
+
+    println!("cargo:rerun-if-changed=src/protocols/grpc.proto");
+    println!("cargo:rerun-if-changed=src/protocols/ipc.proto");
+    println!("cargo:rerun-if-changed=src/protocols/safeipc.proto");
 }

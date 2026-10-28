@@ -83,9 +83,7 @@ pub fn update_tab_logic(tab: DashboardTab, ui: &mut DashboardUI) {
     }
 }
 
-// =========================================================================
-// 1. Overview Tab
-// =========================================================================
+
 pub mod overview {
     use crate::version::VersionGroup;
     use crate::VERSION_DATA;
@@ -294,9 +292,7 @@ pub mod overview {
     }
 }
 
-// =========================================================================
-// 2. Apps Tab (Application Registry)
-// =========================================================================
+
 pub mod apps {
     use super::*;
 
@@ -459,9 +455,7 @@ pub mod apps {
     }
 }
 
-// =========================================================================
-// 3. Virtualization Tab (VMs, Containers, CVMs, Architecture Topology)
-// =========================================================================
+
 pub mod virtualization {
     use super::*;
 
@@ -1300,9 +1294,7 @@ pub mod virtualization {
 
 pub use virtualization as vms;
 
-// =========================================================================
-// 4. Create VM Tab
-// =========================================================================
+
 pub mod createvm {
     use super::*;
 
@@ -1528,9 +1520,7 @@ pub mod createvm {
     }
 }
 
-// =========================================================================
-// 5. Resources Tab
-// =========================================================================
+
 pub mod resources {
     use super::*;
 
@@ -2387,9 +2377,7 @@ pub mod resources {
     }
 }
 
-// =========================================================================
-// 6. Network Tab
-// =========================================================================
+
 pub mod network {
     use super::*;
 
@@ -2430,7 +2418,7 @@ pub mod network {
         pg.draw_text(sub_x, sub_y, &alloc::format!("Target: {}", ui.network_target), 0xCCCCCC);
         sub_y += 28;
 
-        let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off"];
+        let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off", "Static IP"];
         let mut action_x = sub_x;
         for (idx, action) in actions.iter().enumerate() {
             let is_focused = idx == ui.selected_network_action_idx;
@@ -2470,7 +2458,7 @@ pub mod network {
                 true
             }
             Key::Special(ScanCode::RIGHT) => {
-                ui.selected_network_action_idx = (ui.selected_network_action_idx + 1).min(5);
+                ui.selected_network_action_idx = (ui.selected_network_action_idx + 1).min(6);
                 true
             }
             _ => false,
@@ -2481,6 +2469,10 @@ pub mod network {
     pub struct X_Network {
         pub selected_network_action_idx: usize,
         pub network_target: String,
+        pub static_ip_input: String,
+        pub static_gw_input: String,
+        pub static_mask_input: String,
+        pub static_input_focus: usize,
     }
 
     impl X_Network {
@@ -2488,6 +2480,10 @@ pub mod network {
             Self {
                 selected_network_action_idx: 0,
                 network_target: String::new(),
+                static_ip_input: String::new(),
+                static_gw_input: String::new(),
+                static_mask_input: String::from("255.255.255.0"),
+                static_input_focus: 0,
             }
         }
     }
@@ -2530,7 +2526,22 @@ pub mod network {
             pg.draw_text(sub_x, sub_y, &alloc::format!("Target: {}", self.network_target), 0xCCCCCC);
             sub_y += 28;
 
-            let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off"];
+            pg.draw_text(sub_x, sub_y, "Static IP Config (UP/DOWN to focus, type to edit):", 0x00FFFF);
+            sub_y += 22;
+            let ip_color = if self.static_input_focus == 0 { 0xFFFFFF } else { 0xCCCCCC };
+            let ip_prefix = if self.static_input_focus == 0 { ">> " } else { "   " };
+            pg.draw_text(sub_x, sub_y, &alloc::format!("{}IP:   {}", ip_prefix, self.static_ip_input), ip_color);
+            sub_y += 20;
+            let gw_color = if self.static_input_focus == 1 { 0xFFFFFF } else { 0xCCCCCC };
+            let gw_prefix = if self.static_input_focus == 1 { ">> " } else { "   " };
+            pg.draw_text(sub_x, sub_y, &alloc::format!("{}GW:   {}", gw_prefix, self.static_gw_input), gw_color);
+            sub_y += 20;
+            let mask_color = if self.static_input_focus == 2 { 0xFFFFFF } else { 0xCCCCCC };
+            let mask_prefix = if self.static_input_focus == 2 { ">> " } else { "   " };
+            pg.draw_text(sub_x, sub_y, &alloc::format!("{}Mask: {}", mask_prefix, self.static_mask_input), mask_color);
+            sub_y += 30;
+
+            let actions = ["Net Up", "Status", "Ping", "LAN Scan", "HTTP On", "HTTP Off", "Static IP"];
             let mut action_x = sub_x;
             for (idx, action) in actions.iter().enumerate() {
                 let is_focused = idx == self.selected_network_action_idx;
@@ -2556,25 +2567,55 @@ pub mod network {
                     if self.selected_network_action_idx > 0 { self.selected_network_action_idx -= 1; }
                 }
                 Key::Special(ScanCode::RIGHT) => {
-                    if self.selected_network_action_idx < 5 { self.selected_network_action_idx += 1; }
+                    if self.selected_network_action_idx < 6 { self.selected_network_action_idx += 1; }
                 }
-                Key::Printable(c) if u16::from(c) == 0x0D || u16::from(c) == 0x0A => {
-                    match self.selected_network_action_idx {
-                        0 => { let _ = crate::devices::net_hw::init(); }
-                        1 => crate::devices::net::status(),
-                        2 => { let _ = crate::devices::net::ping(&self.network_target, 4, 250); }
-                        3 => crate::devices::net::lanscan("192.168.1."),
-                        4 => crate::devices::net::httpd_start(8080),
-                        5 => crate::devices::net::httpd_stop(),
-                        _ => {}
-                    }
+                Key::Special(ScanCode::UP) => {
+                    if self.static_input_focus > 0 { self.static_input_focus -= 1; }
+                }
+                Key::Special(ScanCode::DOWN) => {
+                    if self.static_input_focus < 2 { self.static_input_focus += 1; }
                 }
                 Key::Printable(c) => {
                     let ch = char::from(c);
-                    if ch == '+' || ch == '=' {
-                        self.network_target = String::from("192.168.1.1");
-                    } else if ch == '-' || ch == '_' {
-                        self.network_target = String::from("127.0.0.1");
+                    match ch {
+                        '\r' | '\n' => {
+                            match self.selected_network_action_idx {
+                                0 => { let _ = crate::devices::net_hw::init(); }
+                                1 => crate::devices::net::status(),
+                                2 => { let _ = crate::devices::net::ping(&self.network_target, 4, 250); }
+                                3 => crate::devices::net::lanscan("192.168.1."),
+                                4 => crate::devices::net::httpd_start(8080),
+                                5 => crate::devices::net::httpd_stop(),
+                                6 => {
+                                    if let Some(ip) = crate::devices::net::parse_ip(&self.static_ip_input) {
+                                        if let Some(gw) = crate::devices::net::parse_ip(&self.static_gw_input) {
+                                            if let Some(mask) = crate::devices::net::parse_ip(&self.static_mask_input) {
+                                                crate::devices::net_stack::set_static_ip(ip, gw, mask);
+                                                let _ = crate::devices::net::save_network_config(&self.static_ip_input, &self.static_gw_input, &self.static_mask_input);
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        '0'..='9' | '.' => {
+                            match self.static_input_focus {
+                                0 => { if self.static_ip_input.len() < 15 { self.static_ip_input.push(ch); } }
+                                1 => { if self.static_gw_input.len() < 15 { self.static_gw_input.push(ch); } }
+                                2 => { if self.static_mask_input.len() < 15 { self.static_mask_input.push(ch); } }
+                                _ => {}
+                            }
+                        }
+                        _ if ch as u32 == 8 => {
+                            match self.static_input_focus {
+                                0 => { self.static_ip_input.pop(); }
+                                1 => { self.static_gw_input.pop(); }
+                                2 => { self.static_mask_input.pop(); }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -2593,9 +2634,6 @@ pub mod network {
     }
 }
 
-// =========================================================================
-// 7. Console Tab (Hypervisor Real-time Log & Command Line)
-// =========================================================================
 pub mod console {
     use alloc::borrow::ToOwned;
     use alloc::boxed::Box;
@@ -2835,9 +2873,7 @@ pub mod console {
     }
 }
 
-// =========================================================================
-// 8. Devices Tab (Device Manager)
-// =========================================================================
+
 pub mod devices {
     use super::*;
 
@@ -3159,9 +3195,7 @@ pub mod devices {
     }
 }
 
-// =========================================================================
-// 9. Storage Tab (Disk & File Explorer)
-// =========================================================================
+
 pub mod storage {
     use super::*;
 
@@ -4188,9 +4222,7 @@ pub mod storage {
     }
 }
 
-// =========================================================================
-// 10. Test Tab (Qt6 Style Test Bed)
-// =========================================================================
+
 pub mod test {
     use super::*;
 
@@ -4635,9 +4667,7 @@ pub mod test {
     }
 }
 
-// =========================================================================
-// 11. Editor Tab
-// =========================================================================
+
 pub mod editor {
     use super::*;
 
@@ -4939,9 +4969,7 @@ pub mod editor {
     }
 }
 
-// =========================================================================
-// 12. Settings Tab
-// =========================================================================
+
 pub mod settings {
     use super::*;
 
@@ -5285,9 +5313,7 @@ pub mod settings {
     }
 }
 
-// =========================================================================
-// 13. Packages Tab
-// =========================================================================
+
 pub mod packages {
     use super::*;
 
@@ -5606,9 +5632,7 @@ pub mod packages {
     }
 }
 
-// =========================================================================
-// 14. System Information Tab
-// =========================================================================
+
 pub mod sysinfo {
     use super::*;
 

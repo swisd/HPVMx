@@ -1,7 +1,146 @@
 {
   "project_name": "HPVMx",
-  "last_updated_by_junie": "2026-09-27",
+  "last_updated_by_junie": "2026-10-26T20:02",
   "files": {
+    "tools/test_http_server.py": {
+      "path": "tools/test_http_server.py",
+      "purpose": "Comprehensive Python test suite for HPVMx HTTP server — 15+ tests across 5 phases: diagnostics, endpoints, connection handling, response structure, and low-level byte analysis.",
+      "key_regions": [
+        {
+          "lines": "19-25",
+          "description": "Configuration constants: timeouts, retry count, delay between requests"
+        },
+        {
+          "lines": "30-49",
+          "description": "TestResult class: tracks passed/failed/skipped counts with detailed messages"
+        },
+        {
+          "lines": "76-108",
+          "description": "parse_http_response: parses raw HTTP response into status line, code, headers dict, and body"
+        },
+        {
+          "lines": "111-188",
+          "description": "send_raw_http_request: sends raw HTTP via socket with timing measurement (handshake, first byte, total)"
+        },
+        {
+          "lines": "191-210",
+          "description": "build_http_request: constructs raw HTTP request bytes with method, path, body, version"
+        },
+        {
+          "lines": "215-280",
+          "description": "Diagnostic tests: TCP connectivity check and RST detection"
+        },
+        {
+          "lines": "285-422",
+          "description": "Endpoint tests: GET /, GET /status, POST /echo, PATCH /config with full validation"
+        },
+        {
+          "lines": "525-640",
+          "description": "Error code tests: 404 Not Found, 405 Method Not Allowed, HTTP/1.0 compatibility"
+        },
+        {
+          "lines": "646-766",
+          "description": "Connection handling tests: multiple sequential requests, connection close behavior"
+        },
+        {
+          "lines": "771-910",
+          "description": "Response structure tests: header validation, Content-Length accuracy, rapid request stress test"
+        },
+        {
+          "lines": "915-998",
+          "description": "Raw socket diagnostic: byte-level hex dump of request and response"
+        },
+        {
+          "lines": "1041-1130",
+          "description": "main: entry point with 5-phase test execution and summary report"
+        }
+      ],
+      "objects": {
+        "TestResult": {
+          "type": "class",
+          "args": {
+            "passed": "int",
+            "failed": "int",
+            "skipped": "int",
+            "details": "list"
+          }
+        },
+        "parse_http_response": {
+          "type": "fn",
+          "args": {
+            "data": "bytes"
+          },
+          "returns": "tuple(status_line, status_code, headers, body)"
+        },
+        "send_raw_http_request": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "port": "int",
+            "request_bytes": "bytes",
+            "label": "str"
+          },
+          "returns": "tuple(response_data, timing_dict)"
+        },
+        "build_http_request": {
+          "type": "fn",
+          "args": {
+            "method": "str",
+            "path": "str",
+            "body": "optional",
+            "http_version": "str",
+            "extra_headers": "optional"
+          },
+          "returns": "bytes"
+        },
+        "test_tcp_connectivity": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "port": "int"
+          },
+          "returns": "bool"
+        },
+        "test_get_root": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "port": "int"
+          },
+          "returns": "bool"
+        },
+        "test_post_echo": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "port": "int"
+          },
+          "returns": "bool"
+        },
+        "test_multiple_sequential_requests": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "port": "int"
+          },
+          "returns": "bool"
+        },
+        "test_raw_socket_diagnostic": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "port": "int"
+          },
+          "returns": "bool"
+        },
+        "main": {
+          "type": "fn",
+          "args": {},
+          "returns": "None"
+        }
+      },
+      "dependencies": []
+    },
     "Cargo.toml": {
       "path": "Cargo.toml",
       "purpose": "Main workspace and project configuration defining package metadata, dependencies, and UEFI compilation profile.",
@@ -16,11 +155,15 @@
     },
     "build.rs": {
       "path": "build.rs",
-      "purpose": "Cargo build script for linking UEFI libraries, assets, and target toolchain verification.",
+      "purpose": "Cargo build script for build counter and prost-build protobuf code generation from .proto files.",
       "key_regions": [
         {
-          "lines": "2-12",
-          "description": "Functional implementation, logic routines, and public API interfaces"
+          "lines": "2-28",
+          "description": "Build counter increment and environment variable setup"
+        },
+        {
+          "lines": "30-55",
+          "description": "prost-build compilation of grpc.proto, ipc.proto, and safeipc.proto into src/network/generated/"
         }
       ],
       "objects": {
@@ -4629,11 +4772,21 @@
           "description": "Core data structures, enums, state definitions, and types"
         },
         {
+          "lines": "523-526",
+          "description": "is_initialized() wrapper — delegates to net_stack::is_initialized() so main.rs can check stack state before starting HTTPD"
+        },
+        {
           "lines": "67-534",
           "description": "Functional implementation, logic routines, and public API interfaces"
         }
       ],
       "objects": {
+        "is_initialized": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "bool",
+          "note": "Wrapper delegating to net_stack::is_initialized() — added so main.rs can guard httpd_start() call"
+        },
         "DhcpPacket": {
           "type": "struct",
           "args": {
@@ -4681,7 +4834,8 @@
         "discover_config": {
           "type": "pub fn",
           "args": {},
-          "returns": "Option<([u8"
+          "returns": "Option<([u8",
+          "note": "Returns (IP, gateway, subnet_mask). Fixed: (1) parse_dhcp_offer returns 4-tuple so server_ip used for DHCP Request option 54, router (option 3) for gateway. (2) VirtualBox NAT heuristic: if no router option provided and DHCP server is 10.0.2.1, gateway is set to 10.0.2.2. (3) Bridged LAN compatibility: DHCP Discover retries up to 3 times with 5-second timeout per attempt (total 15s), ACK timeout 5 seconds. (4) parse_dhcp_offer now accepts packets as small as 240 bytes. (5) XID verification with big-endian storage. (6) Promiscuous mode during DHCP discovery. (7) Diagnostic hex dump logging. (8) send_dhcp_request now includes Client Identifier (option 61). (9) ACK polling logs progress. (10) ensure_net() now checks for static IP config first — if set_static_ip() was called, it bypasses DHCP entirely."
         },
         "send_dhcp_request": {
           "type": "pub fn",
@@ -4690,7 +4844,8 @@
             "server_ip": "[u8; 4]",
             "xid": "u32"
           },
-          "returns": "()"
+          "returns": "()",
+          "note": "Sends DHCP Request with Message Type (option 53), Client Identifier (option 61 - must match Discover), Requested IP (option 50), and Server Identifier (option 54). The Client Identifier was added to fix DHCP ACK not being received - some servers reject Requests that don't include the same Client Identifier as the Discover."
         },
         "parse_ip": {
           "type": "pub fn",
@@ -4709,7 +4864,24 @@
         "ensure_net": {
           "type": "pub fn",
           "args": {},
-          "returns": "()"
+          "returns": "()",
+          "note": "First loads saved network config from XDB hive0, then uses static IP if configured, otherwise falls back to DHCP."
+        },
+        "save_network_config": {
+          "type": "pub fn",
+          "args": {
+            "ip": "&str",
+            "gw": "&str",
+            "mask": "&str"
+          },
+          "returns": "Result<(), &'static str>",
+          "note": "Saves network config to XDB hive0 superhive_meta table (rows 10-12) for persistence across reboots."
+        },
+        "load_network_config": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "Option<(String, String, String)>",
+          "note": "Loads network config from XDB hive0 using GET commands (GET 1 10, GET 1 11, GET 1 12) to directly fetch rows by ID. Also called by discover_config as DHCP fallback — if DHCP fails, tries saved static IP before link-local 169.254.1.1. Fixed: main.rs now checks cache.entries.contains_key(&1) before CREATE TABLE to preserve saved rows across reboots."
         },
         "status": {
           "type": "pub fn",
@@ -4737,7 +4909,8 @@
           "args": {
             "port": "u16"
           },
-          "returns": "()"
+          "returns": "()",
+          "note": "Extensive logging at every step: port, stack init check, HTTPD flag, net_stack::httpd_start call, background task spawn with success/failure check, IP and gateway info"
         },
         "httpd_stop": {
           "type": "pub fn",
@@ -4809,19 +4982,22 @@
           "args": {
             "frame": "&[u8]"
           },
-          "returns": "Result<(), &'static str>"
+          "returns": "Result<(), &'static str>",
+          "note": "Logs TX call, SNP availability, transmit acceptance, buffer recycle wait, and success/failure"
         },
         "rx": {
           "type": "pub fn",
           "args": {
             "buf": "&mut [u8]"
           },
-          "returns": "Result<usize, &'static str>"
+          "returns": "Result<usize, &'static str>",
+          "note": "Uses OWNED_SNP directly instead of snp_open() to avoid exclusive protocol re-open conflict. NOT_READY errors are silent — only logs actual packet reception."
         },
         "init": {
           "type": "pub fn",
           "args": {},
-          "returns": "Result<(), &'static str>"
+          "returns": "Result<(), &'static str>",
+          "note": "Extensive logging at every step: handle discovery, protocol open, state check, start(), initialize(), receive filters, link wait (with retry count), and final MAC address. Returns clear error messages if no NIC found or no usable NIC after trying all handles."
         },
         "get_mac": {
           "type": "pub(crate) fn",
@@ -4833,19 +5009,107 @@
     },
     "src/devices/net_stack.rs": {
       "path": "src/devices/net_stack.rs",
-      "purpose": "UEFI Network Module (0.36.1) - Basic ICMP/IP over SNP",
+      "purpose": "UEFI Network Module - ICMP/IGMPv3/UDP/TCP over SNP with mDNS support, built-in HTTP server, IGMP multicast group management with source-specific filtering, static IP configuration, and per-protocol statistics tracking.",
       "key_regions": [
         {
           "lines": "4-11",
           "description": "Module imports, extern crates, and prelude dependencies"
         },
         {
-          "lines": "35-132",
-          "description": "Core data structures, enums, state definitions, and types"
+          "lines": "26-46",
+          "description": "Protocol constants: ICMP, IGMP, UDP, TCP flags, IGMP message types (V1/V2/V3 membership report, leave group, query, source-specific multicast)"
         },
         {
-          "lines": "104-991",
-          "description": "Functional implementation, logic routines, and public API interfaces"
+          "lines": "54-118",
+          "description": "Core data structures: EthHeader, ArpPacket, Ipv4Header, IcmpHeader, TcpHeader, UdpHeader"
+        },
+        {
+          "lines": "122-135",
+          "description": "Module-level atomics: HTTPD flag, plus NET_STACK_LOCK_IDX, HTTP_POLL_RUNNING, HTTP_POLL_STOP — all feature-gated behind `net-multicore`"
+        },
+        {
+          "lines": "155-237",
+          "description": "HttpTcpState enum, HttpConn struct (with last_rx_seq, last_rx_payload_len, last_rx_tick for simplified duplicate detection), NetState with static IP fields, IGMP groups with IGMPv3 source filter mode/sources/source_count, and per-protocol stats (udp/icmp/igmp rx/tx counters)"
+        },
+        {
+          "lines": "188-254",
+          "description": "Helpers: calculate_checksum, is_local, init (with httpd_port initialization)"
+        },
+        {
+          "lines": "256-380",
+          "description": "ARP resolution, ping_external, ping_loopback, and ARP cache management"
+        },
+        {
+          "lines": "356-370",
+          "description": "init(): initializes network state, registers lock in global lock registry when `net-multicore` feature is enabled"
+        },
+        {
+          "lines": "467-497",
+          "description": "net_stack_lock_acquire / net_stack_lock_release: spin-lock coordination via global lock registry — only compiled when `net-multicore` feature is enabled"
+        },
+        {
+          "lines": "499-582",
+          "description": "poll_tick: main packet reception loop with POLL_COUNTER — acquires/releases network stack lock when `net-multicore` is enabled; increments httpd_poll_tick for duplicate detection; logs warning every 1000 polls if stack/hardware not initialized; logs periodic stats every 10000 polls"
+        },
+        {
+          "lines": "447-472",
+          "description": "handle_arp: ARP request/reply handling with logging of opcode, sender/target IP, cache updates, and reply transmission"
+        },
+        {
+          "lines": "557-682",
+          "description": "handle_ipv4: IPv4 packet dispatch — accepts our IP, broadcast, multicast, and subnet broadcast; dispatches to ICMP (echo, unreachable, time exceeded), IGMP (membership reports, queries, leave), UDP (port-based), or TCP handlers; increments per-protocol RX counters"
+        },
+        {
+          "lines": "1491-1547",
+          "description": "handle_udp: UDP port-based dispatch — handles DHCP (67), DNS (53), NTP (123), NetBIOS (137/138), SNMP (161), syslog (514), mDNS (5353), SSDP (1900), LLMNR (5355), NFCDDP (3702), command listener (1234), and logs unhandled ports"
+        },
+        {
+          "lines": "1545-1604",
+          "description": "handle_mdns_query: mDNS response builder — encodes SYSTEMNAME in DNS A record format and sends to 224.0.0.251:5353 multicast"
+        },
+        {
+          "lines": "1606-1698",
+          "description": "handle_igmp: IGMP packet handler — processes V1/V2/V3 membership reports, leave group, and queries; responds to general queries with V2 or V3 membership reports based on source filter configuration"
+        },
+        {
+          "lines": "1699-1839",
+          "description": "IGMP functions: send_igmp_membership_report (V2 report), send_igmp_v3_membership_report (V3 with source filtering), igmp_join_group (adds multicast group), igmp_leave_group (removes group), igmp_v3_join_group (V3 join with source filtering)"
+        },
+        {
+          "lines": "1618-1654",
+          "description": "Static IP functions: set_static_ip (configures static IP/gw/mask), is_static_ip_configured (checks if static IP is set), get_static_ip_config (returns current static config)"
+        },
+        {
+          "lines": "638-720",
+          "description": "handle_ipv4: IPv4 packet dispatch — validates IP total length field to bound payload slice and ignore Ethernet frame padding; routes to ICMP, IGMP, UDP, TCP handlers"
+        },
+        {
+          "lines": "895-945",
+          "description": "handle_tcp: TCP packet router — checksum validation removed (checksum offloading common in VMs); full header logging and HTTPD port matching"
+        },
+        {
+          "lines": "1114-1441",
+          "description": "handle_httpd: HTTP server TCP state machine — duplicate detection drops looped-back echoes by matching seq+payload_len indefinitely (no time window); fallback connections accept first data packet directly; ARP MAC resolution; SynReceived state trusts client's seq; FIN sent only after client ACKs response; enhanced debug logging for ACK handler showing conn_state, seq, ack, payload, our_seq, their_seq; Established state logs seq match check and empty payload cases"
+        },
+        {
+          "lines": "1510-1584",
+          "description": "send_tcp_packet: TCP packet construction and transmission with software-calculated TCP checksum (hardware may not support offloading); enhanced logging including dst_mac and checksum value; validate_tcp_checksum_frame: debug helper"
+        },
+        {
+          "lines": "2096-2114",
+          "description": "httpd_start: sets port in state before enabling HTTPD flag; spawns dedicated AP poll worker only when `net-multicore` feature is enabled (otherwise BSP handles polling via fast 1ms timer)"
+        },
+        {
+          "lines": "2116-2147",
+          "description": "httpd_stop: disables HTTPD flag; signals AP poll worker to stop only when `net-multicore` is enabled; resets all HTTP connection state"
+        },
+        {
+          "lines": "2149-2232",
+          "description": "http_poll_worker_entry and spawn_http_poll_worker: dedicated AP core poll loop — only compiled when `net-multicore` feature is enabled; uses global lock registry for exclusive SNP access coordination with BSP"
+        },
+        {
+          "lines": "822-1062",
+          "description": "TCP client functions, ICMP, UDP handler, stats, snp_tx, ping"
         }
       ],
       "objects": {
@@ -4923,6 +5187,35 @@
           },
           "returns": "Self"
         },
+        "HttpTcpState": {
+          "type": "enum",
+          "args": {
+            "None": "Unit",
+            "SynReceived": "Unit",
+            "Established": "Unit",
+            "FinWait": "Unit",
+            "Closed": "Unit"
+          },
+          "returns": "Self"
+        },
+        "HttpConn": {
+          "type": "struct",
+          "args": {
+            "client_ip": "[u8; 4]",
+            "client_port": "u16",
+            "tcp_state": "HttpTcpState",
+            "our_seq": "u32",
+            "their_seq": "u32",
+            "request_buf": "Vec<u8>",
+            "request_complete": "bool",
+            "last_rx_seq": "u32",
+            "last_rx_payload_len": "u32",
+            "last_rx_tick": "u64",
+            "last_send_tick": "u64"
+          },
+          "returns": "Self",
+          "note": "Simplified duplicate detection uses last_rx_seq, last_rx_payload_len, and last_rx_tick. A packet is only dropped if it matches the last received packet within 100 ticks (~100ms), avoiding false positives from legitimate retransmissions."
+        },
         "backend_name": {
           "type": "pub fn",
           "args": {},
@@ -4963,7 +5256,26 @@
             "tcp_dst_port": "u16",
             "tcp_seq": "u32",
             "tcp_ack": "u32",
-            "tcp_fin_received": "bool"
+            "tcp_fin_received": "bool",
+            "http_conns": "[HttpConn; MAX_HTTP_CONNS]",
+            "http_isn_counter": "u32",
+            "httpd_port": "u16",
+            "httpd_poll_tick": "u64",
+            "use_static_ip": "bool",
+            "static_ip": "[u8; 4]",
+            "static_gw": "[u8; 4]",
+            "static_mask": "[u8; 4]",
+            "igmp_group_count": "u8",
+            "igmp_groups": "[[u8; 4]; 8]",
+            "igmp_v3_filter_mode": "[u8; 8]",
+            "igmp_v3_sources": "[[[u8; 4]; 4]; 8]",
+            "igmp_v3_source_count": "[u8; 8]",
+            "udp_rx_packets": "u64",
+            "udp_tx_packets": "u64",
+            "icmp_rx_packets": "u64",
+            "icmp_tx_packets": "u64",
+            "igmp_rx_packets": "u64",
+            "igmp_tx_packets": "u64"
           },
           "returns": "Self"
         },
@@ -5015,7 +5327,8 @@
             "packet": "&[u8]",
             "src_mac": "[u8; 6]"
           },
-          "returns": "()"
+          "returns": "()",
+          "note": "Fixed for bridged LAN compatibility: accepts packets addressed to our IP, broadcast (255.255.255.255), multicast (224.0.0.0/4), and subnet broadcast (e.g., 192.168.1.255). Previously dropped all non-matching packets, which broke DHCP, NTP, mDNS, and other LAN services on bridged networks."
         },
         "send_udp": {
           "type": "pub fn",
@@ -5037,6 +5350,34 @@
           },
           "returns": "()"
         },
+        "find_http_conn": {
+          "type": "fn",
+          "args": {
+            "state": "&mut NetState",
+            "client_ip": "[u8; 4]",
+            "client_port": "u16",
+            "is_syn": "bool"
+          },
+          "returns": "Option<usize>",
+          "note": "Only reuses closed/empty connection slots when is_syn=true. Non-SYN packets (like lingering ACKs from closed connections) will return None and be silently dropped, preventing the infinite loop where closed connections were reused for ACK packets."
+        },
+        "parse_http_request": {
+          "type": "fn",
+          "args": {
+            "data": "&[u8]"
+          },
+          "returns": "Option<(&str, &str, Vec<u8>)>",
+          "note": "Fixed: scans for HTTP method keyword (GET, POST, etc.) to locate the actual request start, skipping any leading garbage bytes caused by TCP segmentation or dropped packets. Then searches for \\r\\n\\r\\n in raw bytes and validates only the header section as UTF-8. This recovers from cases where the first TCP segment was lost (e.g. dropped by echo detection) so the buffer starts mid-request."
+        },
+        "build_http_response": {
+          "type": "fn",
+          "args": {
+            "method": "&str",
+            "path": "&str",
+            "body": "&[u8]"
+          },
+          "returns": "Vec<u8>"
+        },
         "handle_httpd": {
           "type": "fn",
           "args": {
@@ -5044,9 +5385,11 @@
             "src_mac": "[u8; 6]",
             "tcp": "&TcpHeader",
             "flags": "u16",
-            "packet": "&[u8]"
+            "packet": "&[u8]",
+            "server_port": "u16"
           },
-          "returns": "()"
+          "returns": "()",
+          "note": "TCP state machine for HTTP server connections. Fixed: (1) seq mismatch in Established state silently drops packets instead of sending ACK (prevents infinite ACK loop), (2) FIN is no longer sent immediately after response — instead waits for client to ACK the response, then sends FIN on the next incoming packet (request_complete guard in Established state). This two-phase close prevents confusing the client TCP stack. Added debug logging showing request buffer hex/text when parse_http_request fails. FinWait silently closes without sending ACK. (3) Loop-back echo detection compares incoming packet seq against our_seq — a looped-back packet carries our seq number, while the client's response carries their own seq. This works regardless of MAC address swapping by the VM. (4) Server port is now read fresh from state.httpd_port at entry instead of using the passed parameter, preventing responses with source port 0 when httpd_start race condition occurs."
         },
         "handle_tcp_client": {
           "type": "fn",
@@ -5092,19 +5435,117 @@
             "port": "u16",
             "data": "&[u8]"
           },
-          "returns": "()"
+          "returns": "()",
+          "note": "Enhanced: port-based dispatch for DHCP (67), DNS (53), NTP (123), NetBIOS (137/138), SNMP (161), syslog (514), mDNS (5353), SSDP (1900), LLMNR (5355), NFCDDP (3702), command listener (1234), and logs unhandled ports with source IP."
+        },
+        "handle_mdns_query": {
+          "type": "fn",
+          "args": {
+            "src_ip": "[u8; 4]",
+            "query_data": "&[u8]"
+          },
+          "returns": "()",
+          "note": "Builds mDNS DNS response with A record for SYSTEMNAME.local. and sends to 224.0.0.251:5353 multicast."
+        },
+        "handle_igmp": {
+          "type": "fn",
+          "args": {
+            "src_ip": "[u8; 4]",
+            "payload": "&[u8]"
+          },
+          "returns": "()",
+          "note": "Handles IGMP V1/V2/V3 membership reports, leave group messages, and queries. Responds to general queries with V2 or V3 membership reports based on source filter configuration."
+        },
+        "send_igmp_membership_report": {
+          "type": "pub fn",
+          "args": {
+            "group_ip": "[u8; 4]"
+          },
+          "returns": "()",
+          "note": "Sends IGMPv2 membership report for a multicast group with proper multicast MAC addressing."
+        },
+        "igmp_join_group": {
+          "type": "pub fn",
+          "args": {
+            "group_ip": "[u8; 4]"
+          },
+          "returns": "()",
+          "note": "Joins a multicast group (max 8 groups), sends membership report, and tracks group membership."
+        },
+        "igmp_leave_group": {
+          "type": "pub fn",
+          "args": {
+            "group_ip": "[u8; 4]"
+          },
+          "returns": "()",
+          "note": "Leaves a multicast group by removing it from the group table."
+        },
+        "send_igmp_v3_membership_report": {
+          "type": "fn",
+          "args": {
+            "group_ip": "[u8; 4]",
+            "group_index": "usize"
+          },
+          "returns": "()",
+          "note": "Sends IGMPv3 membership report with source filtering (MODE_IS_INCLUDE/MODE_IS_EXCLUDE) for a multicast group."
+        },
+        "igmp_v3_join_group": {
+          "type": "pub fn",
+          "args": {
+            "group_ip": "[u8; 4]",
+            "sources": "&[[u8; 4]]",
+            "filter_mode": "u8"
+          },
+          "returns": "()",
+          "note": "Joins a multicast group with IGMPv3 source-specific multicast support. Falls back to IGMPv2 if no sources provided. Supports INCLUDE/EXCLUDE filter modes."
+        },
+        "set_static_ip": {
+          "type": "pub fn",
+          "args": {
+            "ip": "[u8; 4]",
+            "gw": "[u8; 4]",
+            "mask": "[u8; 4]"
+          },
+          "returns": "()",
+          "note": "Configures static IP address, gateway, and subnet mask. Bypasses DHCP on next ensure_net() call."
+        },
+        "is_static_ip_configured": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "bool",
+          "note": "Returns true if static IP configuration has been set."
+        },
+        "get_static_ip_config": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "([u8; 4], [u8; 4], [u8; 4])",
+          "note": "Returns the current static IP configuration as (ip, gateway, mask) tuple."
+        },
+        "send_udp": {
+          "type": "pub fn",
+          "args": {
+            "dst_ip": "[u8; 4]",
+            "dst_mac": "[u8; 6]",
+            "src_port": "u16",
+            "dst_port": "u16",
+            "data": "&[u8]"
+          },
+          "returns": "()",
+          "note": "Sends a UDP packet to a specific IP/port via SNP with proper IPv4/UDP headers."
         },
         "httpd_start": {
           "type": "pub fn",
           "args": {
-            "_port": "u16"
+            "port": "u16"
           },
-          "returns": "()"
+          "returns": "()",
+          "note": "Sets httpd_port BEFORE enabling HTTPD flag to prevent race condition where packets arrive with HTTPD=true but port=0."
         },
         "httpd_stop": {
           "type": "pub fn",
           "args": {},
-          "returns": "()"
+          "returns": "()",
+          "note": "Disables HTTPD flag and resets all HTTP connection state (port, tcp_state, request_buf)."
         },
         "stats": {
           "type": "pub fn",
@@ -5138,6 +5579,229 @@
         }
       },
       "dependencies": []
+    },
+    "src/network/mod.rs": {
+      "path": "src/network/mod.rs",
+      "purpose": "Network module entry point — declares protobuf, generated, dispatcher, and transport submodules.",
+      "key_regions": [
+        {
+          "lines": "1-10",
+          "description": "Module declarations for protobuf, generated, dispatcher, and transport"
+        }
+      ],
+      "objects": {},
+      "dependencies": [
+        "src/network/protobuf.rs",
+        "src/network/generated/mod.rs",
+        "src/network/dispatcher.rs",
+        "src/network/transport.rs"
+      ]
+    },
+    "src/network/transport.rs": {
+      "path": "src/network/transport.rs",
+      "purpose": "Transport abstraction layer for sending and receiving protobuf messages over TCP or UDP.",
+      "key_regions": [
+        {
+          "lines": "1-44",
+          "description": "TransportType enum, TransportError enum, frame_message, and deframe_message"
+        },
+        {
+          "lines": "46-99",
+          "description": "send() and recv() functions wrapping net_stack TCP/UDP operations"
+        }
+      ],
+      "objects": {
+        "TransportType": {
+          "type": "pub enum",
+          "args": {
+            "Tcp": "Unit",
+            "Udp": "Unit"
+          },
+          "returns": "Self"
+        },
+        "TransportError": {
+          "type": "pub enum",
+          "args": {
+            "TcpConnectFailed": "Unit",
+            "MacResolutionFailed": "Unit",
+            "StackNotInitialized": "Unit"
+          },
+          "returns": "Self"
+        },
+        "frame_message": {
+          "type": "pub fn",
+          "args": {
+            "flags": "u8",
+            "payload": "&[u8]"
+          },
+          "returns": "Vec<u8>"
+        },
+        "deframe_message": {
+          "type": "pub fn",
+          "args": {
+            "buffer": "&[u8]"
+          },
+          "returns": "Result<(u8, &[u8]), TransportError>"
+        },
+        "send": {
+          "type": "pub fn",
+          "args": {
+            "dst_ip": "[u8; 4]",
+            "dst_port": "u16",
+            "transport": "TransportType",
+            "payload": "&[u8]"
+          },
+          "returns": "Result<(), TransportError>"
+        },
+        "recv": {
+          "type": "pub fn",
+          "args": {
+            "transport": "TransportType",
+            "timeout_ms": "u32"
+          },
+          "returns": "Option<Vec<u8>>"
+        }
+      },
+      "dependencies": [
+        "src/devices/net_stack.rs"
+      ]
+    },
+    "src/network/dispatcher.rs": {
+      "path": "src/network/dispatcher.rs",
+      "purpose": "Generic protobuf request/response dispatcher with handler registration and dispatch logic.",
+      "key_regions": [
+        {
+          "lines": "1-100",
+          "description": "ProtobufDispatcher struct with handler registry, register_handler, dispatch, and poll_and_dispatch"
+        },
+        {
+          "lines": "115-184",
+          "description": "Default handlers for VmActionRequest, IPCRequest, and VDispatchKernelCommand"
+        }
+      ],
+      "objects": {
+        "ProtobufDispatcher": {
+          "type": "pub struct",
+          "args": {
+            "handlers": "[Option<HandlerEntry>; 16]",
+            "next_slot": "usize"
+          },
+          "returns": "Self"
+        },
+        "new": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "ProtobufDispatcher"
+        },
+        "register_handler": {
+          "type": "pub fn",
+          "args": {
+            "name": "&'static str",
+            "dispatch_tag": "u8",
+            "handler": "&'static BoxedHandler"
+          },
+          "returns": "bool"
+        },
+        "dispatch": {
+          "type": "pub fn",
+          "args": {
+            "raw_packet": "&[u8]"
+          },
+          "returns": "Option<Vec<u8>>"
+        },
+        "poll_and_dispatch": {
+          "type": "pub fn",
+          "args": {
+            "transport_type": "TransportType"
+          },
+          "returns": "()"
+        },
+        "handle_vm_action_request": {
+          "type": "pub fn",
+          "args": {
+            "bytes": "&[u8]"
+          },
+          "returns": "Option<Vec<u8>>"
+        },
+        "handle_ipc_request": {
+          "type": "pub fn",
+          "args": {
+            "bytes": "&[u8]"
+          },
+          "returns": "Option<Vec<u8>>"
+        },
+        "handle_kernel_command": {
+          "type": "pub fn",
+          "args": {
+            "bytes": "&[u8]"
+          },
+          "returns": "Option<Vec<u8>>"
+        }
+      },
+      "dependencies": [
+        "src/network/transport.rs",
+        "src/network/generated/external.rs",
+        "src/network/generated/internal.rs",
+        "src/network/generated/internal.safe.rs"
+      ]
+    },
+    "src/network/protobuf.rs": {
+      "path": "src/network/protobuf.rs",
+      "purpose": "Protobuf integration layer — re-exports generated types and provides helper functions for VM, IPC, and kernel commands.",
+      "key_regions": [
+        {
+          "lines": "1-25",
+          "description": "Re-exports of generated protobuf types and ProtobufError enum"
+        },
+        {
+          "lines": "27-99",
+          "description": "Helper functions: handle_incoming_grpc_packet, execute_vm_action, process_ipc_request, process_kernel_command"
+        }
+      ],
+      "objects": {
+        "ProtobufError": {
+          "type": "pub enum",
+          "args": {
+            "IncompleteFrame": "Unit",
+            "InvalidHeader": "Unit",
+            "DecodeError": "prost::DecodeError"
+          },
+          "returns": "Self"
+        },
+        "handle_incoming_grpc_packet": {
+          "type": "pub fn",
+          "args": {
+            "packet_data": "&[u8]"
+          },
+          "returns": "Result<VmActionRequest, ProtobufError>"
+        },
+        "execute_vm_action": {
+          "type": "pub fn",
+          "args": {
+            "request": "&VmActionRequest"
+          },
+          "returns": "VmActionResponse"
+        },
+        "process_ipc_request": {
+          "type": "pub fn",
+          "args": {
+            "request": "&IPCRequest"
+          },
+          "returns": "IPCResponse"
+        },
+        "process_kernel_command": {
+          "type": "pub fn",
+          "args": {
+            "request": "&VDispatchKernelCommand"
+          },
+          "returns": "KernelIPC"
+        }
+      },
+      "dependencies": [
+        "src/network/generated/external.rs",
+        "src/network/generated/internal.rs",
+        "src/network/generated/internal.safe.rs"
+      ]
     },
     "src/devices/timer.rs": {
       "path": "src/devices/timer.rs",
@@ -7689,12 +8353,16 @@
       "purpose": "Logging subsystem, buffer management, color index conversion and colored vdebug_autoprefix macro definitions.",
       "key_regions": [
         {
-          "lines": "1-93",
-          "description": "LogEntry struct, buffer lifecycle, persistence and push_log"
+          "lines": "1-23",
+          "description": "LogEntry struct, statics (LOG_BUFFER, LOG_COUNT, LOGGING_SILENCED, VERBOSE_DEBUG_ENABLED, BUSY_TSC, LOCK_AUTOPREFIX)"
+        },
+        {
+          "lines": "24-93",
+          "description": "Buffer lifecycle, persistence and push_log"
         },
         {
           "lines": "94-221",
-          "description": "hpvm_log, hpvm_info, hpvm_warn, hpvm_error and vdebug macros"
+          "description": "hpvm_log, hpvm_info, hpvm_warn, hpvm_error, vdebug, and message macros"
         },
         {
           "lines": "222-293",
@@ -7706,6 +8374,16 @@
         }
       ],
       "objects": {
+        "LOG_COUNT": {
+          "type": "pub static AtomicUsize",
+          "args": {},
+          "returns": ""
+        },
+        "LOGGING_SILENCED": {
+          "type": "pub static mut bool",
+          "args": {},
+          "returns": ""
+        },
         "AsColor": {
           "type": "pub trait",
           "args": {},
@@ -8256,12 +8934,32 @@
           "description": "UEFI initialization, heap, memory map, GDT, IDT, paging, devices, package manager"
         },
         {
-          "lines": "275-305",
-          "description": "Startup self-tests (async, multipar, MP topology, boot/VMM/hosting self-tests)"
+          "lines": "286-301",
+          "description": "XDB initialization (moved before network init so saved static IP config can be loaded on boot)"
         },
         {
-          "lines": "306-380",
-          "description": "Shell banner, dashboard autostart check, and interactive shell loop"
+          "lines": "313-323",
+          "description": "Network hardware init only — httpd_start() is deferred until after MP/async init so the AP poll worker can spawn correctly"
+        },
+        {
+          "lines": "354-378",
+          "description": "Startup self-tests (async, multipar, MP topology, boot/VMM/hosting self-tests) then global executor init"
+        },
+        {
+          "lines": "380-384",
+          "description": "HTTP server start AFTER MP and async executor are ready — checks is_initialized() before calling httpd_start(8080)"
+        },
+        {
+          "lines": "386-421",
+          "description": "Shell banner, then auto-start dashboard — starts by default when hypervisor is available; config.cfg with onstart=\"dashboard\" is no longer required"
+        },
+        {
+          "lines": "423-510",
+          "description": "Non-blocking main loop using timer event — waits on key event AND 1ms timer so poll_tick() runs every 1ms for responsive network handling. The `net-multicore` feature is disabled by default, so the BSP handles all network polling via this fast timer. Falls back to blocking loop if timer creation fails."
+        },
+        {
+          "lines": "687-742",
+          "description": "shutdown() and shutdown_handler() — switches back to terminal from pg/dashboard mode, prints shutdown diagnostics (version, memory, VMs, log count), and resets with the correct shutdown type"
         }
       ],
       "objects": {
@@ -8274,6 +8972,21 @@
           "type": "pub fn",
           "args": {},
           "returns": "u32"
+        },
+        "shutdown": {
+          "type": "fn",
+          "args": {
+            "mode": "char"
+          },
+          "returns": "()"
+        },
+        "shutdown_handler": {
+          "type": "pub fn",
+          "args": {
+            "shutdown_type": "ResetType",
+            "code": "u8"
+          },
+          "returns": "!"
         }
       },
       "dependencies": [
@@ -10474,7 +11187,8 @@
           "args": {
             "package_manager": "&PackageManager"
           },
-          "returns": "()"
+          "returns": "()",
+          "note": "Before entering the dashboard loop, clears the framebuffer directly (pg.clear + pg.flip) to prevent screen tearing from shell text remaining visible. Dashboard UI main loop calls devices::net_stack::poll_tick() every frame so HTTP server responds in real-time."
         },
         "Command": {
           "type": "struct",
@@ -16588,6 +17302,53 @@
         "src/ui/tabui.rs"
       ]
     },
+    "src/xdb/mod.rs": {
+      "path": "src/xdb/mod.rs",
+      "purpose": "XDB database module providing global database server access for persistent key-value storage via hive0.xdb.",
+      "key_regions": [
+        {
+          "lines": "1-15",
+          "description": "Module imports and submodule declarations"
+        },
+        {
+          "lines": "16-38",
+          "description": "Global DB server static, init_global_db(), get_global_db_mut() for shared access"
+        },
+        {
+          "lines": "40-45",
+          "description": "open_db() function to open a database file"
+        }
+      ],
+      "objects": {
+        "init_global_db": {
+          "type": "pub fn",
+          "args": {
+            "path": "&str"
+          },
+          "returns": "()",
+          "note": "Initializes the global XDB server from the given path (e.g. /reg/hive/hive0.xdb)."
+        },
+        "get_global_db_mut": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "Option<&'static mut DbServer>",
+          "note": "Returns mutable reference to the global XDB server for executing SQL-like commands."
+        },
+        "open_db": {
+          "type": "pub fn",
+          "args": {
+            "path": "&str"
+          },
+          "returns": "DbServer"
+        }
+      },
+      "dependencies": [
+        "src/xdb/database.rs",
+        "src/xdb/manager.rs",
+        "src/xdb/server.rs",
+        "src/filesystem.rs"
+      ]
+    },
     "examples/hpx_obj_viewer.c": {
       "path": "examples/hpx_obj_viewer.c",
       "purpose": "3D model viewer for .obj files with MineCrap controls, written in C as an HPVMx executable.",
@@ -16628,6 +17389,135 @@
       },
       "dependencies": [
         "examples/hpx_v1.h"
+      ]
+    },
+    "src/devices/net_stack.rs": {
+      "path": "src/devices/net_stack.rs",
+      "purpose": "Network stack implementation including ARP, ICMP, UDP, IGMP, TCP, and HTTP server for UEFI environment.",
+      "key_regions": [
+        {
+          "lines": "47-52",
+          "description": "TCP flag constants: FIN, SYN, RST, ACK, PSH"
+        },
+        {
+          "lines": "148-186",
+          "description": "HttpTcpState enum and HttpConn struct for HTTP server connection tracking"
+        },
+        {
+          "lines": "190-241",
+          "description": "NetState struct with network configuration, ARP cache, HTTP connections, and protocol stats"
+        },
+        {
+          "lines": "617-721",
+          "description": "handle_ipv4: IPv4 packet dispatcher — validates IP total length to bound payload and ignore Ethernet padding; routes to ICMP, UDP, TCP, IGMP"
+        },
+        {
+          "lines": "825-863",
+          "description": "handle_tcp: TCP packet router — checksum validation removed (offloading common in VMs); routes to HTTP server or client handlers based on destination port"
+        },
+        {
+          "lines": "865-978",
+          "description": "find_http_conn: Find or create HTTP connection slot with fallback for lost SYN packets — fallback creates connection in Established state with their_seq=0 so the first data packet initializes sequence tracking"
+        },
+        {
+          "lines": "1056-1425",
+          "description": "handle_httpd: HTTP server TCP state machine — duplicate detection drops looped-back echoes by seq+payload_len indefinitely (no time window) for both host-only and bridged networks; fallback connections accept first data packet directly; ARP MAC resolution; SYN handshake; data transfer; FIN close; RST on no connection"
+        },
+        {
+          "lines": "1369-1421",
+          "description": "send_tcp_packet: Construct and transmit TCP packet with Ethernet, IPv4, and TCP headers"
+        }
+      ],
+      "objects": {
+        "HttpTcpState": {
+          "type": "enum",
+          "args": {
+            "variants": "None, SynReceived, Established, FinWait, Closed"
+          }
+        },
+        "HttpConn": {
+          "type": "struct",
+          "args": {
+            "client_ip": "[u8; 4]",
+            "client_port": "u16",
+            "tcp_state": "HttpTcpState",
+            "our_seq": "u32",
+            "their_seq": "u32",
+            "request_buf": "Vec<u8>",
+            "request_complete": "bool",
+            "last_rx_seq": "u32",
+            "last_rx_payload_len": "u32",
+            "last_rx_tick": "u64",
+            "last_send_tick": "u64"
+          }
+        },
+        "NetState": {
+          "type": "pub struct",
+          "args": {
+            "ip_addr": "[u8; 4]",
+            "gateway": "[u8; 4]",
+            "subnet_mask": "[u8; 4]",
+            "mac_addr": "[u8; 6]",
+            "http_conns": "[HttpConn; MAX_HTTP_CONNS]",
+            "httpd_port": "u16"
+          }
+        },
+        "handle_ipv4": {
+          "type": "fn",
+          "args": {
+            "packet": "&[u8]",
+            "src_mac": "[u8; 6]"
+          },
+          "returns": "()"
+        },
+        "handle_tcp": {
+          "type": "fn",
+          "args": {
+            "src_ip": "[u8; 4]",
+            "src_mac": "[u8; 6]",
+            "packet": "&[u8]"
+          },
+          "returns": "()"
+        },
+        "find_http_conn": {
+          "type": "fn",
+          "args": {
+            "state": "&mut NetState",
+            "client_ip": "[u8; 4]",
+            "client_port": "u16",
+            "is_syn": "bool"
+          },
+          "returns": "Option<usize>"
+        },
+        "handle_httpd": {
+          "type": "fn",
+          "args": {
+            "src_ip": "[u8; 4]",
+            "src_mac": "[u8; 6]",
+            "tcp": "&TcpHeader",
+            "flags": "u16",
+            "packet": "&[u8]",
+            "server_port": "u16"
+          },
+          "returns": "()"
+        },
+        "send_tcp_packet": {
+          "type": "fn",
+          "args": {
+            "dst_ip": "[u8; 4]",
+            "dst_mac": "[u8; 6]",
+            "src_port": "u16",
+            "dst_port": "u16",
+            "seq": "u32",
+            "ack": "u32",
+            "flags": "u8",
+            "data": "&[u8]"
+          },
+          "returns": "()"
+        }
+      },
+      "dependencies": [
+        "src/devices/mod.rs"
       ]
     }
   }

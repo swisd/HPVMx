@@ -24,6 +24,7 @@ pub const NULL_QWORD: &str = "\0\0\0\0\0\0\0\0";
 pub const NULL_FLOAT: &str = "\0\0\0\0";
 pub const NULL_DOUBLE: &str = "\0\0\0\0\0\0\0\0";
 pub const NULL_BOOL: &str = "\0";
+use crate::consts::net::phy::Driver;
 use crate::types::*;
 
 
@@ -31,12 +32,138 @@ use crate::types::*;
 
 
 // We'll use some linux kernel consts for simplicity
+pub type PciClass = u32;
+pub type PciDevice = u32;
+pub type PciVendor = u16;
 
+
+pub type PhyDeviceID = u32;
+pub type PhyClass = u32;
+
+pub struct MDIODeviceID {
+    phy_id: u32,
+    phy_id_mask: u32
+}
+
+impl MDIODeviceID {
+    pub fn new(phy_id: u32, phy_id_mask: u32) -> MDIODeviceID {
+        MDIODeviceID { phy_id, phy_id_mask }
+    }
+}
+pub struct PhyDeviceId(MDIODeviceID);
+
+impl PhyDeviceId {
+    /// Creates a new instance with the exact match mask.
+    pub const fn new_with_exact_mask(id: u32) -> Self {
+        Self(MDIODeviceID {
+            phy_id: id,
+            phy_id_mask: DeviceMask::Exact.as_int()
+        })
+    }
+
+    /// Creates a new instance with the model match mask.
+    pub const fn new_with_model_mask(id: u32) -> Self {
+        Self(MDIODeviceID {
+            phy_id: id,
+            phy_id_mask: DeviceMask::Model.as_int(),
+        })
+    }
+
+    /// Creates a new instance with the vendor match mask.
+    pub const fn new_with_vendor_mask(id: u32) -> Self {
+        Self(MDIODeviceID {
+            phy_id: id,
+            phy_id_mask: DeviceMask::Vendor.as_int(),
+        })
+    }
+
+    /// Creates a new instance with a custom match mask.
+    pub const fn new_with_custom_mask(id: u32, mask: u32) -> Self {
+        Self(MDIODeviceID {
+            phy_id: id,
+            phy_id_mask: DeviceMask::Custom(mask).as_int(),
+        })
+    }
+
+    /// Creates a new instance from [`Driver`].
+    pub const fn new_with_driver<T: Driver>() -> Self {
+        T::PHY_DEVICE_ID
+    }
+
+    /// Get the MDIO device's PHY ID.
+    pub const fn id(&self) -> u32 {
+        self.0.phy_id
+    }
+
+    /// Get the MDIO device's match mask.
+    pub const fn mask_as_int(&self) -> u32 {
+        self.0.phy_id_mask
+    }
+
+    // macro use only
+    #[doc(hidden)]
+    pub fn mdio_device_id(&self) -> MDIODeviceID {
+        MDIODeviceID::new(self.0.phy_id, self.0.phy_id_mask)
+    }
+}
+
+
+#[derive(PartialEq, Eq)]
+pub enum DeviceState {
+    /// PHY device and driver are not ready for anything.
+    Down,
+    /// PHY is ready to send and receive packets.
+    Ready,
+    /// PHY is up, but no polling or interrupts are done.
+    Halted,
+    /// PHY is up, but is in an error state.
+    Error,
+    /// PHY and attached device are ready to do work.
+    Up,
+    /// PHY is currently running.
+    Running,
+    /// PHY is up, but not currently plugged in.
+    NoLink,
+    /// PHY is performing a cable test.
+    CableTest,
+}
+
+/// A mode of Ethernet communication.
+///
+/// PHY drivers get duplex information from hardware and update the current state.
+pub enum DuplexMode {
+    /// PHY is in full-duplex mode.
+    Full,
+    /// PHY is in half-duplex mode.
+    Half,
+    /// PHY is in unknown duplex mode.
+    Unknown,
+}
+enum DeviceMask {
+    Exact,
+    Model,
+    Vendor,
+    Custom(u32),
+}
+
+impl DeviceMask {
+    const MASK_EXACT: u32 = !0;
+    const MASK_MODEL: u32 = !0 << 4;
+    const MASK_VENDOR: u32 = !0 << 10;
+
+    const fn as_int(&self) -> u32 {
+        match self {
+            DeviceMask::Exact => Self::MASK_EXACT,
+            DeviceMask::Model => Self::MASK_MODEL,
+            DeviceMask::Vendor => Self::MASK_VENDOR,
+            DeviceMask::Custom(mask) => *mask,
+        }
+    }
+}
 
 //PCI Constants
 pub mod pci {
-
-    use crate::types::{PciClass, PciVendor};
+    use crate::consts::{PciClass, PciVendor};
 
 
     pub const PCI_CLASS_NOT_DEFINED: PciClass = 0x000000;
@@ -528,8 +655,8 @@ pub mod iommu {
 
 
 pub mod irq {
-    use crate::types::{LONG, ULONG, ULONG_MAX};
-    pub struct Flags(ULONG);
+
+    pub struct Flags(u32);
     impl Flags {
         /// Use the interrupt line as already configured.
         pub const TRIGGER_NONE: Flags = Flags::new(0x00000000);
@@ -596,15 +723,15 @@ pub mod irq {
         /// `PERCPU`.
         pub const NO_DEBUG: Flags = Flags::new(0x00000000);
 
-        pub(crate) fn into_inner(self) -> ULONG {
+        pub(crate) fn into_inner(self) -> u32 {
             self.0
         }
 
         // Always inline to optimize out error path of `build_assert`.
         #[inline(always)]
         const fn new(value: u32) -> Self {
-            assert!(value as u64 <= ULONG_MAX as u64);
-            Self(value as ULONG)
+            assert!(value as u64 <= u32::MAX as u64);
+            Self(value as u32)
         }
     }
 }
@@ -695,8 +822,60 @@ pub mod mm_virt{
 
 pub mod net {
     pub mod phy {
-        use crate::types::net::phy::PhyDeviceId;
-        use crate::types::Str;
+        use crate::consts::{MDIODeviceID, PhyDeviceId};
+
+        #[derive(PartialEq, Eq)]
+        pub enum DeviceState {
+            /// PHY device and driver are not ready for anything.
+            Down,
+            /// PHY is ready to send and receive packets.
+            Ready,
+            /// PHY is up, but no polling or interrupts are done.
+            Halted,
+            /// PHY is up, but is in an error state.
+            Error,
+            /// PHY and attached device are ready to do work.
+            Up,
+            /// PHY is currently running.
+            Running,
+            /// PHY is up, but not currently plugged in.
+            NoLink,
+            /// PHY is performing a cable test.
+            CableTest,
+        }
+
+        /// A mode of Ethernet communication.
+        ///
+        /// PHY drivers get duplex information from hardware and update the current state.
+        pub enum DuplexMode {
+            /// PHY is in full-duplex mode.
+            Full,
+            /// PHY is in half-duplex mode.
+            Half,
+            /// PHY is in unknown duplex mode.
+            Unknown,
+        }
+        enum DeviceMask {
+            Exact,
+            Model,
+            Vendor,
+            Custom(u32),
+        }
+
+        impl DeviceMask {
+            const MASK_EXACT: u32 = !0;
+            const MASK_MODEL: u32 = !0 << 4;
+            const MASK_VENDOR: u32 = !0 << 10;
+
+            const fn as_int(&self) -> u32 {
+                match self {
+                    DeviceMask::Exact => Self::MASK_EXACT,
+                    DeviceMask::Model => Self::MASK_MODEL,
+                    DeviceMask::Vendor => Self::MASK_VENDOR,
+                    DeviceMask::Custom(mask) => *mask,
+                }
+            }
+        }
 
         pub mod flags {
             /// PHY is internal.
@@ -714,7 +893,7 @@ pub mod net {
             const FLAGS: u32 = 0;
 
             /// The friendly name of this PHY type.
-            const NAME: &'static Str;
+            const NAME: &'static str;
 
             /// This driver only works for PHYs with IDs which match this field.
             /// The default id and mask are zero.

@@ -16,7 +16,7 @@ use uefi::{boot, runtime, system};
 use uefi_raw::Status;
 use uefi_raw::table::runtime::ResetType;
 use crate::filesystem::FileSystem;
-use crate::{hpvm_error, hpvm_info, hpvm_warn, hpvm_log, message, read_line, ui, HYPERVISOR, devices, loader, logiclang_int, read_line_int, env, apps, TSC_PER_US, GLOBALENV, GLOBAL_SYNC_STATE};
+use crate::{hpvm_error, hpvm_info, hpvm_warn, hpvm_log, message, read_line, ui, HYPERVISOR, devices, loader, logiclang_int, read_line_int, env, apps, TSC_PER_US, GLOBALENV, GLOBAL_SYNC_STATE, hpvmlog, vdebug, VERSION_DATA, HEAP_STORAGE, TOTAL_PHYSICAL_MEMORY_MB};
 use crate::kernel::KernelLoader;
 use crate::rng::XorShiftRng;
 use crate::ui::{DashboardUI, VectorSyncState};
@@ -24,6 +24,7 @@ use uefi::proto::console::text::{Color, Key};
 use crate::env::{Application, Environment};
 use crate::pm::PackageManager;
 use crate::apps::simple_app::SimpleApp;
+use crate::devices::timer::sleep_ms;
 use crate::hpvmlog::{LOGGING_SILENCED, set_verbose_debug, verbose_debug_enabled};
 use crate::ui::pixel_graphics::PixelGraphics;
 
@@ -583,7 +584,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
     // with_stdout(|stdout| {cursor.render(stdout)});
 }
 
-fn enter(itm: &str) {
+pub fn enter(itm: &str) {
     match itm {
         "ui" => {
             hpvm_warn!("ui", "NTSHELL is deprecated, use dashboard instead");
@@ -606,7 +607,7 @@ fn enter(itm: &str) {
     }
 }
 
-fn start_kernel(path: &str) {
+pub fn start_kernel(path: &str) {
     crate::vdebug!("kernel", "attempting to load kernel from: {}", path);
 
     match KernelLoader::load_kernel(path) {
@@ -662,34 +663,8 @@ fn start_kernel(path: &str) {
 }
 
 
-fn shutdown(mode: char) {
-    match mode {
-        's' => {
-            crate::vdebug!("HPVMx", "shutting down...");
-            let mmap = unsafe { boot::exit_boot_services(None) };
-
-            crate::vdebug!("malloc", "Memory Map:");
-            for desc in mmap.entries() {
-                crate::vdebug!("malloc",
-            "start=0x{:016x} size=0x{:016x} type={:?}, attr={:?}",
-            desc.phys_start,
-            desc.page_count * 4096,
-            desc.ty,
-            desc.att
-        );
-            }
-            runtime::reset(ResetType::SHUTDOWN, Status::SUCCESS, Some(&[0]))
-        }
-        'r' => {
-            crate::vdebug!("HPVMx", "restarting...");
-            runtime::reset(ResetType::SHUTDOWN, Status::SUCCESS, Some(&[255]))
-        }
-        _ => { crate::vdebug!("x", "incorrect, command") }
-    }
-}
-
 #[allow(static_mut_refs)]
-fn handle_vm_command(command: &[&str]) {
+pub fn handle_vm_command(command: &[&str]) {
     unsafe {
         match HYPERVISOR.as_mut() {
             Some(hv) => {
@@ -863,7 +838,7 @@ fn handle_vm_command(command: &[&str]) {
 }
 
 #[allow(static_mut_refs)]
-fn handle_vmm_command(command: &[&str]) {
+pub fn handle_vmm_command(command: &[&str]) {
     unsafe {
         match HYPERVISOR.as_mut() {
             Some(hv) => {
@@ -922,7 +897,7 @@ fn handle_vmm_command(command: &[&str]) {
 
 #[allow(static_mut_refs)]
 /// Boot a VM with an ISO, EFI file, or disk image
-fn boot_vm_with_media(vm_id: u32, media_path: &str) {
+pub fn boot_vm_with_media(vm_id: u32, media_path: &str) {
     unsafe {
         match HYPERVISOR.as_mut() {
             Some(hv) => {
@@ -951,10 +926,10 @@ fn boot_vm_with_media(vm_id: u32, media_path: &str) {
 
 #[allow(static_mut_refs)]
 /// Run a standalone EFI application
-fn run_efi_application(efi_path: &str, args: &[&str]) {
+pub fn run_efi_application(efi_path: &str, args: &[&str]) {
     crate::vdebug!("EFI", "loading EFI application from '{}'", efi_path);
 
-    match crate::load_boot_media(efi_path) {
+    match load_boot_media(efi_path) {
         Ok(efi_data) => {
             crate::vdebug!("EFI", "loaded {} bytes", efi_data.len());
 
@@ -1025,6 +1000,16 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
 
 
     LOGGING_SILENCED = true;
+
+    // Clear the framebuffer directly before the first frame to prevent screen tearing.
+    // Without this, the shell text (banner, debug output) remains visible on the
+    // real framebuffer until the first backbuffer flip completes, causing a visual
+    // tear where the shell content briefly flashes before the dashboard appears.
+    if let Some(mut pg) = PixelGraphics::new() {
+        pg.clear(0x222222);
+        pg.flip();
+    }
+
     dashboard.refresh_storage();
     dashboard.refresh_devices();
 
@@ -1108,6 +1093,8 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
     loop {
         unsafe { crate::hpvmlog::BUSY_TSC = 0; }
         tick_disk_executables();
+        // Poll network stack every frame so HTTP server responds in real-time
+        devices::net_stack::poll_tick();
         unsafe {
             if let Some(global) = GLOBALENV.as_mut() {
                 if !global.data.active_apps.is_empty() {
@@ -1426,7 +1413,7 @@ pub unsafe fn show_dashboard_ui(package_manager: &PackageManager) {
 
 #[allow(static_mut_refs, dead_code)]
 /// Attach to a VM's console for interaction
-fn attach_vm_console(vm_id: u32) {
+pub fn attach_vm_console(vm_id: u32) {
     crate::vdebug!("Console", "attaching to VM {} console", vm_id);
 
     unsafe {
@@ -1476,7 +1463,7 @@ fn attach_vm_console(vm_id: u32) {
 
 
 /// Load boot media (ISO, EFI, IMG files) from filesystem
-fn load_boot_media(path: &str) -> Result<Vec<u8>, &'static str> {
+pub fn load_boot_media(path: &str) -> Result<Vec<u8>, &'static str> {
     // Since FileSystem doesn't expose a read_file method, we use the kernel loader
     // which already has file loading capability
     match KernelLoader::load_kernel(path) {
@@ -1504,7 +1491,7 @@ fn load_boot_media(path: &str) -> Result<Vec<u8>, &'static str> {
 
 /// Helper function to read a file from the filesystem
 #[allow(dead_code)]
-fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
+pub fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
 
 
     // Use KernelLoader's file loading capability
@@ -1515,7 +1502,60 @@ fn read_boot_file(path: &str) -> Result<Vec<u8>, &'static str> {
 }
 
 
+pub fn shutdown(mode: char) {
+    match mode {
+        's' => {
+            crate::vdebug!("HPVMx", "shutting down...");
+            shutdown_handler(ResetType::SHUTDOWN, 0);
+        }
+        'w' => {
+            crate::vdebug!("HPVMx", "restarting...");
+            shutdown_handler(ResetType::WARM, 0);
+        }
+        'c' => {
+            crate::vdebug!("HPVMx", "restarting...");
+            shutdown_handler(ResetType::COLD, 0);
+        }
+        _ => { crate::vdebug!("x", "incorrect, command") }
+    }
+}
+/// ResetType::SHUTDOWN => sleep state
+/// ResetType::COLD => hardware power cycle
+/// ResetType::WARM => software cycle
+pub fn shutdown_handler(shutdown_type: ResetType, code: u8) -> ! {
 
+    // Switch back to terminal if in pg ui/dashboard
+    unsafe {
+        hpvmlog::LOGGING_SILENCED = false;
+    }
+    uefi::system::with_stdout(|stdout| {
+        let _ = stdout.reset(false);
+        let _ = stdout.clear();
+        let _ = stdout.enable_cursor(true);
+    });
+    sleep_ms(100);
+
+    // Print shutdown diagnostics
+    let mode_str = match shutdown_type {
+        ResetType::SHUTDOWN => "SHUTDOWN",
+        ResetType::WARM => "WARM REBOOT",
+        ResetType::COLD => "COLD REBOOT",
+        _ => "UNKNOWN",
+    };
+    vdebug!("HPVMx", "Mode: {}", mode_str);
+    sleep_ms(100);
+    vdebug!("HPVMx", "Version: {}", env!("CARGO_PKG_VERSION"));
+    if let Some(ver) = unsafe { VERSION_DATA.as_ref() } {
+        vdebug!("HPVMx", "Build: {}", ver.format_to_string());
+    }
+    vdebug!("HPVMx", "Physical memory: {} MB", unsafe { TOTAL_PHYSICAL_MEMORY_MB });
+    vdebug!("HPVMx", "Heap size: {} MB", HEAP_STORAGE.len() / (1024 * 1024));
+    vdebug!("HPVMx", "Log entries: {}", unsafe { hpvmlog::LOG_COUNT.load(core::sync::atomic::Ordering::Relaxed) });
+    vdebug!("HPVMx", "Shutting down...");
+    sleep_ms(2000);
+
+    runtime::reset(shutdown_type, Status::SUCCESS, Some(&[code]))
+}
 
 
 struct Command {
