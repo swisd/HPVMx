@@ -7,7 +7,7 @@
 pub static mut DASH_BACK_ENABLED: bool = false;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use crate::{hpvm_error, hpvm_info, hpvm_log, vdebug, TSC_PER_US, MOUSE, GLOBALENV, GLOBAL_SYNC_STATE, run_polling};
+use crate::{hpvm_error, hpvm_info, hpvm_log, vdebug, TSC_PER_US, MOUSE, GLOBALENV, GLOBAL_SYNC_STATE, run_polling, GLOBAL_SYSTEM_TRACKER};
 use alloc::fmt::format;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -159,6 +159,9 @@ pub struct DashboardUI {
     pub selected_process_idx: usize,
     pub dragging_window: Option<(usize, usize, usize)>,
 
+    // Tooltip / hover text displayed near the cursor
+    pub hover_text: Option<String>,
+
     // Virtualization management fields
     pub virt_subtab: VirtSubTab,
     pub containers: Vec<ContainerDisplayInfo>,
@@ -198,6 +201,7 @@ pub struct UiSettings {
     pub pg_dither: bool,
     pub pg_glitch: bool,
     pub pg_aberration: usize, // 0: off, 1: low, 2: mid, 3: high
+    pub windows_discovery: bool, // Enable WebDAV for Windows File Explorer discovery (default: off)
 }
 
 #[derive(Clone, Copy, Debug, Ord, PartialEq, Eq, PartialOrd)]
@@ -501,6 +505,7 @@ pub struct SystemResources {
     pub net_rx_kbps: u64,
     pub net_tx_kbps: u64,
     pub gpu_usage: u32,
+    pub disk_usage_percent: u32,
     
     // History for graphs
     pub cpu_history: Vec<u32>,
@@ -579,6 +584,7 @@ impl DashboardUI {
                 net_rx_kbps: 0,
                 net_tx_kbps: 0,
                 gpu_usage: 0,
+                disk_usage_percent: 0,
                 cpu_history: Vec::with_capacity(100),
                 cpu_core_history: alloc::vec![Vec::with_capacity(100); cores as usize],
                 mem_history: Vec::with_capacity(100),
@@ -664,6 +670,7 @@ impl DashboardUI {
                 pg_dither: false,
                 pg_glitch: false,
                 pg_aberration: 0,
+                windows_discovery: false,
             },
             status_line: String::from("Ready"),
             command_history: Vec::new(),
@@ -682,6 +689,7 @@ impl DashboardUI {
             cycles: 0,
             selected_process_idx: 0,
             dragging_window: None,
+            hover_text: None,
             virt_subtab: VirtSubTab::VMs,
             containers: alloc::vec![
                 ContainerDisplayInfo {
@@ -921,6 +929,8 @@ impl DashboardUI {
         push_limit(&mut self.resources.gpu_history, self.resources.gpu_usage, 100);
         push_limit(&mut self.resources.fps_history, self.resources.fps as u32, 100);
         push_limit(&mut self.resources.ft_ms_history, self.resources.frame_ms as u32, 100);
+
+        unsafe { GLOBAL_SYSTEM_TRACKER = Some(self.resources.clone()); }
     }
 
     //noinspection GrazieInspectionRunner
@@ -2155,8 +2165,14 @@ impl DashboardUI {
                 //                [self.resources.fps, self.resources.frame_ms, self.resources.cpu_usage as usize, self.resources.used_memory_mb as usize]
                 // );
                 // cursor always drawn last (always on top)
-                if let Some(m) = MOUSE.as_ref() {
-                    self.cursor.update_from_mouse(pg.resolution().0, pg.resolution().1);
+                // Always update mouse — the fallback chain in update_from_mouse dynamically
+                // scans for SimplePointer handles each frame via scan_mouse_handles(), so it
+                // works even if the global MOUSE static is None (e.g., USB mouse not ready at init).
+                self.cursor.update_from_mouse(pg.resolution().0, pg.resolution().1);
+
+                // Draw tooltip if hover text is set, before the cursor so cursor appears on top
+                if let Some(ref hover) = self.hover_text {
+                    pg.draw_tooltip(self.cursor.x as usize, self.cursor.y as usize, hover);
                 }
 
                 pg.draw_cursor(self.cursor.x as usize, self.cursor.y as usize);
@@ -2164,7 +2180,8 @@ impl DashboardUI {
 
                 if self.settings.pg_scanlines { pg.apply_scanlines(); }
                 if self.settings.pg_dither { pg.apply_dither(); }
-                if self.settings.pg_glitch { self.glitch_y = pg.apply_glitch(self.glitch_y); }
+                 self.glitch_y = if self.glitch_y < height + 20 { self.glitch_y + 2 } else { 0 };
+                if self.settings.pg_glitch { pg.apply_glitch(self.glitch_y); }
 
                 match self.settings.pg_aberration {
                     1 => pg.apply_edge_aberration(0.2),
@@ -2441,18 +2458,30 @@ impl DashboardUI {
                 });
             }
 
-            // 2. Sort/Reorder: Put volume labeled "boot" first
+            // 2. Sync with FileSystem's drive handles to ensure aliases match
+            // This prevents FileReadFault when switching disks
+            let fs_state = crate::FileSystem::get_state();
+            
+            // Build a map from handle to alias from FileSystem
+            let handle_to_alias: alloc::collections::BTreeMap<uefi::Handle, String> = fs_state.drive_handles.iter()
+                .map(|(alias, handle)| (*handle, alias.clone()))
+                .collect();
+
+            // Sort/Reorder: Put volume labeled "boot" first
             valid_disks.sort_by(|a, b| {
                 let a_is_boot = a.volume_label.eq_ignore_ascii_case("boot");
                 let b_is_boot = b.volume_label.eq_ignore_ascii_case("boot");
                 b_is_boot.cmp(&a_is_boot)
             });
 
-            // 3. Construct detected_disks with dsk0 assigned to boot (or first item)
+            // 3. Construct detected_disks using FileSystem's aliases where available
             let mut detected_disks = Vec::new();
             for (idx, disk) in valid_disks.into_iter().enumerate() {
+                let alias = handle_to_alias.get(&disk.handle)
+                    .cloned()
+                    .unwrap_or_else(|| format!("dsk{}", idx));
                 detected_disks.push(DiskTabInfo {
-                    alias: format!("dsk{}", idx),
+                    alias,
                     volume_label: disk.volume_label,
                     total_bytes: disk.total_bytes,
                     free_bytes: disk.free_bytes,
@@ -2777,11 +2806,11 @@ impl DashboardUI {
                 }
                 4 => {
                     crate::devices::net::httpd_start(8080);
-                    self.status_line = String::from("HTTP management server started on 8080");
+                    self.status_line = String::from("HTTP hypervisor server started on 8080");
                 }
                 5 => {
                     crate::devices::net::httpd_stop();
-                    self.status_line = String::from("HTTP management server stopped");
+                    self.status_line = String::from("HTTP hypervisor server stopped");
                 }
                 6 => {
                     // Configure static IP from input fields
@@ -3229,11 +3258,21 @@ impl DashboardUI {
         }
 
         fn draw_startup_menu(&self, pg: &mut PixelGraphics, width: usize, height: usize) {
-            let taskbar_y = height.saturating_sub(28);
+            let taskbar_y = height.saturating_sub(32);
             pg.fill_rect(0, taskbar_y, width, 28, 0x000080);
             pg.fill_rect(6, taskbar_y + 4, 102, 20, if self.startup_menu_active { 0x008080 } else { 0x444444 });
             let stringx = unsafe { if DASH_BACK_ENABLED {"[F1] Start     [X] Shutdown     [Q] Dev Menu"} else {"[F1] Start     [X] Shutdown     |Q| Dev Menu"} };
             pg.draw_text(14, taskbar_y + 8, stringx, 0xFFFFFF);
+            pg.draw_icon(width - 32, taskbar_y, 32, 32, &icons::upscale_icon(&icons::ETHERNET_ICON_DATA, 16, 2));
+            pg.draw_icon(width - 64, taskbar_y, 32, 32, &icons::upscale_icon(&icons::CPU_ICON_DATA, 16, 2));
+            pg.draw_icon(width - 96, taskbar_y, 32, 32, &icons::INTEGRATED_CIRCUIT_32_ICON_DATA);
+            pg.draw_icon(width - 128, taskbar_y, 32, 32, &icons::BLADE_NETWORK_32_LIGHT_ICON_DATA);
+            if self.glitch_y % 240 < 120 { pg.draw_icon((width - 128) + 16, taskbar_y+16, 16, 16, &icons::WARNING_16_ICON_DATA); }
+            pg.draw_icon(width - 160, taskbar_y, 32, 32, &icons::MODEM_CLUSTER_32_ICON_DATA);
+            if self.glitch_y % 240 < 120 { pg.draw_icon((width - 160) + 16, taskbar_y+16, 16, 16, &icons::WARNING_16_ICON_DATA); }
+            pg.draw_icon(width - 192, taskbar_y, 32, 32, &icons::upscale_icon(&icons::PCI_GREEN_ICON_DATA, 16, 2));
+            pg.draw_icon(width-224, taskbar_y, 32, 32, &icons::DATABASE_CLUSTER_32_ICON_DATA);
+
 
             // Draw active window taskbar tabs next to start menu buttons (starting at x = 330)
             let mut tab_x = 380usize;
@@ -3274,6 +3313,8 @@ impl DashboardUI {
                 pg.draw_text(40, y + 2, display_name, if selected { 0xFFFF00 } else { 0xFFFFFF });
                 pg.draw_text(190, y + 2, version, 0xAAAAAA);
             }
+
+
         }
 
         fn handle_startup_menu_input(&mut self, key: Key) -> bool {

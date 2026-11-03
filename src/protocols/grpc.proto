@@ -23,6 +23,9 @@ enum VmAction {
   VM_ACTION_DELETE = 5;
   VM_ACTION_TERMINAL = 6;
   VM_ACTION_LOAD_ISO = 7;
+  VM_ACTION_GET_STATS = 8;
+  VM_ACTION_GET_NODE_STATS = 9;
+  VM_ACTION_GET_SERVER_STATS = 10;
 }
 
 message VmIdentity {
@@ -89,4 +92,103 @@ message TerminalFrame {
   VmIdentity identity = 2;
   string session_id = 3;
   bytes data = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Stats messages for Intermediate Server ↔ Hypervisor RPC polling
+// ---------------------------------------------------------------------------
+
+message CpuStats {
+  uint32 cores = 1;
+  uint32 usage_percent = 2;
+  uint32 threads = 3;
+  string brand = 4;
+  uint32 clock_mhz = 5;
+}
+
+message MemoryStats {
+  uint64 total_mb = 1;
+  uint64 used_mb = 2;
+  uint32 usage_percent = 3;
+}
+
+message NetworkStats {
+  string ip = 1;
+  string mac = 2;
+  string gateway = 3;
+  string subnet_mask = 4;
+  uint64 rx_kbps = 5;
+  uint64 tx_kbps = 6;
+  uint64 rx_packets = 7;
+  uint64 tx_packets = 8;
+  uint64 rx_bytes = 9;
+  uint64 tx_bytes = 10;
+  uint32 usage_percent = 11;
+}
+
+message DiskStats {
+  uint64 read_kbps = 1;
+  uint64 write_kbps = 2;
+  uint64 read_bytes = 3;
+  uint64 write_bytes = 4;
+  uint64 read_ops = 5;
+  uint64 write_ops = 6;
+  uint32 usage_percent = 7;
+}
+
+message VirtualizationStats {
+  uint32 vms_running = 1;
+  uint32 vms_total = 2;
+  string hypervisor = 3;
+}
+
+message GpuStats {
+  string device_name = 1;
+  uint32 usage_percent = 2;
+  uint32 fps = 3;
+}
+
+message NodeStats {
+  string node_id = 1;
+  bool online = 2;
+  uint64 last_heartbeat_ms = 3;
+  CpuStats cpu = 4;
+  MemoryStats memory = 5;
+  NetworkStats network = 6;
+  DiskStats disk = 7;
+  VirtualizationStats virtualization = 8;
+  uint32 deployed_instances = 9;
+}
+
+message ServerStatsRequest {
+  string request_id = 1;
+}
+
+message ServerStatsResponse {
+  string request_id = 1;
+  bool success = 2;
+  string error = 3;
+  string hostname = 4;
+  string version = 5;
+  string time = 6;
+  uint64 uptime_seconds = 7;
+  CpuStats cpu = 8;
+  MemoryStats memory = 9;
+  NetworkStats network = 10;
+  DiskStats disk = 11;
+  VirtualizationStats virtualization = 12;
+  repeated NodeStats nodes = 13;
+  GpuStats gpu = 14;
+}
+
+message NodeStatsRequest {
+  string request_id = 1;
+  string node_id = 2;
+}
+
+message NodeStatsResponse {
+  string request_id = 1;
+  bool success = 2;
+  string error = 3;
+  NodeStats stats = 4;
 }

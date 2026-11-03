@@ -912,6 +912,544 @@ def test_rapid_requests(server_ip, port, count=5):
 
 # ─── Raw Socket Diagnostic ───────────────────────────────────────────────────
 
+# ─── SSDP/UPnP Tests ─────────────────────────────────────────────────────────
+
+SSDP_MULTICAST_IP = "239.255.255.250"
+SSDP_PORT = 1900
+SSDP_RESPONSE_TIMEOUT = 5  # Seconds to wait for SSDP multicast responses
+
+
+def send_ssdp_msearch(server_ip, search_target="ssdp:all"):
+    """Send an SSDP M-SEARCH request and collect responses."""
+    # Build M-SEARCH request
+    request = (
+        f"M-SEARCH * HTTP/1.1\r\n"
+        f"HOST: {SSDP_MULTICAST_IP}:{SSDP_PORT}\r\n"
+        f"MAN: \"ssdp:discover\"\r\n"
+        f"MX: 3\r\n"
+        f"ST: {search_target}\r\n"
+        f"\r\n"
+    )
+    request_bytes = request.encode("utf-8")
+
+    responses = []
+    sock = None
+    try:
+        # Create UDP socket with multicast support
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.settimeout(TIMEOUT_CONNECT)
+
+        # Join the SSDP multicast group so we can receive responses
+        try:
+            mreq = struct.pack("4s4s", socket.inet_aton(SSDP_MULTICAST_IP), socket.inet_aton("0.0.0.0"))
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        except Exception as e:
+            info_msg(f"Could not join multicast group: {e} (may still work)")
+
+        # Send to the SSDP multicast address
+        sock.sendto(request_bytes, (SSDP_MULTICAST_IP, SSDP_PORT))
+        info_msg(f"M-SEARCH sent for ST: {search_target}")
+
+        # Wait for responses
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < SSDP_RESPONSE_TIMEOUT:
+            try:
+                sock.settimeout(max(0.5, SSDP_RESPONSE_TIMEOUT - (time.monotonic() - t0)))
+                data, addr = sock.recvfrom(4096)
+                resp_text = data.decode("utf-8", errors="replace")
+                responses.append((data, resp_text, addr))
+                info_msg(f"SSDP response from {addr[0]}:{addr[1]} ({len(data)} bytes)")
+            except socket.timeout:
+                break
+
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+    return responses
+
+
+def parse_ssdp_response(text):
+    """Parse an SSDP response into a dict of headers."""
+    headers = {}
+    lines = text.split("\r\n")
+    if not lines:
+        return None, headers
+
+    status_line = lines[0]
+    for line in lines[1:]:
+        if ":" in line:
+            key, value = line.split(":", 1)
+            headers[key.strip().upper()] = value.strip()
+
+    status_code = None
+    parts = status_line.split(" ", 2)
+    if len(parts) >= 2:
+        try:
+            status_code = int(parts[1])
+        except ValueError:
+            pass
+
+    return status_code, headers
+
+
+def test_ssdp_msearch_all(server_ip):
+    """Test SSDP M-SEARCH for ssdp:all."""
+    section_header("TEST: SSDP M-SEARCH (ssdp:all)")
+
+    info_msg(f"Sending M-SEARCH for 'ssdp:all' to {SSDP_MULTICAST_IP}:{SSDP_PORT}")
+    responses = send_ssdp_msearch(server_ip, "ssdp:all")
+
+    if not responses:
+        fail_msg("No SSDP responses received")
+        results.add("SSDP M-SEARCH ssdp:all", False, "No responses")
+        return False
+
+    checks_passed = True
+    rootdevice_found = False
+    network_infra_found = False
+
+    for i, (raw, text, addr) in enumerate(responses):
+        sub_header(f"Response {i + 1} from {addr[0]}:{addr[1]}")
+        status_code, headers = parse_ssdp_response(text)
+
+        if status_code == 200:
+            pass_msg(f"Status: {status_code} OK")
+        else:
+            fail_msg(f"Status: {status_code} (expected 200)")
+            checks_passed = False
+
+        # Check required headers
+        required = ["LOCATION", "SERVER", "ST", "USN", "CACHE-CONTROL", "EXT"]
+        for h in required:
+            if h in headers:
+                pass_msg(f"{h}: {headers[h]}")
+            else:
+                fail_msg(f"Missing header: {h}")
+                checks_passed = False
+
+        # Check ST header value
+        st = headers.get("ST", "")
+        if st == "upnp:rootdevice":
+            rootdevice_found = True
+            pass_msg("Found rootdevice response")
+        elif "NetworkInfrastructure" in st:
+            network_infra_found = True
+            pass_msg("Found NetworkInfrastructure device response")
+        else:
+            info_msg(f"Unexpected ST: {st}")
+
+        # Check LOCATION points to desc.xml
+        location = headers.get("LOCATION", "")
+        if "desc.xml" in location:
+            pass_msg(f"LOCATION points to desc.xml: {location}")
+        else:
+            fail_msg(f"LOCATION does not point to desc.xml: {location}")
+            checks_passed = False
+
+        # Check USN contains uuid
+        usn = headers.get("USN", "")
+        if usn.startswith("uuid:"):
+            pass_msg(f"USN is UUID-based: {usn}")
+        else:
+            fail_msg(f"USN not UUID-based: {usn}")
+            checks_passed = False
+
+        # Check SERVER header
+        server = headers.get("SERVER", "")
+        if "HPVMx" in server:
+            pass_msg(f"SERVER identifies as HPVMx: {server}")
+        else:
+            info_msg(f"SERVER header: {server}")
+
+        # Show raw response preview
+        info_msg(f"Raw response ({len(raw)} bytes):")
+        for line in text.split("\r\n")[:10]:
+            print(f"    {line}")
+
+    if rootdevice_found:
+        pass_msg("Received upnp:rootdevice response")
+    else:
+        fail_msg("Did not receive upnp:rootdevice response")
+        checks_passed = False
+
+    if network_infra_found:
+        pass_msg("Received NetworkInfrastructure response")
+    else:
+        fail_msg("Did not receive NetworkInfrastructure response")
+        checks_passed = False
+
+    results.add("SSDP M-SEARCH ssdp:all", checks_passed,
+                f"{len(responses)} responses, root={rootdevice_found}, infra={network_infra_found}")
+    return checks_passed
+
+
+def test_ssdp_msearch_rootdevice(server_ip):
+    """Test SSDP M-SEARCH for upnp:rootdevice."""
+    section_header("TEST: SSDP M-SEARCH (upnp:rootdevice)")
+
+    info_msg(f"Sending M-SEARCH for 'upnp:rootdevice'")
+    responses = send_ssdp_msearch(server_ip, "upnp:rootdevice")
+
+    if not responses:
+        fail_msg("No SSDP responses received")
+        results.add("SSDP M-SEARCH rootdevice", False, "No responses")
+        return False
+
+    checks_passed = True
+    for i, (raw, text, addr) in enumerate(responses):
+        status_code, headers = parse_ssdp_response(text)
+        st = headers.get("ST", "")
+        if st == "upnp:rootdevice":
+            pass_msg(f"Response {i+1}: ST matches upnp:rootdevice")
+        else:
+            info_msg(f"Response {i+1}: ST={st}")
+
+        if status_code == 200:
+            pass_msg(f"Response {i+1}: Status 200 OK")
+        else:
+            fail_msg(f"Response {i+1}: Status {status_code}")
+            checks_passed = False
+
+    results.add("SSDP M-SEARCH rootdevice", checks_passed,
+                f"{len(responses)} responses")
+    return checks_passed
+
+
+def test_ssdp_msearch_network_infra(server_ip):
+    """Test SSDP M-SEARCH for NetworkInfrastructure device type."""
+    section_header("TEST: SSDP M-SEARCH (NetworkInfrastructure)")
+
+    info_msg(f"Sending M-SEARCH for 'urn:schemas-upnp-org:device:NetworkInfrastructure:1'")
+    responses = send_ssdp_msearch(server_ip,
+                                   "urn:schemas-upnp-org:device:NetworkInfrastructure:1")
+
+    if not responses:
+        fail_msg("No SSDP responses received")
+        results.add("SSDP M-SEARCH NetworkInfrastructure", False, "No responses")
+        return False
+
+    checks_passed = True
+    for i, (raw, text, addr) in enumerate(responses):
+        status_code, headers = parse_ssdp_response(text)
+        st = headers.get("ST", "")
+        if "NetworkInfrastructure" in st:
+            pass_msg(f"Response {i+1}: ST matches NetworkInfrastructure")
+        else:
+            info_msg(f"Response {i+1}: ST={st}")
+
+        if status_code == 200:
+            pass_msg(f"Response {i+1}: Status 200 OK")
+        else:
+            fail_msg(f"Response {i+1}: Status {status_code}")
+            checks_passed = False
+
+    results.add("SSDP M-SEARCH NetworkInfrastructure", checks_passed,
+                f"{len(responses)} responses")
+    return checks_passed
+
+
+def test_ssdp_desc_xml(server_ip, port):
+    """Test fetching the UPnP device description XML via HTTP."""
+    section_header("TEST: GET /desc.xml (UPnP Device Description)")
+
+    request = build_http_request("GET", "/desc.xml")
+
+    for attempt in range(RETRY_COUNT + 1):
+        if attempt > 0:
+            info_msg(f"Retry {attempt}/{RETRY_COUNT}...")
+            time.sleep(DELAY_BETWEEN_REQUESTS)
+
+        response, timing = send_raw_http_request(server_ip, port, request, "GET /desc.xml")
+
+        if not response:
+            fail_msg("No response received")
+            results.add("GET /desc.xml", False, "No response")
+            continue
+
+        status_line, status_code, headers, body = parse_http_response(response)
+
+        checks_passed = True
+        if status_code == 200:
+            pass_msg(f"Status code: {status_code}")
+        else:
+            fail_msg(f"Status code: {status_code} (expected 200)")
+            checks_passed = False
+
+        if headers and "content-type" in headers:
+            ct = headers["content-type"]
+            if "xml" in ct:
+                pass_msg(f"Content-Type: {ct}")
+            else:
+                fail_msg(f"Content-Type: {ct} (expected text/xml or application/xml)")
+                checks_passed = False
+
+        if body:
+            body_text = body.decode("utf-8", errors="replace")
+
+            # Check for UPnP XML structure
+            if "<?xml" in body_text:
+                pass_msg("Body contains XML declaration")
+            else:
+                fail_msg("Body missing XML declaration")
+                checks_passed = False
+
+            if "NetworkInfrastructure" in body_text:
+                pass_msg("Body contains NetworkInfrastructure device type")
+            else:
+                fail_msg("Body missing NetworkInfrastructure device type")
+                checks_passed = False
+
+            if "deviceType" in body_text:
+                pass_msg("Body contains deviceType element")
+            else:
+                fail_msg("Body missing deviceType element")
+                checks_passed = False
+
+            if "UDN" in body_text and "uuid:" in body_text:
+                pass_msg("Body contains UDN with UUID")
+            else:
+                fail_msg("Body missing UDN with UUID")
+                checks_passed = False
+
+            if "friendlyName" in body_text:
+                pass_msg("Body contains friendlyName")
+            else:
+                fail_msg("Body missing friendlyName")
+                checks_passed = False
+
+            if "serviceList" in body_text:
+                pass_msg("Body contains serviceList")
+            else:
+                fail_msg("Body missing serviceList")
+                checks_passed = False
+
+            if "WANCommonInterfaceConfig" in body_text:
+                pass_msg("Body contains WANCommonInterfaceConfig service")
+            else:
+                info_msg("Body missing WANCommonInterfaceConfig service (optional)")
+
+            info_msg(f"Body: {len(body)} bytes")
+            if len(body) < 500:
+                sub_header("XML Preview")
+                for line in body_text.split("\n")[:20]:
+                    print(f"  {line}")
+        else:
+            fail_msg("Empty body")
+            checks_passed = False
+
+        results.add("GET /desc.xml", checks_passed, f"Status {status_code}, {len(body) if body else 0} bytes")
+        return checks_passed
+
+    return False
+
+
+# ─── WebDAV Tests ─────────────────────────────────────────────────────────────
+
+def test_webdav_propfind_root(server_ip, port):
+    """Test WebDAV PROPFIND on root path."""
+    section_header("TEST: WebDAV PROPFIND /")
+
+    extra_headers = {"Depth": "1"}
+    request = build_http_request("PROPFIND", "/", extra_headers=extra_headers)
+
+    for attempt in range(RETRY_COUNT + 1):
+        if attempt > 0:
+            info_msg(f"Retry {attempt}/{RETRY_COUNT}...")
+            time.sleep(DELAY_BETWEEN_REQUESTS)
+
+        response, timing = send_raw_http_request(server_ip, port, request, "PROPFIND /")
+
+        if not response:
+            fail_msg("No response received")
+            results.add("WebDAV PROPFIND /", False, "No response")
+            continue
+
+        status_line, status_code, headers, body = parse_http_response(response)
+
+        checks_passed = True
+        if status_code == 207:
+            pass_msg(f"Status code: {status_code} Multi-Status")
+        elif status_code == 200:
+            info_msg(f"Status code: {status_code} (acceptable for PROPFIND)")
+        else:
+            fail_msg(f"Status code: {status_code} (expected 207)")
+            checks_passed = False
+
+        if headers and "content-type" in headers:
+            ct = headers["content-type"]
+            if "xml" in ct:
+                pass_msg(f"Content-Type: {ct}")
+            else:
+                info_msg(f"Content-Type: {ct}")
+
+        if headers and "dav" in headers:
+            pass_msg(f"DAV header: {headers['dav']}")
+        else:
+            info_msg("Missing DAV header (optional)")
+
+        if body:
+            body_text = body.decode("utf-8", errors="replace")
+            if "multistatus" in body_text.lower() or "D:multistatus" in body_text:
+                pass_msg("Body contains multistatus XML")
+            else:
+                fail_msg("Body missing multistatus XML")
+                checks_passed = False
+
+            if "response" in body_text.lower():
+                pass_msg("Body contains response elements")
+            else:
+                info_msg("Body may not contain response elements")
+
+            info_msg(f"Body: {len(body)} bytes")
+            if len(body) < 500:
+                sub_header("XML Preview")
+                for line in body_text.split("\n")[:20]:
+                    print(f"  {line}")
+        else:
+            info_msg("Empty body (acceptable for PROPFIND on empty dir)")
+
+        results.add("WebDAV PROPFIND /", checks_passed, f"Status {status_code}")
+        return checks_passed
+
+    return False
+
+
+def test_webdav_options(server_ip, port):
+    """Test WebDAV OPTIONS request."""
+    section_header("TEST: WebDAV OPTIONS /")
+
+    request = build_http_request("OPTIONS", "/")
+
+    for attempt in range(RETRY_COUNT + 1):
+        if attempt > 0:
+            info_msg(f"Retry {attempt}/{RETRY_COUNT}...")
+            time.sleep(DELAY_BETWEEN_REQUESTS)
+
+        response, timing = send_raw_http_request(server_ip, port, request, "OPTIONS /")
+
+        if not response:
+            fail_msg("No response received")
+            results.add("WebDAV OPTIONS /", False, "No response")
+            continue
+
+        status_line, status_code, headers, body = parse_http_response(response)
+
+        checks_passed = True
+        if status_code == 200:
+            pass_msg(f"Status code: {status_code}")
+        else:
+            fail_msg(f"Status code: {status_code} (expected 200)")
+            checks_passed = False
+
+        if headers and "dav" in headers:
+            pass_msg(f"DAV header present: {headers['dav']}")
+            if "1" in headers["dav"] or "2" in headers["dav"]:
+                pass_msg("DAV header includes version 1 or 2")
+            else:
+                info_msg(f"DAV versions: {headers['dav']}")
+        else:
+            info_msg("Missing DAV header (optional)")
+
+        if headers and "allow" in headers:
+            pass_msg(f"ALLOW header: {headers['allow']}")
+            allow = headers["allow"].upper()
+            for method in ["PROPFIND", "OPTIONS"]:
+                if method in allow:
+                    pass_msg(f"ALLOW includes {method}")
+                else:
+                    info_msg(f"ALLOW does not include {method}")
+        else:
+            info_msg("Missing ALLOW header (optional)")
+
+        results.add("WebDAV OPTIONS /", checks_passed, f"Status {status_code}")
+        return checks_passed
+
+    return False
+
+
+def test_webdav_mkcol(server_ip, port):
+    """Test WebDAV MKCOL — create a new collection (directory)."""
+    section_header("TEST: WebDAV MKCOL /test_collection_" + str(int(time.time())) + "/")
+
+    collection_name = "/test_collection_" + str(int(time.time())) + "/"
+    request = build_http_request("MKCOL", collection_name)
+
+    for attempt in range(RETRY_COUNT + 1):
+        if attempt > 0:
+            info_msg(f"Retry {attempt}/{RETRY_COUNT}...")
+            time.sleep(DELAY_BETWEEN_REQUESTS)
+
+        response, timing = send_raw_http_request(server_ip, port, request, "MKCOL " + collection_name)
+
+        if not response:
+            fail_msg("No response received")
+            results.add("WebDAV MKCOL", False, "No response")
+            continue
+
+        status_line, status_code, headers, body = parse_http_response(response)
+
+        checks_passed = True
+        if status_code == 201:
+            pass_msg(f"Status code: {status_code} Created")
+        elif status_code == 405:
+            # MKCOL may not be supported on all paths
+            info_msg(f"Status code: {status_code} (MKCOL may not be supported)")
+        else:
+            fail_msg(f"Status code: {status_code} (expected 201)")
+            checks_passed = False
+
+        results.add("WebDAV MKCOL", checks_passed, f"Status {status_code}")
+        return checks_passed
+
+    return False
+
+
+def test_webdav_get_file(server_ip, port):
+    """Test WebDAV GET for file download."""
+    section_header("TEST: WebDAV GET / (File Download)")
+
+    # GET / should work as both HTTP and WebDAV
+    request = build_http_request("GET", "/")
+
+    for attempt in range(RETRY_COUNT + 1):
+        if attempt > 0:
+            info_msg(f"Retry {attempt}/{RETRY_COUNT}...")
+            time.sleep(DELAY_BETWEEN_REQUESTS)
+
+        response, timing = send_raw_http_request(server_ip, port, request, "GET /")
+
+        if not response:
+            fail_msg("No response received")
+            results.add("WebDAV GET /", False, "No response")
+            continue
+
+        status_line, status_code, headers, body = parse_http_response(response)
+
+        checks_passed = True
+        if status_code == 200:
+            pass_msg(f"Status code: {status_code}")
+        else:
+            fail_msg(f"Status code: {status_code} (expected 200)")
+            checks_passed = False
+
+        if body and len(body) > 0:
+            pass_msg(f"Received {len(body)} bytes of body")
+        else:
+            fail_msg("Empty body")
+            checks_passed = False
+
+        results.add("WebDAV GET /", checks_passed, f"Status {status_code}, {len(body) if body else 0} bytes")
+        return checks_passed
+
+    return False
+
+
+# ─── Raw Socket Diagnostic ───────────────────────────────────────────────────
+
 def test_raw_socket_diagnostic(server_ip, port):
     """Low-level diagnostic: show exact bytes sent and received."""
     section_header("DIAGNOSTIC: Raw Socket Byte-Level Analysis")
@@ -1052,7 +1590,7 @@ def main():
     port = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_PORT
 
     print("=" * 70)
-    print("  HPVMx HTTP Server Comprehensive Test Suite v2.0")
+    print("  HPVMx HTTP Server Comprehensive Test Suite v3.0")
     print("=" * 70)
     print(f"  Target: {server_ip}:{port}")
     print(f"  Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -1119,6 +1657,36 @@ def main():
     section_header("PHASE 5: Low-Level Diagnostic")
 
     test_raw_socket_diagnostic(server_ip, port)
+
+    # ─── Phase 6: SSDP/UPnP Discovery ─────────────────────────────────────
+    section_header("PHASE 6: SSDP/UPnP Discovery")
+
+    test_ssdp_msearch_all(server_ip)
+    time.sleep(DELAY_BETWEEN_REQUESTS)
+
+    test_ssdp_msearch_rootdevice(server_ip)
+    time.sleep(DELAY_BETWEEN_REQUESTS)
+
+    test_ssdp_msearch_network_infra(server_ip)
+    time.sleep(DELAY_BETWEEN_REQUESTS)
+
+    test_ssdp_desc_xml(server_ip, port)
+    time.sleep(DELAY_BETWEEN_REQUESTS)
+
+    # ─── Phase 7: WebDAV ──────────────────────────────────────────────────
+    section_header("PHASE 7: WebDAV")
+
+    test_webdav_propfind_root(server_ip, port)
+    time.sleep(DELAY_BETWEEN_REQUESTS)
+
+    test_webdav_options(server_ip, port)
+    time.sleep(DELAY_BETWEEN_REQUESTS)
+
+    test_webdav_mkcol(server_ip, port)
+    time.sleep(DELAY_BETWEEN_REQUESTS)
+
+    test_webdav_get_file(server_ip, port)
+    time.sleep(DELAY_BETWEEN_REQUESTS)
 
     # ─── Summary ──────────────────────────────────────────────────────────
     print_summary()

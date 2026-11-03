@@ -117,6 +117,163 @@ pub struct TerminalFrame {
     #[prost(bytes = "vec", tag = "4")]
     pub data: ::prost::alloc::vec::Vec<u8>,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CpuStats {
+    #[prost(uint32, tag = "1")]
+    pub cores: u32,
+    #[prost(uint32, tag = "2")]
+    pub usage_percent: u32,
+    #[prost(uint32, tag = "3")]
+    pub threads: u32,
+    #[prost(string, tag = "4")]
+    pub brand: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "5")]
+    pub clock_mhz: u32,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct MemoryStats {
+    #[prost(uint64, tag = "1")]
+    pub total_mb: u64,
+    #[prost(uint64, tag = "2")]
+    pub used_mb: u64,
+    #[prost(uint32, tag = "3")]
+    pub usage_percent: u32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NetworkStats {
+    #[prost(string, tag = "1")]
+    pub ip: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub mac: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub gateway: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub subnet_mask: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "5")]
+    pub rx_kbps: u64,
+    #[prost(uint64, tag = "6")]
+    pub tx_kbps: u64,
+    #[prost(uint64, tag = "7")]
+    pub rx_packets: u64,
+    #[prost(uint64, tag = "8")]
+    pub tx_packets: u64,
+    #[prost(uint64, tag = "9")]
+    pub rx_bytes: u64,
+    #[prost(uint64, tag = "10")]
+    pub tx_bytes: u64,
+    #[prost(uint32, tag = "11")]
+    pub usage_percent: u32,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DiskStats {
+    #[prost(uint64, tag = "1")]
+    pub read_kbps: u64,
+    #[prost(uint64, tag = "2")]
+    pub write_kbps: u64,
+    #[prost(uint64, tag = "3")]
+    pub read_bytes: u64,
+    #[prost(uint64, tag = "4")]
+    pub write_bytes: u64,
+    #[prost(uint64, tag = "5")]
+    pub read_ops: u64,
+    #[prost(uint64, tag = "6")]
+    pub write_ops: u64,
+    #[prost(uint32, tag = "7")]
+    pub usage_percent: u32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VirtualizationStats {
+    #[prost(uint32, tag = "1")]
+    pub vms_running: u32,
+    #[prost(uint32, tag = "2")]
+    pub vms_total: u32,
+    #[prost(string, tag = "3")]
+    pub hypervisor: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GpuStats {
+    #[prost(string, tag = "1")]
+    pub device_name: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "2")]
+    pub usage_percent: u32,
+    #[prost(uint32, tag = "3")]
+    pub fps: u32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NodeStats {
+    #[prost(string, tag = "1")]
+    pub node_id: ::prost::alloc::string::String,
+    #[prost(bool, tag = "2")]
+    pub online: bool,
+    #[prost(uint64, tag = "3")]
+    pub last_heartbeat_ms: u64,
+    #[prost(message, optional, tag = "4")]
+    pub cpu: ::core::option::Option<CpuStats>,
+    #[prost(message, optional, tag = "5")]
+    pub memory: ::core::option::Option<MemoryStats>,
+    #[prost(message, optional, tag = "6")]
+    pub network: ::core::option::Option<NetworkStats>,
+    #[prost(message, optional, tag = "7")]
+    pub disk: ::core::option::Option<DiskStats>,
+    #[prost(message, optional, tag = "8")]
+    pub virtualization: ::core::option::Option<VirtualizationStats>,
+    #[prost(uint32, tag = "9")]
+    pub deployed_instances: u32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ServerStatsRequest {
+    #[prost(string, tag = "1")]
+    pub request_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ServerStatsResponse {
+    #[prost(string, tag = "1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag = "2")]
+    pub success: bool,
+    #[prost(string, tag = "3")]
+    pub error: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub hostname: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub version: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub time: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "7")]
+    pub uptime_seconds: u64,
+    #[prost(message, optional, tag = "8")]
+    pub cpu: ::core::option::Option<CpuStats>,
+    #[prost(message, optional, tag = "9")]
+    pub memory: ::core::option::Option<MemoryStats>,
+    #[prost(message, optional, tag = "10")]
+    pub network: ::core::option::Option<NetworkStats>,
+    #[prost(message, optional, tag = "11")]
+    pub disk: ::core::option::Option<DiskStats>,
+    #[prost(message, optional, tag = "12")]
+    pub virtualization: ::core::option::Option<VirtualizationStats>,
+    #[prost(message, repeated, tag = "13")]
+    pub nodes: ::prost::alloc::vec::Vec<NodeStats>,
+    #[prost(message, optional, tag = "14")]
+    pub gpu: ::core::option::Option<GpuStats>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NodeStatsRequest {
+    #[prost(string, tag = "1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub node_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NodeStatsResponse {
+    #[prost(string, tag = "1")]
+    pub request_id: ::prost::alloc::string::String,
+    #[prost(bool, tag = "2")]
+    pub success: bool,
+    #[prost(string, tag = "3")]
+    pub error: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "4")]
+    pub stats: ::core::option::Option<NodeStats>,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum Environment {
@@ -160,6 +317,9 @@ pub enum VmAction {
     Delete = 5,
     Terminal = 6,
     LoadIso = 7,
+    GetStats = 8,
+    GetNodeStats = 9,
+    GetServerStats = 10,
 }
 impl VmAction {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -176,6 +336,9 @@ impl VmAction {
             Self::Delete => "VM_ACTION_DELETE",
             Self::Terminal => "VM_ACTION_TERMINAL",
             Self::LoadIso => "VM_ACTION_LOAD_ISO",
+            Self::GetStats => "VM_ACTION_GET_STATS",
+            Self::GetNodeStats => "VM_ACTION_GET_NODE_STATS",
+            Self::GetServerStats => "VM_ACTION_GET_SERVER_STATS",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -189,6 +352,9 @@ impl VmAction {
             "VM_ACTION_DELETE" => Some(Self::Delete),
             "VM_ACTION_TERMINAL" => Some(Self::Terminal),
             "VM_ACTION_LOAD_ISO" => Some(Self::LoadIso),
+            "VM_ACTION_GET_STATS" => Some(Self::GetStats),
+            "VM_ACTION_GET_NODE_STATS" => Some(Self::GetNodeStats),
+            "VM_ACTION_GET_SERVER_STATS" => Some(Self::GetServerStats),
             _ => None,
         }
     }

@@ -140,10 +140,169 @@ impl Cursor {
         self.prev_right_button = self.right_button;
         self.poll_count = self.poll_count.wrapping_add(1);
 
-        // let abs_res = self.try_update_absolute(screen_width, screen_height);
-        let rel_res = self.try_update_relative(screen_width, screen_height);
+        // If FORCE_PS2_MOUSE is enabled, skip UEFI protocols and use PS/2 directly
+        #[cfg(feature = "ps2_mouse")]
+        if crate::consts::FORCE_PS2_MOUSE {
+            return self.try_update_ps2_mouse(screen_width, screen_height);
+        }
 
-        /*abs_res ||*/ rel_res
+        // If FORCE_USB_TABLET_MOUSE is enabled, skip other UEFI protocols and use USB Tablet directly
+        if crate::consts::FORCE_USB_TABLET_MOUSE {
+            return self.try_update_usb_tablet(screen_width, screen_height);
+        }
+
+        // Try absolute pointer first (virtualized: VBox/QEMU absolute mode)
+        let abs_res = self.try_update_absolute(screen_width, screen_height);
+
+        // Try USB Tablet next (QEMU usb-tablet, VBox absolute SimplePointer)
+        let usb_tablet_res = if !abs_res {
+            self.try_update_usb_tablet(screen_width, screen_height)
+        } else {
+            false
+        };
+
+        // Fall back to relative pointer (physical hardware + VBox/QEMU relative mode)
+        let rel_res = if !abs_res && !usb_tablet_res {
+            self.try_update_relative(screen_width, screen_height)
+        } else {
+            false
+        };
+
+        // Fall back to PS/2 mouse if UEFI protocols didn't provide input
+        #[cfg(feature = "ps2_mouse")]
+        let ps2_res = if !abs_res && !usb_tablet_res && !rel_res {
+            self.try_update_ps2_mouse(screen_width, screen_height)
+        } else {
+            false
+        };
+
+        #[cfg(not(feature = "ps2_mouse"))]
+        let ps2_res = false;
+
+        abs_res || usb_tablet_res || rel_res || ps2_res
+    }
+
+    /// Read PS/2 mouse packets directly from hardware ports and apply movement to cursor.
+    /// Used as a fallback when UEFI mouse protocols (AbsolutePointer/SimplePointer) are unavailable.
+    #[cfg(feature = "ps2_mouse")]
+    unsafe fn try_update_ps2_mouse(&mut self, screen_width: usize, screen_height: usize) -> bool {
+        use crate::devices::ps2;
+        
+        let mut any_updated = false;
+        
+        // Read all available PS/2 mouse packets
+        while let Some((button_state, x, y)) = ps2::mouse_read_packet() {
+            // PS/2 mouse protocol: Y axis is inverted compared to screen coordinates
+            // PS/2: Y positive = Up, Screen: Y positive = Down
+            // So we negate Y to match screen coordinates
+            let dx = x as i32;
+            let dy = -(y as i32);
+            
+            // Handle overflow flags — if overflow, apply max movement
+            let (dx, dy) = if button_state & ps2::PS2_MOUSE_X_OVERFLOW != 0 {
+                if dx > 0 { (127, dy) } else { (-127, dy) } 
+            } else if button_state & ps2::PS2_MOUSE_Y_OVERFLOW != 0 {
+                if dy > 0 { (dx, 127) } else { (dx, -127) }
+            } else {
+                (dx, dy)
+            };
+            
+            if dx != 0 || dy != 0 {
+                self.x = (self.x + dx).clamp(0, screen_width.saturating_sub(1) as i32);
+                self.y = (self.y + dy).clamp(0, screen_height.saturating_sub(1) as i32);
+                any_updated = true;
+            }
+            
+            // Update button states
+            let new_left = button_state & ps2::PS2_MOUSE_LEFT != 0;
+            let new_right = button_state & ps2::PS2_MOUSE_RIGHT != 0;
+            if new_left != self.left_button || new_right != self.right_button {
+                self.left_button = new_left;
+                self.right_button = new_right;
+                any_updated = true;
+            }
+        }
+        
+        any_updated
+    }
+
+    /// Read USB Tablet input via SimplePointer protocol with absolute coordinates.
+    /// USB Tablet (QEMU `-device usb-tablet`, VirtualBox) reports absolute coordinates
+    /// through SimplePointer where relative_movement contains absolute X/Y values scaled
+    /// to the resolution. Unlike try_update_relative which computes deltas, this method
+    /// directly sets the cursor position to the absolute coordinates.
+    unsafe fn try_update_usb_tablet(&mut self, screen_width: usize, screen_height: usize) -> bool {
+        let mut any_updated = false;
+
+        if let Ok(handles) = boot::locate_handle_buffer(boot::SearchType::ByProtocol(&SimplePointer::GUID)) {
+            for handle in handles.iter() {
+                if let Ok(mut mouse) = boot::open_protocol::<SimplePointer>(
+                    boot::OpenProtocolParams {
+                        handle: *handle,
+                        agent: boot::image_handle(),
+                        controller: None,
+                    },
+                    OpenProtocolAttributes::GetProtocol,
+                ) {
+                    // Check mode FIRST before reading state — if we read state on a non-tablet
+                    // handle, we consume the input data and the fallback try_update_relative
+                    // will see no data. Only read state when we confirm this is an absolute device.
+                    let mode = mouse.mode();
+                    let resolution_x = mode.resolution[0] as f32;
+                    let resolution_y = mode.resolution[1] as f32;
+
+                    // USB Tablet detection: resolution matches screen dimensions or is 65536
+                    // This indicates absolute coordinates in relative_movement fields
+                    let is_usb_tablet = (resolution_x == 65536.0 && resolution_y == 65536.0)
+                        || (resolution_x == screen_width as f32 && resolution_y == screen_height as f32)
+                        || (resolution_x == (screen_width - 1) as f32 && resolution_y == (screen_height - 1) as f32)
+                        || (resolution_x > 100.0 && resolution_y > 100.0
+                            && resolution_x <= screen_width as f32 * 1.1
+                            && resolution_y <= screen_height as f32 * 1.1);
+
+                    if is_usb_tablet {
+                        // Only read state if this is confirmed as an absolute device
+                        if let Ok(Some(state)) = mouse.read_state() {
+                            let raw_x = state.relative_movement[0] as f32;
+                            let raw_y = state.relative_movement[1] as f32;
+
+                            // Directly set absolute cursor position — no delta computation needed
+                            let target_x = if resolution_x > 0.0 {
+                                (raw_x / resolution_x) * (screen_width - 1) as f32
+                            } else {
+                                raw_x
+                            };
+
+                            let target_y = if resolution_y > 0.0 {
+                                (raw_y / resolution_y) * (screen_height - 1) as f32
+                            } else {
+                                raw_y
+                            };
+
+                            let new_x = (target_x as i32).clamp(0, screen_width.saturating_sub(1) as i32);
+                            let new_y = (target_y as i32).clamp(0, screen_height.saturating_sub(1) as i32);
+
+                            if new_x != self.x || new_y != self.y {
+                                self.x = new_x;
+                                self.y = new_y;
+                                any_updated = true;
+                            }
+
+                            // Update button states
+                            let new_left = state.button[0];
+                            let new_right = state.button[1];
+                            if new_left != self.left_button || new_right != self.right_button {
+                                self.left_button = new_left;
+                                self.right_button = new_right;
+                                any_updated = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        any_updated
     }
 
     unsafe fn try_update_absolute(&mut self, screen_width: usize, screen_height: usize) -> bool {
@@ -318,75 +477,86 @@ impl Cursor {
         // any_updated
 
         if let Some(mut mouse) = scan_mouse_handles() {
-            // Grab the input event token non-destructively
-            if let Ok(input_event) = mouse.wait_for_input_event() {
+            // Always try to read mouse state, regardless of event signal status.
+            // VirtualBox and QEMU may have mouse data available even when the event is not signaled.
+            // The check_event guard was preventing mouse input on VirtualBox with mouse input enabled.
+            if let Ok(Some(state)) = mouse.read_state() {
+                let mode = mouse.mode();
+                let resolution_x = mode.resolution[0] as f32;
+                let resolution_y = mode.resolution[1] as f32;
 
-                // CRITICAL: Check if a hardware event packet is actually waiting.
-                // This prevents rapid frame polling from emptying the state queue.
-                if boot::check_event(&input_event) == Ok(true) {
+                let raw_x = state.relative_movement[0] as f32;
+                let raw_y = state.relative_movement[1] as f32;
 
-                    if let Ok(Some(state)) = mouse.read_state() {
-                        let mode = mouse.mode();
-                        let resolution_x = mode.resolution[0] as f32;
-                        let resolution_y = mode.resolution[1] as f32;
+                // DYNAMIC RESOLUTION ENGINE
+                // VirtualBox/QEMU feed absolute metrics hidden inside the relative data array.
+                // Detection: resolution matches 65536, matches screen dimensions, or is within 10% of screen.
+                // The 10% tolerance covers VirtualBox USB mouse mode which may report slightly different resolution.
+                let is_absolute_mode = (resolution_x == 65536.0 && resolution_y == 65536.0)
+                    || (resolution_x == screen_width as f32 && resolution_y == screen_height as f32)
+                    || (resolution_x == (screen_width - 1) as f32 && resolution_y == (screen_height - 1) as f32)
+                    || (resolution_x > 100.0 && resolution_y > 100.0
+                        && resolution_x <= screen_width as f32 * 1.1
+                        && resolution_y <= screen_height as f32 * 1.1);
 
-                        let raw_x = state.relative_movement[0] as f32;
-                        let raw_y = state.relative_movement[1] as f32;
+                let (delta_x, delta_y) = if is_absolute_mode {
+                    // VirtualBox SimplePointer: relative_movement contains absolute screen coordinates
+                    // scaled to the resolution. Normalize to screen coordinates.
+                    let target_abs_x = if resolution_x > 0.0 {
+                        (raw_x / resolution_x) * screen_width as f32
+                    } else {
+                        raw_x
+                    };
+                    let target_abs_y = if resolution_y > 0.0 {
+                        (raw_y / resolution_y) * screen_height as f32
+                    } else {
+                        raw_y
+                    };
 
-                        // DYNAMIC RESOLUTION ENGINE
-                        // If dimensions match 65536, VirtualBox/QEMU are feeding absolute metrics
-                        // hidden inside the relative data array.
-                        let (delta_x, delta_y) = if resolution_x == 65536.0 && resolution_y == 65536.0 {
-                            // Compute scaled absolute positions on your real screen layout matrix
-                            let target_abs_x = ((raw_x / resolution_x) * screen_width as f32);
-                            let target_abs_y = ((raw_y / resolution_y) * screen_height as f32);
+                    // If this is the very first frame initialization, establish a baseline
+                    let prev_x = self.last_raw_abs_x.unwrap_or(target_abs_x);
+                    let prev_y = self.last_raw_abs_y.unwrap_or(target_abs_y);
 
-                            // If this is the very first frame initialization, establish a baseline
-                            let prev_x = self.last_raw_abs_x.unwrap_or(target_abs_x);
-                            let prev_y = self.last_raw_abs_y.unwrap_or(target_abs_y);
+                    // Extract relative movement vector out of the raw stream
+                    let dx = target_abs_x - prev_x;
+                    let dy = target_abs_y - prev_y;
 
-                            // Extract relative movement vector yourself out of the raw stream
-                            let dx = target_abs_x - prev_x;
-                            let dy = target_abs_y - prev_y;
+                    // Save current values for next frame comparison
+                    self.last_raw_abs_x = Some(target_abs_x);
+                    self.last_raw_abs_y = Some(target_abs_y);
 
-                            // Save current values for next frame frame comparison
-                            self.last_raw_abs_x = Some(target_abs_x);
-                            self.last_raw_abs_y = Some(target_abs_y);
+                    (dx as i32, dy as i32)
+                } else {
+                    // Standard true hardware relative mouse behavior (QEMU natively with mouse device)
+                    // Clear the tracking buffers so a device swap wouldn't lock up
+                    self.last_raw_abs_x = None;
+                    self.last_raw_abs_y = None;
 
-                            (dx as i32, dy as i32)
-                        } else {
-                            // Standard true hardware relative mouse behavior (QEMU natively with mouse device)
-                            // Clear the tracking buffers so a device swap wouldn't lock up
-                            self.last_raw_abs_x = None;
-                            self.last_raw_abs_y = None;
+                    (raw_x as i32, raw_y as i32)
+                };
 
-                            (raw_x as i32, raw_y as i32)
-                        };
+                // APPLY MOVEMENT DELTAS Safely
+                if delta_x != 0 || delta_y != 0 {
+                    let new_x = self.x + delta_x;
+                    let new_y = self.y + delta_y;
 
-                        // APPLY MOVEMENT DELTAS Safely
-                        if delta_x != 0 || delta_y != 0 {
-                            let new_x = self.x + delta_x;
-                            let new_y = self.y + delta_y;
+                    let clamped_x = new_x.clamp(0, screen_width.saturating_sub(1) as i32);
+                    let clamped_y = new_y.clamp(0, screen_height.saturating_sub(1) as i32);
 
-                            let clamped_x = new_x.clamp(0, screen_width.saturating_sub(1) as i32);
-                            let clamped_y = new_y.clamp(0, screen_height.saturating_sub(1) as i32);
-
-                            if self.x != clamped_x || self.y != clamped_y {
-                                self.x = clamped_x;
-                                self.y = clamped_y;
-                                any_updated = true;
-                                //vdebug_autoprefix!("mouse moved: x={}, y={}", self.x, self.y);
-                            }
-                        }
-
-                        // PROCESS BUTTON STATES
-                        if state.button[0] != self.left_button || state.button[1] != self.right_button {
-                            self.left_button = state.button[0];
-                            self.right_button = state.button[1];
-                            any_updated = true;
-                            //vdebug_autoprefix!("mouse buttons: left={}, right={}", self.left_button, self.right_button);
-                        }
+                    if self.x != clamped_x || self.y != clamped_y {
+                        self.x = clamped_x;
+                        self.y = clamped_y;
+                        any_updated = true;
+                        //vdebug_autoprefix!("mouse moved: x={}, y={}", self.x, self.y);
                     }
+                }
+
+                // PROCESS BUTTON STATES
+                if state.button[0] != self.left_button || state.button[1] != self.right_button {
+                    self.left_button = state.button[0];
+                    self.right_button = state.button[1];
+                    any_updated = true;
+                    //vdebug_autoprefix!("mouse buttons: left={}, right={}", self.left_button, self.right_button);
                 }
             }
         }
@@ -509,25 +679,19 @@ unsafe fn scan_mouse_handles() -> Option<ScopedProtocol<SimplePointer>> {
         // vdebug!("usbhid", "Found {} SimplePointer handles", handles.len());
 
         for (i, handle) in handles.iter().enumerate() {
-            if let Ok(mut mouse) = boot::open_protocol::<SimplePointer>(
+            if let Ok(mouse) = boot::open_protocol::<SimplePointer>(
                 boot::OpenProtocolParams {
                     handle: *handle,
                     agent: boot::image_handle(),
                     controller: None,
                 },
-                OpenProtocolAttributes::Exclusive,
+                OpenProtocolAttributes::GetProtocol,
             ) {
-                if mouse.reset(false).is_ok() {
-                    let mode = mouse.mode();
-                    //vdebug!("usbhid", "Handle [{}]: Res X={}, Y={}, Z={}",
-                    //    i, mode.resolution[0], mode.resolution[1], mode.resolution[2]);
-
-                    // DO NOT skip purely on 65536, as EDK2 applies this to genuine USB mice.
-                    // Instead, look for scroll wheel attributes (ResolutionZ > 0)
-                    // or accept the handle if it's the only one active.
-                    //vdebug!("usbhid", "Handle [{}]: Successfully bound to pointer interface.", i);
-                    return Some(mouse);
-                }
+                // Do NOT call reset() here — it's called every frame and can clear
+                // the keyboard input buffer when SimplePointer shares a UEFI handle
+                // with SimpleTextInput (common in VirtualBox/QEMU).
+                //vdebug!("usbhid", "Handle [{}]: Successfully bound to pointer interface.", i);
+                return Some(mouse);
             }
         }
     }

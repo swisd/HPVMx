@@ -121,6 +121,9 @@ struct UdpHeader {
 // --- Module State ---
 
 static HTTPD: AtomicBool = AtomicBool::new(false);
+static WEBDAV: AtomicBool = AtomicBool::new(false);
+/// Whether the RPC (MSMI) server is enabled.
+static RPCD: AtomicBool = AtomicBool::new(false);
 
 /// Registry index for the network stack tracked lock (only used when `net-multicore` is enabled).
 #[cfg(feature = "net-multicore")]
@@ -223,6 +226,10 @@ pub struct NetState {
     http_isn_counter: u32,
     /// Port the HTTP server is listening on (0 = disabled)
     httpd_port: u16,
+    /// Port the WebDAV server is listening on (0 = disabled)
+    webdav_port: u16,
+    /// Port the RPC (MSMI) server is listening on (0 = disabled)
+    rpcd_port: u16,
     /// Monotonically increasing poll tick counter — used for duplicate packet timeout
     httpd_poll_tick: u64,
     /// Whether to use static IP configuration instead of DHCP
@@ -317,6 +324,8 @@ pub fn init(ip: [u8; 4], gw: [u8; 4], mask: [u8; 4]) {
         http_conns: core::array::from_fn(|_| HttpConn::default()),
         http_isn_counter: 1000,
         httpd_port: 0,
+        webdav_port: 0,
+        rpcd_port: 0,
         httpd_poll_tick: 0,
         use_static_ip: false,
         static_ip: [0; 4],
@@ -778,7 +787,7 @@ fn handle_ipv4(packet: &[u8], src_mac: [u8; 6]) {
                 let src_port = u16::from_be(udp.src_port);
                 let udp_len = u16::from_be(udp.len);
                 crate::vdebug!("UDP", "RX: {} -> {} (len={})", src_port, dst_port, udp_len);
-                handle_udp(ip.src, dst_port, &payload[size_of::<UdpHeader>()..]);
+                handle_udp(ip.src, src_port, dst_port, &payload[size_of::<UdpHeader>()..]);
             }
         }
         IP_PROTO_TCP  => {
@@ -918,17 +927,27 @@ fn handle_tcp(src_ip: [u8; 4], src_mac: [u8; 6], packet: &[u8]) {
         if (flags & TCP_FLAG_FIN as u16) != 0 { 1 } else { 0 },
         if (flags & TCP_FLAG_RST as u16) != 0 { 1 } else { 0 });
 
-    // Route to HTTP server if listening, otherwise handle client connections
+    // Route to HTTP, WebDAV, or RPC server if listening, otherwise handle client connections
     let state_mut = unsafe { NET_STATE.assume_init_mut().as_mut().unwrap() };
     let httpd_port = state_mut.httpd_port;
+    let webdav_port = state_mut.webdav_port;
+    let rpcd_port = state_mut.rpcd_port;
     
-    crate::vdebug!("TCP", "handle_tcp: httpd_port={} HTTPD_running={}", 
-        httpd_port, HTTPD.load(Ordering::SeqCst));
+    crate::vdebug!("TCP", "handle_tcp: httpd_port={} webdav_port={} rpcd_port={} HTTPD_running={}", 
+        httpd_port, webdav_port, rpcd_port, HTTPD.load(Ordering::SeqCst));
     
     if httpd_port != 0 && dst_port == httpd_port && HTTPD.load(Ordering::SeqCst) {
         crate::vdebug!("HTTPD", "TCP pkt from {}.{}.{}.{}:{}, flags=0x{:x} dst_port={}", 
             src_ip[0], src_ip[1], src_ip[2], src_ip[3], src_port, flags, dst_port);
         handle_httpd(src_ip, src_mac, tcp, flags, packet, httpd_port);
+    } else if webdav_port != 0 && dst_port == webdav_port && WEBDAV.load(Ordering::SeqCst) {
+        crate::vdebug!("HTTPD", "WebDAV TCP pkt from {}.{}.{}.{}:{}, flags=0x{:x} dst_port={}", 
+            src_ip[0], src_ip[1], src_ip[2], src_ip[3], src_port, flags, dst_port);
+        handle_httpd(src_ip, src_mac, tcp, flags, packet, webdav_port);
+    } else if rpcd_port != 0 && dst_port == rpcd_port && RPCD.load(Ordering::SeqCst) {
+        crate::vdebug!("RPCD", "RPC TCP pkt from {}.{}.{}.{}:{}, flags=0x{:x} dst_port={}", 
+            src_ip[0], src_ip[1], src_ip[2], src_ip[3], src_port, flags, dst_port);
+        handle_rpcd(src_ip, src_mac, tcp, flags, packet, rpcd_port);
     } else if dst_port >= 49152 {
         // Potential client response
         crate::vdebug!("TCP", "Client packet: flags=0x{:x} seq={} ack={} payload={}", flags, seq, ack, packet.len() - (((u16::from_be(tcp.off_flags) >> 12) * 4) as usize));
@@ -990,6 +1009,50 @@ fn find_http_conn(state: &mut NetState, client_ip: [u8; 4], client_port: u16, is
             return Some(i);
         }
     }
+
+    // Fourth: all slots are full — evict the oldest stale connection to make room.
+    // Find the connection that has been idle the longest (smallest last_rx_tick among active connections).
+    // Skip connections that recently received packets (within the last 10000 ticks, ~10 seconds).
+    const EVICTION_TIMEOUT: u64 = 10000;
+    let mut oldest_idx: Option<usize> = None;
+    let mut oldest_tick: u64 = u64::MAX;
+    for (i, conn) in state.http_conns.iter().enumerate() {
+        if conn.tcp_state == HttpTcpState::None || conn.tcp_state == HttpTcpState::Closed {
+            continue;
+        }
+        let age = state.httpd_poll_tick.wrapping_sub(conn.last_rx_tick);
+        if age >= EVICTION_TIMEOUT && conn.last_rx_tick < oldest_tick {
+            oldest_idx = Some(i);
+            oldest_tick = conn.last_rx_tick;
+        }
+    }
+    if let Some(evict_idx) = oldest_idx {
+        let evicted_conn = &state.http_conns[evict_idx];
+        crate::vdebug!("HTTPD", "Evicting stale connection {}: {}.{}.{}.{}:{:?} (state={:?}, idle={} ticks)",
+            evict_idx, evicted_conn.client_ip[0], evicted_conn.client_ip[1],
+            evicted_conn.client_ip[2], evicted_conn.client_ip[3],
+            evicted_conn.client_port, evicted_conn.tcp_state,
+            state.httpd_poll_tick.wrapping_sub(evicted_conn.last_rx_tick));
+        // Reset the evicted slot for the new connection
+        let conn = &mut state.http_conns[evict_idx];
+        if is_syn {
+            conn.tcp_state = HttpTcpState::None;
+        } else {
+            conn.tcp_state = HttpTcpState::Established;
+        }
+        conn.client_ip = client_ip;
+        conn.client_port = client_port;
+        conn.our_seq = if is_syn { 0 } else { 1 };
+        conn.their_seq = 0;
+        conn.request_buf.clear();
+        conn.request_complete = false;
+        conn.last_rx_seq = 0;
+        conn.last_rx_payload_len = 0;
+        conn.last_rx_tick = 0;
+        conn.last_send_tick = 0;
+        return Some(evict_idx);
+    }
+
     None
 }
 
@@ -1000,7 +1063,8 @@ fn find_http_conn(state: &mut NetState, client_ip: [u8; 4], client_port: u16, is
 fn parse_http_request(data: &[u8]) -> Option<(&str, &str, Vec<u8>)> {
     // Known HTTP methods — scan for the first occurrence to find the request start.
     // This handles cases where leading bytes were lost (e.g., first TCP segment dropped by echo detection).
-    const METHODS: &[&[u8]] = &[b"GET ", b"POST ", b"PATCH ", b"PUT ", b"DELETE ", b"HEAD ", b"OPTIONS "];
+    // WebDAV methods (PROPFIND, MKCOL) are included when Windows Discovery is enabled.
+    const METHODS: &[&[u8]] = &[b"GET ", b"POST ", b"PATCH ", b"PUT ", b"DELETE ", b"HEAD ", b"OPTIONS ", b"PROPFIND ", b"MKCOL "];
 
     let mut method_found: Option<&[u8]> = None;
     let mut method_start = 0usize;
@@ -1068,7 +1132,7 @@ fn parse_http_request(data: &[u8]) -> Option<(&str, &str, Vec<u8>)> {
     let method = if method_name.is_empty() { parts[0] } else { method_name };
     let path = parts[1];
     match method {
-        "GET" | "POST" | "PATCH" | "PUT" | "DELETE" | "HEAD" | "OPTIONS" => {},
+        "GET" | "POST" | "PATCH" | "PUT" | "DELETE" | "HEAD" | "OPTIONS" | "PROPFIND" | "MKCOL" => {},
         _ => {
             crate::vdebug!("HTTPD", "Parse: unknown method '{}'", method);
             return None;
@@ -1078,16 +1142,254 @@ fn parse_http_request(data: &[u8]) -> Option<(&str, &str, Vec<u8>)> {
     Some((method, path, body))
 }
 
+/// Convert a WebDAV URL path to a filesystem path.
+/// WebDAV paths are URL-style (/dir/file), filesystem paths use drive notation.
+fn webdav_fs_path(url_path: &str) -> String {
+    if url_path == "/" || url_path.is_empty() {
+        return String::from("/");
+    }
+    // Strip leading slash and convert to filesystem path
+    let path = url_path.trim_start_matches('/');
+    // Replace URL-encoded characters
+    let mut fs_path = String::from("/");
+    let mut chars = path.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            // URL decoding
+            let hex: String = chars.by_ref().take(2).collect();
+            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                fs_path.push(byte as char);
+            }
+        } else if c == '%' {
+            fs_path.push(c);
+        } else {
+            fs_path.push(c);
+        }
+    }
+    fs_path
+}
+
+/// Format a WebDAV href (must end with / for collections)
+fn webdav_href(path: &str) -> String {
+    let mut href = if path.is_empty() { String::from("/") } else { path.to_string() };
+    if !href.starts_with('/') {
+        href = alloc::format!("/{}", href);
+    }
+    href
+}
+
 /// Build an HTTP response for the given request
 ///
 static HEADER_VAL_11: &str = "HHTTP/1.1";
 
 fn build_http_response(method: &str, path: &str, body: &[u8]) -> Vec<u8> {
-    let (status_line, content_type, response_body): (&str, &str, Vec<u8>) = if path == "/" || path == "/index.html" {
-        // Build dynamic overview page mirroring the OS dashboard overview tab
+    // WebDAV methods must be checked BEFORE path-based routing, so PROPFIND / doesn't
+    // incorrectly match the HTML overview page (path == "/")
+    let (status_line, content_type, response_body): (&str, &str, Vec<u8>) = if method == "PROPFIND" {
+        // WebDAV PROPFIND — return directory listing as XML (D:multistatus)
+        let fs_path = webdav_fs_path(path);
+        let mut xml = alloc::format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<D:multistatus xmlns:D=\"DAV:\">\n"
+        );
+        // Add self entry
+        let is_dir = fs_path == "/" || fs_path == "";
+        xml.push_str(&alloc::format!(
+            "<D:response>\n<D:href>{}</D:href>\n<D:propstat>\n<D:status>HTTP/1.1 200 OK</D:status>\n<D:prop>\n",
+            webdav_href(path)
+        ));
+        if is_dir {
+            xml.push_str("<D:resourcetype><D:collection/></D:resourcetype>\n");
+        }
+        xml.push_str("</D:prop>\n</D:propstat>\n</D:response>\n");
+        // List children
+        if is_dir {
+            if let Ok(entries) = crate::filesystem::FileSystem::read_dir(&fs_path) {
+                for (name, is_directory) in entries {
+                    let escaped_name = name.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+                    let child_href = if fs_path == "/" {
+                        alloc::format!("/{}", escaped_name)
+                    } else {
+                        alloc::format!("{}/{}", path, escaped_name)
+                    };
+                    xml.push_str(&alloc::format!(
+                        "<D:response>\n<D:href>{}</D:href>\n<D:propstat>\n<D:status>HTTP/1.1 200 OK</D:status>\n<D:prop>\n",
+                        child_href
+                    ));
+                    if is_directory {
+                        xml.push_str("<D:resourcetype><D:collection/></D:resourcetype>\n");
+                    } else {
+                        xml.push_str("<D:resourcetype/>\n");
+                    }
+                    xml.push_str("</D:prop>\n</D:propstat>\n</D:response>\n");
+                }
+            }
+        }
+        xml.push_str("</D:multistatus>");
+        (&*(HEADER_VAL_11.to_string() + &*" 207 Multi-Status\r\n".to_string()), "text/xml", xml.into_bytes())
+    } else if method == "OPTIONS" {
+        // WebDAV OPTIONS — advertise supported methods
+        (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "text/plain", Vec::new())
+    } else if method == "MKCOL" {
+        // WebDAV MKCOL — create collection (directory)
+        let fs_path = webdav_fs_path(path);
+        match crate::filesystem::FileSystem::mkdir(&fs_path) {
+            Ok(()) => (&*(HEADER_VAL_11.to_string() + &*" 201 Created\r\n".to_string()), "text/plain", b"Created".to_vec()),
+            Err(_) => {
+                let html = "<!DOCTYPE html>\n<html><body><h1>500 Internal Server Error</h1><p>Failed to create collection.</p></body></html>";
+                (&*(HEADER_VAL_11.to_string() + &*" 500 Internal Server Error\r\n".to_string()), "text/html", html.as_bytes().to_vec())
+            }
+        }
+    } else if (method == "GET" || method == "HEAD") && (path == "/" || path == "/index.html") {
+        // Build overview page that polls /usage endpoint via JavaScript for live stats
         let hostname = crate::SYSTEMNAME;
-        let cpu_cores = crate::hardware::cpu::core_count().max(1);
-        let total_mem_mb = crate::get_total_physical_memory_mb();
+        let version = unsafe {
+            if let Some(ver) = crate::VERSION_DATA.as_ref() {
+                ver.format_to_string()
+            } else {
+                String::from("unknown")
+            }
+        };
+
+        let html = format!(
+            "<!DOCTYPE html>\n\
+            <html><head><meta charset='utf-8'>\n\
+            <title>{} - HPVMx Overview</title>\n\
+            <style>\n\
+            body {{ background: #1a1a1a; color: #cccccc; font-family: 'Segoe UI', monospace; margin: 0; padding: 20px; }}\n\
+            h1 {{ color: #00ff00; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 5px; }}\n\
+            h2 {{ color: #00cc88; margin-top: 25px; font-size: 18px; }}\n\
+            .hostname {{ color: #0088cc; font-size: 14px; margin-bottom: 15px; }}\n\
+            .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 15px 0; }}\n\
+            .card {{ background: #2a2a2a; border: 1px solid #333; border-radius: 8px; padding: 15px; text-align: center; }}\n\
+            .card .value {{ color: #ffffff; font-size: 28px; font-weight: bold; }}\n\
+            .card .label {{ color: #888888; font-size: 11px; margin-top: 5px; text-transform: uppercase; letter-spacing: 1px; }}\n\
+            .stat-row {{ display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #2a2a2a; }}\n\
+            .stat-label {{ color: #888888; }}\n\
+            .stat-value {{ color: #ffffff; font-weight: bold; }}\n\
+            .section {{ background: #222222; border: 1px solid #333; border-radius: 8px; padding: 15px; margin: 15px 0; }}\n\
+            .ring-graph {{ display: flex; justify-content: space-around; flex-wrap: wrap; margin: 15px 0; }}\n\
+            .ring-item {{ text-align: center; margin: 10px; }}\n\
+            .ring-canvas {{ width: 70px; height: 70px; border-radius: 50%; position: relative; display: inline-block; }}\n\
+            .ring-center {{ position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 16px; font-weight: bold; color: #fff; }}\n\
+            .ring-label {{ margin-top: 5px; font-size: 12px; color: #aaaaaa; }}\n\
+            footer {{ margin-top: 30px; color: #666; font-size: 12px; border-top: 1px solid #333; padding-top: 10px; text-align: center; }}\n\
+            .live-dot {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #00ff00; margin-right: 5px; animation: pulse 1.5s infinite; }}\n\
+            @keyframes pulse {{ 0% {{ opacity: 1; }} 50% {{ opacity: 0.3; }} 100% {{ opacity: 1; }} }}\n\
+            </style></head>\n\
+            <body>\n\
+            <h1><span class='live-dot'></span>HPVMx System Overview</h1>\n\
+            <p class='hostname'>{}</p>\n\n\
+            <h2>Live Resource Usage</h2>\n\
+            <div class='ring-graph' id='ringGraph'>\n\
+              <div class='ring-item'><div class='ring-canvas' id='ringCPU'><div class='ring-center' id='ringCPUVal'>0%</div></div><div class='ring-label'>CPU</div></div>\n\
+              <div class='ring-item'><div class='ring-canvas' id='ringGPU'><div class='ring-center' id='ringGPUVal'>0%</div></div><div class='ring-label'>GPU</div></div>\n\
+              <div class='ring-item'><div class='ring-canvas' id='ringMEM'><div class='ring-center' id='ringMEMVal'>0%</div></div><div class='ring-label'>MEM</div></div>\n\
+              <div class='ring-item'><div class='ring-canvas' id='ringNET'><div class='ring-center' id='ringNETVal'>0%</div></div><div class='ring-label'>NET</div></div>\n\
+              <div class='ring-item'><div class='ring-canvas' id='ringDISK'><div class='ring-center' id='ringDISKVal'>0%</div></div><div class='ring-label'>DISK</div></div>\n\
+            </div>\n\n\
+            <h2>Key Metrics</h2>\n\
+            <div class='grid'>\n\
+              <div class='card'><div class='value' id='cpuCores'>0</div><div class='label'>CPU Cores</div></div>\n\
+              <div class='card'><div class='value' id='totalMem'>0 MB</div><div class='label'>Total Memory</div></div>\n\
+              <div class='card'><div class='value' id='uptime'>0</div><div class='label'>Uptime (s)</div></div>\n\
+              <div class='card'><div class='value' id='time'>N/A</div><div class='label'>Time</div></div>\n\
+            </div>\n\n\
+            <h2>I/O Performance</h2>\n\
+            <div class='section'>\n\
+              <div class='stat-row'><span class='stat-label'>Disk Read</span><span class='stat-value' id='diskReadKbps'>0 KB/s</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>Disk Write</span><span class='stat-value' id='diskWriteKbps'>0 KB/s</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>Disk Read Total</span><span class='stat-value' id='diskReadTotal'>0 MB</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>Disk Write Total</span><span class='stat-value' id='diskWriteTotal'>0 MB</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>Disk Read Ops</span><span class='stat-value' id='diskReadOps'>0</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>Disk Write Ops</span><span class='stat-value' id='diskWriteOps'>0</span></div>\n\
+            </div>\n\n\
+            <h2>Network Statistics</h2>\n\
+            <div class='section'>\n\
+              <div class='stat-row'><span class='stat-label'>IP Address</span><span class='stat-value' id='netIP'>-</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>MAC Address</span><span class='stat-value' id='netMAC'>-</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>Gateway</span><span class='stat-value' id='netGW'>-</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>Subnet Mask</span><span class='stat-value' id='netMask'>-</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>Network RX</span><span class='stat-value' id='netRxKbps'>0 KB/s</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>Network TX</span><span class='stat-value' id='netTxKbps'>0 KB/s</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>RX Packets</span><span class='stat-value' id='netRxPkts'>0</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>TX Packets</span><span class='stat-value' id='netTxPkts'>0</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>RX Total</span><span class='stat-value' id='netRxTotal'>0 MB</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>TX Total</span><span class='stat-value' id='netTxTotal'>0 MB</span></div>\n\
+            </div>\n\n\
+            <h2>Virtualization</h2>\n\
+            <div class='grid'>\n\
+              <div class='card'><div class='value' id='vmsRunning'>0</div><div class='label'>VMs Running</div></div>\n\
+              <div class='card'><div class='value' id='vmsTotal'>0</div><div class='label'>Total VMs</div></div>\n\
+              <div class='card'><div class='value' id='hypervisor'>-</div><div class='label'>Hypervisor</div></div>\n\
+              <div class='card'><div class='value' id='backend'>-</div><div class='label'>Backend</div></div>\n\
+            </div>\n\n\
+            <h2>System Information</h2>\n\
+            <div class='section'>\n\
+              <div class='stat-row'><span class='stat-label'>OS</span><span class='stat-value'>HPVMx UEFI</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>Version</span><span class='stat-value'>{}</span></div>\n\
+              <div class='stat-row'><span class='stat-label'>Hostname</span><span class='stat-value'>{}</span></div>\n\
+            </div>\n\n\
+            <footer>{} &copy; 2026 HPVMx Project | Live via /usage JSON</footer>\n\
+            </body></html>\n\
+            <script>\n\
+            function ringColor(pct) {{ if(pct<50) return '#00cc88'; if(pct<80) return '#ccaa00'; return '#cc4400'; }}\n\
+            function setRing(id, valId, pct) {{\n\
+              var c = ringColor(pct);\n\
+              var element = document.getElementById(id);\n\
+              element.style.background = 'conic-gradient(' + c + ' 0% ' + pct + '%, #333 ' + pct + '% 100%)';\n\
+              var maskValue = 'radial-gradient(farthest-side, transparent 70%, black 71%)';\n\
+              element.style.mask = maskValue;\n\
+              element.style.webkitMask = maskValue;\n\
+              document.getElementById(valId).textContent = pct + '%';\n\
+            }}\n\
+            function update(data) {{\n\
+              setRing('ringCPU','ringCPUVal', data.cpu.usage_percent);\n\
+              setRing('ringGPU','ringGPUVal', data.gpu.usage_percent);\n\
+              setRing('ringMEM','ringMEMVal', data.memory.usage_percent);\n\
+              setRing('ringNET','ringNETVal', data.network.usage_percent);\n\
+              setRing('ringDISK','ringDISKVal', data.disk.usage_percent);\n\
+              document.getElementById('cpuCores').textContent = data.cpu.cores;\n\
+              document.getElementById('totalMem').textContent = data.memory.total_mb+' MB';\n\
+              document.getElementById('uptime').textContent = data.uptime_seconds;\n\
+              document.getElementById('time').textContent = data.time;\n\
+              document.getElementById('diskReadKbps').textContent = data.disk.read_kbps+' KB/s';\n\
+              document.getElementById('diskWriteKbps').textContent = data.disk.write_kbps+' KB/s';\n\
+              document.getElementById('diskReadTotal').textContent = Math.round(data.disk.read_bytes/(1024*1024))+' MB';\n\
+              document.getElementById('diskWriteTotal').textContent = Math.round(data.disk.write_bytes/(1024*1024))+' MB';\n\
+              document.getElementById('diskReadOps').textContent = data.disk.read_ops;\n\
+              document.getElementById('diskWriteOps').textContent = data.disk.write_ops;\n\
+              document.getElementById('netIP').textContent = data.network.ip;\n\
+              document.getElementById('netMAC').textContent = data.network.mac;\n\
+              document.getElementById('netGW').textContent = data.network.gateway;\n\
+              document.getElementById('netMask').textContent = data.network.subnet_mask;\n\
+              document.getElementById('netRxKbps').textContent = data.network.rx_kbps+' KB/s';\n\
+              document.getElementById('netTxKbps').textContent = data.network.tx_kbps+' KB/s';\n\
+              document.getElementById('netRxPkts').textContent = data.network.rx_packets;\n\
+              document.getElementById('netTxPkts').textContent = data.network.tx_packets;\n\
+              document.getElementById('netRxTotal').textContent = Math.round(data.network.rx_bytes/(1024*1024))+' MB';\n\
+              document.getElementById('netTxTotal').textContent = Math.round(data.network.tx_bytes/(1024*1024))+' MB';\n\
+              document.getElementById('vmsRunning').textContent = data.virtualization.vms_running;\n\
+              document.getElementById('vmsTotal').textContent = data.virtualization.vms_total;\n\
+              document.getElementById('hypervisor').textContent = data.virtualization.hypervisor;\n\
+              document.getElementById('backend').textContent = data.virtualization.hypervisor;\n\
+            }}\n\
+            function fetchUsage() {{\n\
+              fetch('/usage').then(function(r){{ return r.json(); }}).then(function(d){{ update(d); }}).catch(function(){{}});\n\
+            }}\n\
+            fetchUsage();\n\
+            setInterval(fetchUsage, 2000);\n\
+            </script>\n\
+            </html>",
+            hostname,
+            hostname,
+            version,
+            hostname,
+            version
+        );
+        (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "text/html", html.into_bytes())
+    } else if method == "GET" && path == "/usage" {
+        // JSON endpoint: use GLOBAL_SYSTEM_TRACKER for accurate real-time stats
+        let hostname = crate::SYSTEMNAME;
         let version = unsafe {
             if let Some(ver) = crate::VERSION_DATA.as_ref() {
                 ver.format_to_string()
@@ -1099,18 +1401,305 @@ fn build_http_response(method: &str, path: &str, body: &[u8]) -> Vec<u8> {
             let ts = format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
                 time.year(), time.month(), time.day(),
                 time.hour(), time.minute(), time.second());
-            // Approximate uptime from tick counter
             let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
             (ts, state.httpd_poll_tick / 1000)
         } else {
             (String::from("N/A"), 0)
         };
-        let html = format!(
-            "<!DOCTYPE html>\n<html><head><meta charset='utf-8'><title>{} - HPVMx Overview</title>\n<style>\nbody {{ background: #1a1a1a; color: #cccccc; font-family: monospace; margin: 0; padding: 20px; }}\nh1 {{ color: #00ff00; border-bottom: 1px solid #333; padding-bottom: 10px; }}\nh2 {{ color: #00cc88; margin-top: 20px; }}\n.hostname {{ color: #0088cc; font-size: 14px; }}\n.grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 15px 0; }}\n.card {{ background: #2a2a2a; border: 1px solid #333; border-radius: 6px; padding: 15px; text-align: center; }}\n.card .value {{ color: #ffffff; font-size: 24px; font-weight: bold; }}\n.card .label {{ color: #888888; font-size: 12px; margin-top: 5px; }}\n.bar {{ background: #333; border-radius: 3px; height: 8px; margin-top: 5px; overflow: hidden; }}\n.bar-fill {{ height: 100%; border-radius: 3px; }}\ntable {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}\nth, td {{ text-align: left; padding: 6px 10px; border-bottom: 1px solid #333; }}\nth {{ color: #aaaaaa; }}\nfooter {{ margin-top: 30px; color: #666; font-size: 12px; border-top: 1px solid #333; padding-top: 10px; }}\n</style></head>\n<body>\n<h1>HPVMx System Overview</h1>\n<p class='hostname'>{}</p>\n\n<h2>Resource Usage</h2>\n<div class='grid'>\n  <div class='card'><div class='value'>{}</div><div class='label'>CPU Cores</div></div>\n  <div class='card'><div class='value'>{} MB</div><div class='label'>Total Memory</div></div>\n  <div class='card'><div class='value'>{}</div><div class='label'>Uptime (s)</div></div>\n  <div class='card'><div class='value'>{}</div><div class='label'>Time</div></div>\n</div>\n\n<h2>System Information</h2>\n<table>\n  <tr><th>Property</th><th>Value</th></tr>\n  <tr><td>OS</td><td>HPVMx UEFI</td></tr>\n  <tr><td>Version</td><td>{}</td></tr>\n  <tr><td>Hostname</td><td>{}</td></tr>\n  <tr><td>CPU Cores</td><td>{}</td></tr>\n  <tr><td>Total Memory</td><td>{} MB</td></tr>\n  <tr><td>Time</td><td>{}</td></tr>\n  <tr><td>Uptime</td><td>{} seconds</td></tr>\n</table>\n\n<h2>Available Endpoints</h2>\n<table>\n  <tr><th>Method</th><th>Path</th><th>Description</th></tr>\n  <tr><td>GET</td><td>/</td><td>This overview page</td></tr>\n  <tr><td>GET</td><td>/status</td><td>System status (JSON)</td></tr>\n  <tr><td>POST</td><td>/echo</td><td>Echo back posted data</td></tr>\n  <tr><td>PATCH</td><td>/config</td><td>Update configuration</td></tr>\n</table>\n\n<footer>{} &copy; 2026 HPVMx Project</footer>\n</body></html>",
-            hostname, hostname, cpu_cores, total_mem_mb, uptime_secs, time_str,
-            version, hostname, cpu_cores, total_mem_mb, time_str, uptime_secs, version
+
+        // Use GLOBAL_SYSTEM_TRACKER for CPU, GPU, memory, disk I/O, net I/O
+        let (cpu_cores, cpu_usage, gpu_usage, total_mem_mb, used_mem_mb,
+             disk_read_kbps, disk_write_kbps, net_rx_kbps, net_tx_kbps) = unsafe {
+            if let Some(tracker) = crate::GLOBAL_SYSTEM_TRACKER.as_ref() {
+                (
+                    tracker.cpu_count,
+                    tracker.cpu_usage,
+                    tracker.gpu_usage,
+                    tracker.total_memory_mb,
+                    tracker.used_memory_mb,
+                    tracker.disk_read_kbps,
+                    tracker.disk_write_kbps,
+                    tracker.net_rx_kbps,
+                    tracker.net_tx_kbps,
+                )
+            } else {
+                // Fallback if tracker not yet initialized
+                (
+                    crate::hardware::cpu::core_count().max(1),
+                    0, 0,
+                    crate::get_total_physical_memory_mb(),
+                    0, 0, 0, 0, 0
+                )
+            }
+        };
+        let mem_usage_pct = if total_mem_mb > 0 { (used_mem_mb as f64 / total_mem_mb as f64 * 100.0) as u32 } else { 0 };
+
+        // Network cumulative stats from net stack
+        let net_stats = stats();
+        let net_state = get_state();
+
+        // Disk cumulative stats from filesystem
+        let (disk_r_bytes, disk_w_bytes, disk_r_ops, disk_w_ops) = crate::filesystem::disk_stats();
+        let disk_usage_pct = crate::filesystem::get_disk_usage_percent();
+
+        // Network usage percentage for ring graph (as % of 1 Gbps = 125000 KB/s)
+        let net_total_kbps = net_rx_kbps + net_tx_kbps;
+        let net_usage_pct = if net_total_kbps == 0 { 0 } else { (net_total_kbps as f64 / 125000.0 * 100.0).min(100.0) as u32 };
+
+        let ip_str = format!("{}.{}.{}.{}",
+            net_state.ip_addr[0], net_state.ip_addr[1], net_state.ip_addr[2], net_state.ip_addr[3]);
+        let mac_str = format!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            net_state.mac_addr[0], net_state.mac_addr[1], net_state.mac_addr[2],
+            net_state.mac_addr[3], net_state.mac_addr[4], net_state.mac_addr[5]);
+        let gw_str = format!("{}.{}.{}.{}",
+            net_state.gateway[0], net_state.gateway[1], net_state.gateway[2], net_state.gateway[3]);
+        let mask_str = format!("{}.{}.{}.{}",
+            net_state.subnet_mask[0], net_state.subnet_mask[1], net_state.subnet_mask[2], net_state.subnet_mask[3]);
+
+        // VM counts from hypervisor
+        let (vm_count, vm_running) = unsafe {
+            if let Some(hv) = crate::HYPERVISOR.as_ref() {
+                let vms = hv.list_vms();
+                let total = vms.len();
+                let running = vms.iter().filter(|(_, _, s)| s.to_string().contains("running")).count();
+                (total, running)
+            } else {
+                (0, 0)
+            }
+        };
+
+        let json = format!(
+            "{{\
+             \"hostname\":\"{}\",\
+             \"version\":\"{}\",\
+             \"time\":\"{}\",\
+             \"uptime_seconds\":{},\
+             \"cpu\":{{\"cores\":{},\"usage_percent\":{}}},\
+             \"gpu\":{{\"usage_percent\":{}}},\
+             \"memory\":{{\"total_mb\":{},\"used_mb\":{},\"usage_percent\":{}}},\
+             \"network\":{{\
+               \"ip\":\"{}\",\
+               \"mac\":\"{}\",\
+               \"gateway\":\"{}\",\
+               \"subnet_mask\":\"{}\",\
+               \"rx_kbps\":{},\
+               \"tx_kbps\":{},\
+               \"rx_packets\":{},\
+               \"tx_packets\":{},\
+               \"rx_bytes\":{},\
+               \"tx_bytes\":{},\
+               \"usage_percent\":{}\
+             }},\
+             \"disk\":{{\
+               \"read_kbps\":{},\
+               \"write_kbps\":{},\
+               \"read_bytes\":{},\
+               \"write_bytes\":{},\
+               \"read_ops\":{},\
+               \"write_ops\":{},\
+               \"usage_percent\":{}\
+             }},\
+             \"virtualization\":{{\
+               \"vms_running\":{},\
+               \"vms_total\":{},\
+               \"hypervisor\":\"{}\"\
+             }}\
+            }}",
+            hostname,
+            version,
+            time_str,
+            uptime_secs,
+            cpu_cores, cpu_usage,
+            gpu_usage,
+            total_mem_mb, used_mem_mb, mem_usage_pct,
+            ip_str, mac_str, gw_str, mask_str,
+            net_rx_kbps, net_tx_kbps,
+            net_stats.rx_pkts, net_stats.tx_pkts,
+            net_stats.rx_bytes, net_stats.tx_bytes,
+            net_usage_pct,
+            disk_read_kbps, disk_write_kbps,
+            disk_r_bytes, disk_w_bytes,
+            disk_r_ops, disk_w_ops,
+            disk_usage_pct,
+            vm_running, vm_count,
+            backend_name()
         );
-        (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "text/html", html.into_bytes())
+        (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "application/json", json.into_bytes())
+    } else if method == "GET" && path == "/api/nodes" {
+        // JSON endpoint: list registered nodes with their stats (for intermediate server polling)
+        let nodes_json = unsafe {
+            if let Some(dispatcher) = crate::VM_DISPATCHER.as_ref() {
+                let registry = dispatcher.registry();
+                let mut parts = alloc::vec::Vec::new();
+                for node in registry.iter_nodes() {
+                    let node_entry = format!(
+                        "{{\"node_id\":\"{}\",\"ip\":\"{}\",\"port\":{},\"online\":{},\"last_heartbeat_ms\":{},\"cpu_cores\":{},\"memory_mb\":{},\"deployed_instances\":{}}}",
+                        node.node_id, node.ip, node.port, node.online,
+                        node.last_heartbeat_ms, node.cpu_cores, node.memory_mb,
+                        node.deployed_instances.len()
+                    );
+                    parts.push(node_entry);
+                }
+                format!("[{}]", parts.join(","))
+            } else {
+                String::from("[]")
+            }
+        };
+        (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "application/json", nodes_json.into_bytes())
+    } else if method == "GET" && path == "/api/stats" {
+        // JSON endpoint: full server stats including node stats (for intermediate server polling)
+        // Reuses the same data as /usage but includes node information
+        let hostname = crate::SYSTEMNAME;
+        let version = unsafe {
+            if let Some(ver) = crate::VERSION_DATA.as_ref() {
+                ver.format_to_string()
+            } else {
+                String::from("unknown")
+            }
+        };
+        let (time_str, uptime_secs) = if let Ok(time) = uefi::runtime::get_time() {
+            let ts = format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                time.year(), time.month(), time.day(),
+                time.hour(), time.minute(), time.second());
+            let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
+            (ts, state.httpd_poll_tick / 1000)
+        } else {
+            (String::from("N/A"), 0)
+        };
+        // Always read CPU info — it's fast and always available
+        let cpu_info = crate::hardware::cpu::CpuInfo::get();
+        let cpu_cores = cpu_info.cores.max(1);
+        let cpu_threads = cpu_info.threads.max(1);
+        let cpu_brand = cpu_info.brand;
+        let cpu_clock_mhz = unsafe { crate::TSC_PER_US as u32 };
+
+        let (cpu_usage, gpu_usage, gpu_device_name, total_mem_mb, used_mem_mb,
+             disk_read_kbps, disk_write_kbps, net_rx_kbps, net_tx_kbps) = unsafe {
+            if let Some(tracker) = crate::GLOBAL_SYSTEM_TRACKER.as_ref() {
+                (
+                    tracker.cpu_usage,
+                    tracker.gpu_usage,
+                    alloc::format!("UEFI GOP Display Adapter"),
+                    tracker.total_memory_mb,
+                    tracker.used_memory_mb,
+                    tracker.disk_read_kbps,
+                    tracker.disk_write_kbps,
+                    tracker.net_rx_kbps,
+                    tracker.net_tx_kbps,
+                )
+            } else {
+                (
+                    0, 0,
+                    alloc::format!("UEFI GOP Display Adapter"),
+                    crate::get_total_physical_memory_mb(),
+                    0, 0, 0, 0, 0
+                )
+            }
+        };
+        let mem_usage_pct = if total_mem_mb > 0 { (used_mem_mb as f64 / total_mem_mb as f64 * 100.0) as u32 } else { 0 };
+        let net_stats = stats();
+        let net_state = get_state();
+        let (disk_r_bytes, disk_w_bytes, disk_r_ops, disk_w_ops) = crate::filesystem::disk_stats();
+        let disk_usage_pct = crate::filesystem::get_disk_usage_percent();
+        let net_total_kbps = net_rx_kbps + net_tx_kbps;
+        let net_usage_pct = if net_total_kbps == 0 { 0 } else { (net_total_kbps as f64 / 125000.0 * 100.0).min(100.0) as u32 };
+        let ip_str = format!("{}.{}.{}.{}",
+            net_state.ip_addr[0], net_state.ip_addr[1], net_state.ip_addr[2], net_state.ip_addr[3]);
+        let mac_str = format!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            net_state.mac_addr[0], net_state.mac_addr[1], net_state.mac_addr[2],
+            net_state.mac_addr[3], net_state.mac_addr[4], net_state.mac_addr[5]);
+        let gw_str = format!("{}.{}.{}.{}",
+            net_state.gateway[0], net_state.gateway[1], net_state.gateway[2], net_state.gateway[3]);
+        let mask_str = format!("{}.{}.{}.{}",
+            net_state.subnet_mask[0], net_state.subnet_mask[1], net_state.subnet_mask[2], net_state.subnet_mask[3]);
+        let (vm_count, vm_running) = unsafe {
+            if let Some(hv) = crate::HYPERVISOR.as_ref() {
+                let vms = hv.list_vms();
+                let total = vms.len();
+                let running = vms.iter().filter(|(_, _, s)| s.to_string().contains("running")).count();
+                (total, running)
+            } else {
+                (0, 0)
+            }
+        };
+        // Collect node stats
+        let nodes_json = unsafe {
+            if let Some(dispatcher) = crate::VM_DISPATCHER.as_ref() {
+                let registry = dispatcher.registry();
+                let mut parts = alloc::vec::Vec::new();
+                for node in registry.iter_nodes() {
+                    let node_entry = format!(
+                        "{{\"node_id\":\"{}\",\"ip\":\"{}\",\"port\":{},\"online\":{},\"cpu_cores\":{},\"memory_mb\":{},\"deployed_instances\":{}}}",
+                        node.node_id, node.ip, node.port, node.online,
+                        node.cpu_cores, node.memory_mb, node.deployed_instances.len()
+                    );
+                    parts.push(node_entry);
+                }
+                format!("\"nodes\":[{}]", parts.join(","))
+            } else {
+                String::from("\"nodes\":[]")
+            }
+        };
+        // Escape special JSON characters in brand and GPU name
+        let cpu_brand_escaped = cpu_brand.replace('\\', "\\\\").replace('"', "\\\"");
+        let gpu_device_escaped = gpu_device_name.replace('\\', "\\\\").replace('"', "\\\"");
+
+        let json = format!(
+            "{{\
+             \"hostname\":\"{}\",\
+             \"version\":\"{}\",\
+             \"time\":\"{}\",\
+             \"uptime_seconds\":{},\
+             \"cpu\":{{\"cores\":{},\"usage_percent\":{},\"threads\":{},\"brand\":\"{}\",\"clock_mhz\":{}}},\
+             \"gpu\":{{\"device_name\":\"{}\",\"usage_percent\":{}}},\
+             \"memory\":{{\"total_mb\":{},\"used_mb\":{},\"usage_percent\":{}}},\
+             \"network\":{{\
+               \"ip\":\"{}\",\
+               \"mac\":\"{}\",\
+               \"gateway\":\"{}\",\
+               \"subnet_mask\":\"{}\",\
+               \"rx_kbps\":{},\
+               \"tx_kbps\":{},\
+               \"rx_packets\":{},\
+               \"tx_packets\":{},\
+               \"rx_bytes\":{},\
+               \"tx_bytes\":{},\
+               \"usage_percent\":{}\
+             }},\
+             \"disk\":{{\
+               \"read_kbps\":{},\
+               \"write_kbps\":{},\
+               \"read_bytes\":{},\
+               \"write_bytes\":{},\
+               \"read_ops\":{},\
+               \"write_ops\":{},\
+               \"usage_percent\":{}\
+             }},\
+             \"virtualization\":{{\
+               \"vms_running\":{},\
+               \"vms_total\":{},\
+               \"hypervisor\":\"{}\"\
+             }},\
+             {}\
+            }}",
+            hostname, version, time_str, uptime_secs,
+            cpu_cores, cpu_usage, cpu_threads, cpu_brand_escaped, cpu_clock_mhz,
+            gpu_device_escaped, gpu_usage,
+            total_mem_mb, used_mem_mb, mem_usage_pct,
+            ip_str, mac_str, gw_str, mask_str,
+            net_rx_kbps, net_tx_kbps,
+            net_stats.rx_pkts, net_stats.tx_pkts,
+            net_stats.rx_bytes, net_stats.tx_bytes,
+            net_usage_pct,
+            disk_read_kbps, disk_write_kbps,
+            disk_r_bytes, disk_w_bytes,
+            disk_r_ops, disk_w_ops,
+            disk_usage_pct,
+            vm_running, vm_count,
+            backend_name(),
+            nodes_json
+        );
+        (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "application/json", json.into_bytes())
     } else if path == "/status" {
         let html = "<!DOCTYPE html>\n<html><head><title>HPVMx Status</title></head>\n<body>\n<h1>System Status</h1>\n<p>HPVMx UEFI Server is running.</p>\n<p>Network: Active</p>\n</body></html>";
         (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "text/html", html.as_bytes().to_vec())
@@ -1132,9 +1721,77 @@ fn build_http_response(method: &str, path: &str, body: &[u8]) -> Vec<u8> {
     } else if path == "/config" && method == "PATCH" {
         let html = "<!DOCTYPE html>\n<html><head><title>Config Updated</title></head>\n<body>\n<h1>Configuration Updated</h1>\n<p>PATCH request processed successfully.</p>\n</body></html>";
         (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "text/html", html.as_bytes().to_vec())
+    } else if path == "/desc.xml" {
+        // UPnP device description XML — NetworkInfrastructure device class
+        let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
+        let mac = state.mac_addr;
+        let hostname = crate::SYSTEMNAME;
+        let mac_str = alloc::format!("{:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X}",
+            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        let uuid = alloc::format!("{}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            hostname, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        let xml = alloc::format!(
+            "<?xml version=\"1.0\"?>\n\
+             <root xmlns=\"urn:schemas-upnp-org:device-1-0\">\n\
+               <specVersion>\n\
+                 <major>1</major>\n\
+                 <minor>0</minor>\n\
+               </specVersion>\n\
+               <device>\n\
+                 <deviceType>urn:schemas-upnp-org:device:NetworkInfrastructure:1</deviceType>\n\
+                 <friendlyName>{}</friendlyName>\n\
+                 <manufacturer>HPVMx</manufacturer>\n\
+                 <manufacturerURL>http://hpvmx.local</manufacturerURL>\n\
+                 <modelName>HPVMx UEFI Server</modelName>\n\
+                 <modelNumber>1.0</modelNumber>\n\
+                 <modelURL>http://hpvmx.local</modelURL>\n\
+                 <serialNumber>{}</serialNumber>\n\
+                 <UDN>uuid:{}</UDN>\n\
+                 <serviceList>\n\
+                   <service>\n\
+                     <serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>\n\
+                     <serviceId>urn:upnp-org:serviceId:WANCommonInterfaceConfig1</serviceId>\n\
+                     <controlURL>/control/wan</controlURL>\n\
+                     <eventSubURL>/event/wan</eventSubURL>\n\
+                     <SCPDURL>/wan.xml</SCPDURL>\n\
+                   </service>\n\
+                 </serviceList>\n\
+               </device>\n\
+             </root>",
+            hostname, mac_str, uuid
+        );
+        (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), "text/xml", xml.into_bytes())
     } else if method == "GET" {
-        let mut html = format!("<!DOCTYPE html>\n<html><body><h1>404 Not Found</h1><p>The requested path was not found: {}</p></body></html>", path);
-        (&*(HEADER_VAL_11.to_string() + &*" 404 Not Found\r\n".to_string()), "text/html", html.into_bytes())
+        // Try to serve the file via WebDAV-style file download
+        let fs_path = webdav_fs_path(path);
+        // Check if it's a file (not a directory)
+        if let Ok(data) = crate::filesystem::FileSystem::read_file(&fs_path) {
+            // Determine content type based on extension
+            let content_type = if fs_path.ends_with(".html") || fs_path.ends_with(".htm") {
+                "text/html"
+            } else if fs_path.ends_with(".txt") {
+                "text/plain"
+            } else if fs_path.ends_with(".xml") {
+                "text/xml"
+            } else if fs_path.ends_with(".json") {
+                "application/json"
+            } else if fs_path.ends_with(".png") {
+                "image/png"
+            } else if fs_path.ends_with(".jpg") || fs_path.ends_with(".jpeg") {
+                "image/jpeg"
+            } else if fs_path.ends_with(".bmp") {
+                "image/bmp"
+            } else if fs_path.ends_with(".rs") {
+                "text/plain"
+            } else {
+                "application/octet-stream"
+            };
+            (&*(HEADER_VAL_11.to_string() + &*" 200 OK\r\n".to_string()), content_type, data)
+        } else {
+            // Fall back to 404
+            let mut html = format!("<!DOCTYPE html>\n<html><body><h1>404 Not Found</h1><p>The requested path was not found: {}</p></body></html>", path);
+            (&*(HEADER_VAL_11.to_string() + &*" 404 Not Found\r\n".to_string()), "text/html", html.into_bytes())
+        }
     } else {
         let html = "<!DOCTYPE html>\n<html><head><title>405 Method Not Allowed</title></head>\n<body>\n<h1>405 Method Not Allowed</h1>\n<p>The HTTP method is not supported for this path.</p>\n</body></html>";
         (&*(HEADER_VAL_11.to_string() + &*" 405 Method Not Allowed\r\n".to_string()), "text/html", html.as_bytes().to_vec())
@@ -1143,6 +1800,11 @@ fn build_http_response(method: &str, path: &str, body: &[u8]) -> Vec<u8> {
     let mut response = Vec::new();
     response.extend_from_slice(status_line.as_bytes());
     response.extend_from_slice(b"Server: HPVMx-UEFI/1.0\r\n");
+    // Add DAV header for WebDAV methods so Windows File Explorer recognizes the server
+    if method == "PROPFIND" || method == "OPTIONS" || method == "MKCOL" {
+        response.extend_from_slice(b"DAV: 1, 2\r\n");
+        response.extend_from_slice(b"Allow: GET, HEAD, POST, OPTIONS, PROPFIND, MKCOL\r\n");
+    }
     response.extend_from_slice(b"Content-Type: ");
     response.extend_from_slice(content_type.as_bytes());
     response.extend_from_slice(b"\r\n");
@@ -1205,7 +1867,11 @@ fn handle_httpd(src_ip: [u8; 4], src_mac: [u8; 6], tcp: &TcpHeader, flags: u16, 
             // Check 2: Drop packets matching the last received packet's seq + payload length.
             // No time window — looped echoes on bridged networks arrive continuously.
             // A real retransmission takes seconds; a looped echo arrives instantly.
+            // IMPORTANT: Skip duplicate detection for FinWait connections — the client's ACK
+            // for our FIN has the same seq and 0 payload as earlier ACKs, and we MUST accept
+            // it to complete the close handshake (FinWait → Closed).
             if !is_syn
+                && conn_preview.tcp_state != HttpTcpState::FinWait
                 && conn_preview.last_rx_tick > 0
                 && seq == conn_preview.last_rx_seq
                 && payload.len() == conn_preview.last_rx_payload_len as usize {
@@ -1555,15 +2221,16 @@ pub fn tcp_disconnect(dst_ip: [u8; 4], dst_port: u16) {
 
 
 
-fn send_tcp_packet(dst_ip: [u8; 4], dst_mac: [u8; 6], src_port: u16, dst_port: u16,
-                   seq: u32, ack: u32, flags: u8, data: &[u8]) {
-    crate::vdebug!("TCP", "send_tcp_packet: to {}.{}.{}.{}, port {}->{} seq={} ack={} flags=0x{:02x} data={} bytes dst_mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-        dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3], src_port, dst_port, seq, ack, flags, data.len(),
-        dst_mac[0], dst_mac[1], dst_mac[2], dst_mac[3], dst_mac[4], dst_mac[5]);
-    
+/// Maximum Ethernet frame size (standard MTU)
+const MAX_FRAME_SIZE: usize = 1514;
+/// Maximum TCP payload per segment: 1514 - 14 (Eth) - 20 (IP) - 20 (TCP) = 1460
+const MAX_TCP_PAYLOAD: usize = MAX_FRAME_SIZE - size_of::<EthHeader>() - size_of::<Ipv4Header>() - size_of::<TcpHeader>();
+
+fn send_tcp_segment(dst_ip: [u8; 4], dst_mac: [u8; 6], src_port: u16, dst_port: u16,
+                    seq: u32, ack: u32, flags: u8, data: &[u8]) {
     #[allow(static_mut_refs)]
     let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
-    let mut frame = [0u8; 1514];
+    let mut frame = [0u8; MAX_FRAME_SIZE];
 
     let tcp_len = size_of::<TcpHeader>() + data.len();
     let ip_len = size_of::<Ipv4Header>() + tcp_len;
@@ -1600,15 +2267,47 @@ fn send_tcp_packet(dst_ip: [u8; 4], dst_mac: [u8; 6], src_port: u16, dst_port: u
     // support checksum offloading. The checksum field must be 0 when calculating.
     let checksum_val = calculate_tcp_checksum(state.ip_addr, dst_ip, &frame[tcp_offset..total_len]).to_be();
     tcp.checksum = checksum_val;
-    crate::vdebug!("TCP", "send_tcp_packet: checksum=0x{:04x} total_len={}", checksum_val, total_len);
+    crate::vdebug!("TCP", "send_tcp_segment: checksum=0x{:04x} total_len={} data_len={}", checksum_val, total_len, data.len());
 
     match snp_tx(&frame[..total_len]) {
         Ok(()) => {
-            crate::vdebug!("TCP", "send_tcp_packet: TX SUCCESS total_len={}", total_len);
+            crate::vdebug!("TCP", "send_tcp_segment: TX SUCCESS total_len={}", total_len);
         }
         Err(e) => {
-            crate::vdebug!("TCP", "send_tcp_packet: TX FAILED: {}", e);
+            crate::vdebug!("TCP", "send_tcp_segment: TX FAILED: {}", e);
         }
+    }
+}
+
+/// Public wrapper for send_tcp_packet, used by external modules (e.g., RPC server).
+pub fn send_tcp_packet_public(dst_ip: [u8; 4], dst_mac: [u8; 6], src_port: u16, dst_port: u16,
+                   seq: u32, ack: u32, flags: u8, data: &[u8]) {
+    send_tcp_packet(dst_ip, dst_mac, src_port, dst_port, seq, ack, flags, data);
+}
+
+fn send_tcp_packet(dst_ip: [u8; 4], dst_mac: [u8; 6], src_port: u16, dst_port: u16,
+                   seq: u32, ack: u32, flags: u8, data: &[u8]) {
+    crate::vdebug!("TCP", "send_tcp_packet: to {}.{}.{}.{}, port {}->{} seq={} ack={} flags=0x{:02x} data={} bytes dst_mac={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3], src_port, dst_port, seq, ack, flags, data.len(),
+        dst_mac[0], dst_mac[1], dst_mac[2], dst_mac[3], dst_mac[4], dst_mac[5]);
+
+    // If data fits in a single MTU, send it directly
+    if data.len() <= MAX_TCP_PAYLOAD {
+        send_tcp_segment(dst_ip, dst_mac, src_port, dst_port, seq, ack, flags, data);
+        return;
+    }
+
+    // Segment large payloads into MTU-compliant chunks
+    let mut offset = 0;
+    let mut current_seq = seq;
+    while offset < data.len() {
+        let end = core::cmp::min(offset + MAX_TCP_PAYLOAD, data.len());
+        let chunk = &data[offset..end];
+        // Last segment keeps the original flags (PSH, FIN, etc.); intermediate segments use ACK only
+        let seg_flags = if end >= data.len() { flags } else { TCP_FLAG_ACK };
+        send_tcp_segment(dst_ip, dst_mac, src_port, dst_port, current_seq, ack, seg_flags, chunk);
+        current_seq += chunk.len() as u32;
+        offset = end;
     }
 }
 
@@ -1701,8 +2400,8 @@ fn send_icmp_reply(dst_ip: [u8; 4], dst_mac: [u8; 6], ident: u16, seq: u16, payl
     crate::vdebug!("ICMP", "Ping reply sent to {}.{}.{}.{}", dst_ip[0], dst_ip[1], dst_ip[2], dst_ip[3]);
 }
 
-fn handle_udp(src_ip: [u8; 4], port: u16, data: &[u8]) {
-    match port {
+fn handle_udp(src_ip: [u8; 4], src_port: u16, dst_port: u16, data: &[u8]) {
+    match dst_port {
         67 => {
             // DHCP server port — handled by DHCP discovery
             crate::vdebug!("UDP", "DHCP server port {} bytes from {}.{}.{}.{}", data.len(), src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
@@ -1737,8 +2436,9 @@ fn handle_udp(src_ip: [u8; 4], port: u16, data: &[u8]) {
             handle_mdns_query(src_ip, data);
         }
         1900 => {
-            // SSDP (Simple Service Discovery Protocol)
-            crate::vdebug!("UDP", "SSDP {} bytes from {}.{}.{}.{}", data.len(), src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
+            // SSDP (Simple Service Discovery Protocol) — respond to M-SEARCH
+            crate::vdebug!("SSDP", "SSDP {} bytes from {}.{}.{}.{}:{}", data.len(), src_ip[0], src_ip[1], src_ip[2], src_ip[3], src_port);
+            handle_ssdp(src_ip, src_port, data);
         }
         5355 => {
             // LLMNR (Link-Local Multicast Name Resolution)
@@ -1754,7 +2454,7 @@ fn handle_udp(src_ip: [u8; 4], port: u16, data: &[u8]) {
                 data.len(), src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
         }
         _ => {
-            crate::vdebug!("UDP", "Unhandled port {} — {} bytes from {}.{}.{}.{}", port, data.len(), src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
+            crate::vdebug!("UDP", "Unhandled port {} — {} bytes from {}.{}.{}.{}", dst_port, data.len(), src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
         }
     }
 }
@@ -1818,6 +2518,129 @@ fn handle_mdns_query(_src_ip: [u8; 4], query_data: &[u8]) {
     send_udp(mdns_ip, mdns_mac, 5353, 5353, &dns_buf);
     unsafe { NET_STATE.assume_init_mut().as_mut().unwrap().udp_tx_packets += 1; }
     let _ = query_data;
+}
+
+/// Handle SSDP M-SEARCH requests (UDP port 1900) — advertise as UPnP NetworkInfrastructure device
+fn handle_ssdp(src_ip: [u8; 4], src_port: u16, data: &[u8]) {
+    // Parse the SSDP request — look for M-SEARCH and ST: header
+    let text = core::str::from_utf8(data).unwrap_or("");
+    
+    // Check if this is an M-SEARCH request
+    if !text.contains("M-SEARCH * HTTP/1.1") {
+        crate::vdebug!("SSDP", "Not an M-SEARCH, ignoring");
+        return;
+    }
+    
+    // Extract the ST (Search Target) header
+    let st_header = if let Some(start) = text.find("ST:") {
+        let after_st = &text[start + 3..];
+        let trimmed = after_st.trim_start();
+        if let Some(end) = trimmed.find("\r\n") {
+            trimmed[..end].trim_end()
+        } else if let Some(end) = trimmed.find("\n") {
+            trimmed[..end].trim_end()
+        } else {
+            trimmed.trim_end_matches(|c: char| c == '\r' || c == '\n')
+        }
+    } else {
+        ""
+    };
+    
+    crate::vdebug!("SSDP", "M-SEARCH ST: {}", st_header);
+    
+    // Only respond to relevant search targets
+    let matches = st_header == "ssdp:all"
+        || st_header == "upnp:rootdevice"
+        || st_header.contains("NetworkInfrastructure");
+    
+    if !matches {
+        crate::vdebug!("SSDP", "Search target '{}' not matched, ignoring", st_header);
+        return;
+    }
+    
+    let state = unsafe { NET_STATE.assume_init_ref().as_ref().unwrap() };
+    let our_ip = state.ip_addr;
+    let ip_str = alloc::format!("{}.{}.{}.{}", our_ip[0], our_ip[1], our_ip[2], our_ip[3]);
+    let hostname = crate::SYSTEMNAME;
+    
+    // Generate a UUID based on MAC address for stable USN
+    let mac = state.mac_addr;
+    let uuid = alloc::format!("{}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        hostname, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    
+    // Build USN (Unique Service Name)
+    let usn_root = alloc::format!("uuid:{}::upnp:rootdevice", uuid);
+    let usn_device = alloc::format!("uuid:{}::urn:schemas-upnp-org:device:NetworkInfrastructure:1", uuid);
+    
+    // Build the LOCATION URL pointing to device description XML
+    let location = alloc::format!("http://{}:8080/desc.xml", ip_str);
+    
+    // Build SSDP response
+    // Send to both the multicast group AND unicast back to the sender
+    let ssdp_mac: [u8; 6] = [0x01, 0x00, 0x5e, 0x00, 0x00, 0xfa]; // MAC for 239.255.255.250
+    let ssdp_ip: [u8; 4] = [239, 255, 255, 250];
+    
+    // Resolve source MAC for unicast response
+    let src_mac = find_mac(src_ip).unwrap_or([0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    
+    // Send two responses: one for rootdevice, one for the device type
+    let response = alloc::format!(
+        "{} 200 OK\r\n\
+         CACHE-CONTROL: max-age=1800\r\n\
+         DATE: {}\r\n\
+         EXT:\r\n\
+         LOCATION: {}\r\n\
+         SERVER: HPVMx/1.0 UPnP/1.0\r\n\
+         ST: {}\r\n\
+         USN: {}\r\n\
+         \r\n",
+        HEADER_VAL_11,
+        "Thu, 01 Jan 2025 00:00:00 GMT", // Static date (no RTC)
+        location,
+        "upnp:rootdevice",
+        usn_root
+    );
+    
+    crate::vdebug!("SSDP", "Sending SSDP response (multicast): USN={}", usn_root);
+    send_udp(ssdp_ip, ssdp_mac, 1900, 1900, response.as_bytes());
+    unsafe { NET_STATE.assume_init_mut().as_mut().unwrap().udp_tx_packets += 1; }
+    
+    // Also send unicast response back to the sender's source port
+    if src_mac != [0xff, 0xff, 0xff, 0xff, 0xff, 0xff] {
+        crate::vdebug!("SSDP", "Sending SSDP response (unicast to {}.{}.{}.{}:{}): USN={}",
+            src_ip[0], src_ip[1], src_ip[2], src_ip[3], src_port, usn_root);
+        send_udp(src_ip, src_mac, 1900, src_port, response.as_bytes());
+        unsafe { NET_STATE.assume_init_mut().as_mut().unwrap().udp_tx_packets += 1; }
+    }
+    
+    // Second response for the device type
+    let response2 = alloc::format!(
+        "{} 200 OK\r\n\
+         CACHE-CONTROL: max-age=1800\r\n\
+         DATE: {}\r\n\
+         EXT:\r\n\
+         LOCATION: {}\r\n\
+         SERVER: HPVMx/1.0 UPnP/1.0\r\n\
+         ST: urn:schemas-upnp-org:device:NetworkInfrastructure:1\r\n\
+         USN: {}\r\n\
+         \r\n",
+        HEADER_VAL_11,
+        "Thu, 01 Jan 2025 00:00:00 GMT",
+        location,
+        usn_device
+    );
+    
+    crate::vdebug!("SSDP", "Sending SSDP response (multicast): USN={}", usn_device);
+    send_udp(ssdp_ip, ssdp_mac, 1900, 1900, response2.as_bytes());
+    unsafe { NET_STATE.assume_init_mut().as_mut().unwrap().udp_tx_packets += 1; }
+    
+    // Also send unicast response back to the sender's source port
+    if src_mac != [0xff, 0xff, 0xff, 0xff, 0xff, 0xff] {
+        crate::vdebug!("SSDP", "Sending SSDP response (unicast to {}.{}.{}.{}:{}): USN={}",
+            src_ip[0], src_ip[1], src_ip[2], src_ip[3], src_port, usn_device);
+        send_udp(src_ip, src_mac, 1900, src_port, response2.as_bytes());
+        unsafe { NET_STATE.assume_init_mut().as_mut().unwrap().udp_tx_packets += 1; }
+    }
 }
 
 /// Handle IGMP packets (membership reports and queries) — supports V1, V2, and V3
@@ -2240,6 +3063,359 @@ pub fn httpd_stop() {
         }
     }
     crate::vdebug!("HTTPD", "stopped");
+}
+
+pub fn webdav_start(port: u16) {
+    unsafe {
+        if let Some(state) = NET_STATE.assume_init_mut().as_mut() {
+            state.webdav_port = port;
+        }
+    }
+    if WEBDAV.swap(true, Ordering::SeqCst) {
+        hpvm_warn!("WebDAV", "already running");
+        return;
+    }
+    crate::vdebug!("HTTPD", "WebDAV server listening on port {}", port);
+
+    // Spawn the poll worker if not already running (shared with HTTPD)
+    #[cfg(feature = "net-multicore")]
+    spawn_http_poll_worker();
+}
+
+pub fn webdav_stop() {
+    if !WEBDAV.swap(false, Ordering::SeqCst) {
+        hpvm_warn!("WebDAV", "not running");
+        return;
+    }
+    unsafe {
+        if let Some(state) = NET_STATE.assume_init_mut().as_mut() {
+            state.webdav_port = 0;
+        }
+    }
+    crate::vdebug!("HTTPD", "WebDAV stopped");
+}
+
+// ============================================================================
+// RPC (MSMI) Server — Port 5001
+// ============================================================================
+
+/// Maximum number of concurrent RPC connections.
+const MAX_RPC_CONNS: usize = 8;
+
+/// TCP state machine states for RPC server connections.
+#[derive(Copy, Clone, Debug, PartialEq, Default)]
+enum RpcTcpState {
+    #[default]
+    None,
+    SynReceived,
+    Established,
+    FinWait,
+    Closed,
+}
+
+/// Tracks one RPC server connection (identified by client IP + port).
+#[derive(Clone, Debug)]
+struct RpcConn {
+    client_ip: [u8; 4],
+    client_port: u16,
+    tcp_state: RpcTcpState,
+    our_seq: u32,
+    their_seq: u32,
+    /// Accumulated raw TCP payload (may span multiple segments).
+    rx_buf: alloc::vec::Vec<u8>,
+    /// Whether we've sent a response for the current request.
+    response_sent: bool,
+    last_rx_seq: u32,
+    last_rx_payload_len: u32,
+    last_rx_tick: u64,
+    last_send_tick: u64,
+}
+
+impl Default for RpcConn {
+    fn default() -> Self {
+        Self {
+            client_ip: [0; 4],
+            client_port: 0,
+            tcp_state: RpcTcpState::None,
+            our_seq: 0,
+            their_seq: 0,
+            rx_buf: alloc::vec::Vec::new(),
+            response_sent: false,
+            last_rx_seq: 0,
+            last_rx_payload_len: 0,
+            last_rx_tick: 0,
+            last_send_tick: 0,
+        }
+    }
+}
+
+/// Add RPC connection table to NetState
+mod rpc_ext {
+    use super::*;
+    /// RPC connection table stored in NetState extension
+    pub static mut RPC_CONNS: [RpcConn; MAX_RPC_CONNS] = {
+        const INIT: RpcConn = RpcConn {
+            client_ip: [0; 4],
+            client_port: 0,
+            tcp_state: RpcTcpState::None,
+            our_seq: 0,
+            their_seq: 0,
+            rx_buf: alloc::vec::Vec::new(),
+            response_sent: false,
+            last_rx_seq: 0,
+            last_rx_payload_len: 0,
+            last_rx_tick: 0,
+            last_send_tick: 0,
+        };
+        [INIT; MAX_RPC_CONNS]
+    };
+    /// ISN counter for RPC connections
+    pub static mut RPC_ISN_COUNTER: u32 = 2000;
+}
+
+/// Start the RPC (MSMI) server on the given port (default: 5001).
+pub fn rpcd_start(port: u16) {
+    unsafe {
+        if let Some(state) = NET_STATE.assume_init_mut().as_mut() {
+            state.rpcd_port = port;
+        }
+    }
+    if RPCD.swap(true, Ordering::SeqCst) {
+        hpvm_warn!("RPCD", "already running");
+        return;
+    }
+    vdebug_autoprefix!("RPC server listening on port {} (MSMI interface)", port);
+}
+
+/// Stop the RPC (MSMI) server.
+pub fn rpcd_stop() {
+    if !RPCD.swap(false, Ordering::SeqCst) {
+        hpvm_warn!("RPCD", "not running");
+        return;
+    }
+    unsafe {
+        if let Some(state) = NET_STATE.assume_init_mut().as_mut() {
+            state.rpcd_port = 0;
+        }
+        for conn in rpc_ext::RPC_CONNS.iter_mut() {
+            conn.tcp_state = RpcTcpState::Closed;
+            conn.rx_buf.clear();
+        }
+    }
+    vdebug_autoprefix!("RPC server stopped");
+}
+
+/// Check if the RPC server is running.
+pub fn rpcd_is_running() -> bool {
+    RPCD.load(Ordering::SeqCst)
+}
+
+/// Find or create an RPC connection slot for the given client.
+fn find_rpc_conn(client_ip: [u8; 4], client_port: u16, is_syn: bool) -> Option<usize> {
+    unsafe {
+        for (i, conn) in rpc_ext::RPC_CONNS.iter_mut().enumerate() {
+            if conn.tcp_state != RpcTcpState::None
+                && conn.tcp_state != RpcTcpState::Closed
+                && conn.client_ip == client_ip
+                && conn.client_port == client_port
+            {
+                return Some(i);
+            }
+        }
+        if is_syn {
+            for (i, conn) in rpc_ext::RPC_CONNS.iter_mut().enumerate() {
+                if conn.tcp_state == RpcTcpState::None || conn.tcp_state == RpcTcpState::Closed {
+                    conn.tcp_state = RpcTcpState::None;
+                    conn.client_ip = client_ip;
+                    conn.client_port = client_port;
+                    conn.our_seq = 0;
+                    conn.their_seq = 0;
+                    conn.rx_buf.clear();
+                    conn.response_sent = false;
+                    return Some(i);
+                }
+            }
+        }
+        // Fallback for orphaned packets
+        for (i, conn) in rpc_ext::RPC_CONNS.iter_mut().enumerate() {
+            if conn.tcp_state == RpcTcpState::None || conn.tcp_state == RpcTcpState::Closed {
+                conn.tcp_state = RpcTcpState::Established;
+                conn.client_ip = client_ip;
+                conn.client_port = client_port;
+                conn.our_seq = 1;
+                conn.their_seq = 0;
+                conn.rx_buf.clear();
+                conn.response_sent = false;
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+/// Handle incoming TCP packets for the RPC (MSMI) server.
+fn handle_rpcd(src_ip: [u8; 4], src_mac: [u8; 6], tcp: &TcpHeader, flags: u16, packet: &[u8], server_port: u16) {
+    // Drop packets from our own MAC address — looped-back transmissions
+    let state = unsafe { NET_STATE.assume_init_mut().as_mut().unwrap() };
+
+    // Resolve the client's MAC address using ARP cache
+    let dst_mac = find_mac(src_ip).unwrap_or(src_mac);
+
+    let seq = u32::from_be(tcp.seq);
+    let ack = u32::from_be(tcp.ack);
+    let client_port = u16::from_be(tcp.src_port);
+    let off_flags_raw = u16::from_be(tcp.off_flags);
+    let data_offset = (off_flags_raw >> 12) as usize;
+    let header_len = data_offset * 4;
+    let payload = if packet.len() > header_len { &packet[header_len..] } else { &[] };
+
+    let is_syn = (flags & (TCP_FLAG_SYN as u16)) != 0 && (flags & (TCP_FLAG_ACK as u16)) == 0;
+
+    // Find or create a connection slot
+    let conn_idx = match find_rpc_conn(src_ip, client_port, is_syn) {
+        Some(i) => i,
+        None => {
+            crate::vdebug!("RPCD", "No free connection slots for {}.{}.{}.{}", src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
+            send_tcp_packet(src_ip, dst_mac, server_port, client_port,
+                            ack.wrapping_add(1), seq, TCP_FLAG_RST, &[]);
+            return;
+        }
+    };
+    let conn = unsafe { &mut rpc_ext::RPC_CONNS[conn_idx] };
+
+    // 1. SYN (without ACK) = new connection request
+    if is_syn {
+        unsafe {
+            conn.our_seq = rpc_ext::RPC_ISN_COUNTER;
+            rpc_ext::RPC_ISN_COUNTER = rpc_ext::RPC_ISN_COUNTER.wrapping_add(1);
+        }
+        conn.their_seq = seq + 1;
+        conn.tcp_state = RpcTcpState::SynReceived;
+        vdebug_autoprefix!("RPCD: SYN from {}.{}.{}.{}, port {}", src_ip[0], src_ip[1], src_ip[2], src_ip[3], client_port);
+        send_tcp_packet(src_ip, dst_mac, server_port, client_port,
+                        conn.our_seq, seq + 1, TCP_FLAG_SYN | TCP_FLAG_ACK, &[]);
+        conn.last_send_tick = state.httpd_poll_tick;
+        return;
+    }
+
+    // SYN+ACK should not arrive from client (we're the server)
+    if (flags & (TCP_FLAG_SYN as u16)) != 0 && (flags & (TCP_FLAG_ACK as u16)) != 0 {
+        return;
+    }
+
+    // 2. ACK = data transfer or connection established
+    if (flags & (TCP_FLAG_ACK as u16)) != 0 && (flags & (TCP_FLAG_SYN as u16)) == 0 {
+        match conn.tcp_state {
+            RpcTcpState::SynReceived => {
+                conn.tcp_state = RpcTcpState::Established;
+                vdebug_autoprefix!("RPCD: Connection established from {}.{}.{}.{}", src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
+                if !payload.is_empty() {
+                    conn.rx_buf.extend_from_slice(payload);
+                    conn.their_seq = seq + payload.len() as u32;
+                    process_rpc_messages(src_ip, dst_mac, server_port, client_port, conn);
+                }
+            }
+            RpcTcpState::Established => {
+                if conn.response_sent {
+                    vdebug_autoprefix!("RPCD: response ACKed, sending FIN");
+                    send_tcp_packet(src_ip, dst_mac, server_port, client_port,
+                                    conn.our_seq, conn.their_seq, TCP_FLAG_ACK | TCP_FLAG_FIN, &[]);
+                    conn.our_seq += 1;
+                    conn.tcp_state = RpcTcpState::FinWait;
+                    conn.last_send_tick = state.httpd_poll_tick;
+                    return;
+                }
+                if payload.is_empty() {
+                    return;
+                }
+                if seq == conn.their_seq {
+                    conn.rx_buf.extend_from_slice(payload);
+                    conn.their_seq = seq + payload.len() as u32;
+                } else if seq < conn.their_seq {
+                    let overlap = conn.their_seq - seq;
+                    if overlap < payload.len() as u32 {
+                        let new_data = &payload[overlap as usize..];
+                        conn.rx_buf.extend_from_slice(new_data);
+                        conn.their_seq = seq + payload.len() as u32;
+                    } else {
+                        send_tcp_packet(src_ip, dst_mac, server_port, client_port,
+                                        conn.our_seq, conn.their_seq, TCP_FLAG_ACK, &[]);
+                        conn.last_send_tick = state.httpd_poll_tick;
+                        return;
+                    }
+                } else {
+                    send_tcp_packet(src_ip, dst_mac, server_port, client_port,
+                                    conn.our_seq, conn.their_seq, TCP_FLAG_ACK, &[]);
+                    conn.last_send_tick = state.httpd_poll_tick;
+                    return;
+                }
+                process_rpc_messages(src_ip, dst_mac, server_port, client_port, conn);
+            }
+            RpcTcpState::FinWait => {
+                if (flags & (TCP_FLAG_FIN as u16)) != 0 {
+                    send_tcp_packet(src_ip, dst_mac, server_port, client_port,
+                                    conn.our_seq, ack + 1, TCP_FLAG_ACK, &[]);
+                    conn.tcp_state = RpcTcpState::Closed;
+                    vdebug_autoprefix!("RPCD: Connection closed from {}.{}.{}.{}", src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
+                }
+            }
+            RpcTcpState::None | RpcTcpState::Closed => {}
+        }
+    }
+
+    // 3. FIN = client closing
+    if (flags & (TCP_FLAG_FIN as u16)) != 0 {
+        send_tcp_packet(src_ip, dst_mac, server_port, client_port,
+                        conn.our_seq, ack + 1, TCP_FLAG_ACK | TCP_FLAG_FIN, &[]);
+        conn.tcp_state = RpcTcpState::Closed;
+        vdebug_autoprefix!("RPCD: Connection closed from {}.{}.{}.{}", src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
+    }
+
+    // 4. RST = connection reset
+    if (flags & (TCP_FLAG_RST as u16)) != 0 {
+        conn.tcp_state = RpcTcpState::Closed;
+        conn.rx_buf.clear();
+    }
+}
+
+/// Process complete length-prefixed protobuf messages from the connection buffer.
+fn process_rpc_messages(src_ip: [u8; 4], dst_mac: [u8; 6], server_port: u16, client_port: u16, conn: &mut RpcConn) {
+    loop {
+        if conn.rx_buf.len() < 5 {
+            break;
+        }
+        let flags_byte = conn.rx_buf[0];
+        let payload_len = u32::from_be_bytes([
+            conn.rx_buf[1], conn.rx_buf[2], conn.rx_buf[3], conn.rx_buf[4],
+        ]) as usize;
+
+        if conn.rx_buf.len() < 5 + payload_len {
+            break;
+        }
+
+        // Extract the protobuf payload
+        let payload_start = 5;
+        let payload_end = 5 + payload_len;
+        let proto_payload = conn.rx_buf[payload_start..payload_end].to_vec();
+        conn.rx_buf.drain(..payload_end);
+
+        vdebug_autoprefix!("RPCD: received frame (flags=0x{:02x}, payload={} bytes)", flags_byte, payload_len);
+
+        // Delegate to the network::rpc_server module for protobuf processing
+        if let Some(response_payload) = crate::network::rpc_server::process_proto_payload(&proto_payload) {
+            // Frame the response with the same flags
+            let response_frame = crate::network::transport::frame_message(flags_byte, &response_payload);
+
+            vdebug_autoprefix!("RPCD: sending response ({} bytes) to {}.{}.{}.{}",
+                response_frame.len(), src_ip[0], src_ip[1], src_ip[2], src_ip[3]);
+
+            send_tcp_packet(src_ip, dst_mac, server_port, client_port,
+                            conn.our_seq, conn.their_seq,
+                            TCP_FLAG_ACK | TCP_FLAG_PSH, &response_frame);
+            conn.our_seq += response_frame.len() as u32;
+            conn.response_sent = true;
+        }
+    }
 }
 
 /// Entry point for the dedicated HTTP poll AP worker (only when `net-multicore` is enabled).

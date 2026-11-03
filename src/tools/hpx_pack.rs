@@ -9,7 +9,7 @@ fn err_str(msg: &str) -> String {
     msg.to_string()
 }
 
-pub const HEADER_SIZE: usize = 40;
+pub const HEADER_SIZE: usize = 108;
 pub const KIND_APP: u16 = 1;
 pub const KIND_BACKGROUND: u16 = 2;
 pub const MAX_IMAGE_SIZE: usize = 64 * 1024 * 1024;
@@ -28,6 +28,8 @@ pub struct PackOptions {
     pub input_offset: u32,
     pub width: u32,
     pub height: u32,
+    pub file_version: u32,
+    pub description: [u8; 64],
 }
 
 /// Create an HPX v1 file from a position-independent x86-64 image.
@@ -57,6 +59,8 @@ pub fn pack_with_imports(image: &[u8], options: PackOptions, imports: &[ImportRe
     file.extend_from_slice(&options.input_offset.to_le_bytes());
     file.extend_from_slice(&options.width.to_le_bytes());
     file.extend_from_slice(&options.height.to_le_bytes());
+    file.extend_from_slice(&options.file_version.to_le_bytes());
+    file.extend_from_slice(&options.description);
     debug_assert_eq!(file.len(), HEADER_SIZE);
     file.extend_from_slice(image);
     if !imports.is_empty() {
@@ -116,4 +120,79 @@ pub fn parse_u32(value: &str) -> Result<u32, String> {
         value.parse::<u32>().map_err(|_| err_str("invalid decimal number"))?
     };
     Ok(parsed)
+}
+
+/// Metadata read from a `project.toml` file.
+#[derive(Clone, Debug)]
+pub struct ProjectMetadata {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+}
+
+/// Parse a version string like "1.2.3" into a packed u32 (0x010203).
+pub fn parse_version_to_u32(version: &str) -> u32 {
+    let mut parts = version.split('.');
+    let major = parts.next().and_then(|s| s.trim().parse::<u32>().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|s| s.trim().parse::<u32>().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|s| s.trim().parse::<u32>().ok()).unwrap_or(0);
+    (major << 16) | (minor << 8) | patch
+}
+
+/// Simple TOML parser that extracts `name`, `version`, and `description` from a `[package]` section.
+/// Supports only the subset needed for HPX metadata.
+pub fn parse_project_toml(content: &str) -> Result<ProjectMetadata, String> {
+    let mut in_package = false;
+    let mut name = String::new();
+    let mut version = String::new();
+    let mut description = String::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        
+        // Detect section headers
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let section = &trimmed[1..trimmed.len()-1].trim();
+            in_package = *section == "package";
+            continue;
+        }
+        
+        if !in_package || trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        
+        // Parse key = value
+        if let Some(eq_pos) = trimmed.find('=') {
+            let key = trimmed[..eq_pos].trim();
+            let value = trimmed[eq_pos + 1..].trim();
+            // Strip quotes from value
+            let value = if (value.starts_with('"') && value.ends_with('"')) || 
+                          (value.starts_with('\'') && value.ends_with('\'')) {
+                &value[1..value.len()-1]
+            } else {
+                value
+            };
+            
+            match key {
+                "name" => name = value.to_string(),
+                "version" => version = value.to_string(),
+                "description" => description = value.to_string(),
+                _ => {}
+            }
+        }
+    }
+    
+    if name.is_empty() {
+        Err(err_str("project.toml missing [package] name"))
+    } else {
+        Ok(ProjectMetadata { name, version, description })
+    }
+}
+
+/// Fill PackOptions description field from a string (null-terminated, max 64 bytes).
+pub fn fill_description(dest: &mut [u8; 64], text: &str) {
+    let bytes = text.as_bytes();
+    let len = bytes.len().min(63); // leave room for null terminator
+    dest[..len].copy_from_slice(&bytes[..len]);
+    dest[len] = 0;
 }

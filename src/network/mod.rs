@@ -7,3 +7,5 @@ pub mod protobuf;
 pub mod generated;
 pub mod dispatcher;
 pub mod transport;
+pub mod rpc_server;
+pub mod rpc_client;

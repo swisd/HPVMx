@@ -1,5 +1,5 @@
 //! Minimal networking scaffolding for HPVMx
-//! Provides placeholder implementations for ping, lanscan, and an HTTP management server
+//! Provides placeholder implementations for ping, lanscan, and an HTTP hypervisor server
 //! so shell commands are available without requiring a fully wired NIC.
 
 #![allow(dead_code)]
@@ -680,7 +680,7 @@ pub fn lanscan(prefix: &str) {
     crate::vdebug!("NET", "scan complete. hosts detected: {}", found.len());
 }
 
-/// Start the HTTP management server on the specified port.
+/// Start the HTTP hypervisor server on the specified port.
 /// Ensures the network stack is initialized first, then enables TCP/HTTP handling
 /// and spawns a background polling task so incoming requests are processed in real-time.
 pub fn httpd_start(port: u16) {
@@ -726,6 +726,72 @@ pub fn httpd_stop() {
         return;
     }
     net_stack::httpd_stop();
+}
+
+static WEBDAV_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Start the WebDAV server on the specified port for Windows File Explorer discovery.
+/// Independent of the HTTP hypervisor server — both can run simultaneously.
+pub fn webdav_start(port: u16) {
+    crate::vdebug!("WebDAV", "webdav_start called with port {}", port);
+    ensure_net();
+
+    if !net_stack::is_initialized() {
+        hpvm_error!("WebDAV", "cannot start: network stack not initialized");
+        return;
+    }
+
+    if WEBDAV_RUNNING.swap(true, Ordering::SeqCst) {
+        hpvm_warn!("WebDAV", "already running");
+        return;
+    }
+
+    net_stack::webdav_start(port);
+
+    let state = net_stack::get_state();
+    hpvm_info!("WebDAV", "Server started on {}.{}.{}.{}:{}",
+        state.ip_addr[0], state.ip_addr[1], state.ip_addr[2], state.ip_addr[3], port);
+}
+
+pub fn webdav_stop() {
+    if !WEBDAV_RUNNING.swap(false, Ordering::SeqCst) {
+        hpvm_warn!("WebDAV", "not running");
+        return;
+    }
+    net_stack::webdav_stop();
+}
+
+static RPCD_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Start the RPC (MSMI) server on the specified port (default: 5001).
+/// Handles protobuf VmActionRequest/VmActionResponse messages from the intermediate server.
+pub fn rpcd_start(port: u16) {
+    crate::vdebug!("RPCD", "rpcd_start called with port {}", port);
+    ensure_net();
+
+    if !net_stack::is_initialized() {
+        hpvm_error!("RPCD", "cannot start: network stack not initialized");
+        return;
+    }
+
+    if RPCD_RUNNING.swap(true, Ordering::SeqCst) {
+        hpvm_warn!("RPCD", "already running");
+        return;
+    }
+
+    net_stack::rpcd_start(port);
+
+    let state = net_stack::get_state();
+    hpvm_info!("RPCD", "MSMI RPC server started on {}.{}.{}.{}:{}",
+        state.ip_addr[0], state.ip_addr[1], state.ip_addr[2], state.ip_addr[3], port);
+}
+
+pub fn rpcd_stop() {
+    if !RPCD_RUNNING.swap(false, Ordering::SeqCst) {
+        hpvm_warn!("RPCD", "not running");
+        return;
+    }
+    net_stack::rpcd_stop();
 }
 
 /// Save network configuration to XDB hive0 for persistence across reboots

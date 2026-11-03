@@ -1,4 +1,5 @@
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Ord, PartialOrd)]
+#[repr(C)]
 pub struct _GUID {
     pub Data1: u32,
     pub Data2: u16,

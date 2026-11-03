@@ -1,6 +1,6 @@
 [package]
 name = "HPVMx"
-version = "1.41.62"
+version = "1.42.24"
 edition = "2024"
 
 [[bin]]
@@ -18,6 +18,9 @@ crypt = []
 # When disabled (default), the BSP runs network polling via a fast timer instead.
 # Enable this only if the global lock registry and MP services are stable.
 net-multicore = []
+# Enable PS/2 mouse driver for physical hardware. On VirtualBox/QEMU the PS/2 port
+# polling can interfere with UEFI keyboard input, so keep it disabled by default.
+ps2_mouse = []
 
 [profile.dev]
 panic = "abort"

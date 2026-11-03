@@ -1,11 +1,28 @@
 use core::ffi::c_void;
 
 pub type FARPROC = Option<unsafe extern "system" fn() -> isize>;
+pub type FARPROC_TYPE<A, T> = Option<unsafe extern "system" fn(A) -> T>;
 pub type FARPTR = c_void;
 
 pub unsafe fn fp_addr_as_func<F, R>(addr: FARPROC) -> Option<extern "system" fn(F) -> R> {
     unsafe {
         core::mem::transmute_copy(&addr)
+    }
+}
+
+pub unsafe fn fpt_addr_as_func<F, R>(addr: FARPROC_TYPE<F, R>) -> Option<unsafe extern "system" fn(F) -> R> {
+    unsafe {
+        core::mem::transmute_copy(&addr)
+    }
+}
+
+pub unsafe fn addr_as_fp_func<A, R>(addr: u64) -> Option<unsafe extern "system" fn (A) -> R> {
+    if addr == 0 {
+        None
+    } else {
+        // Cast the u64 address to a raw pointer, then transmute to the function pointer
+        let raw_ptr = addr as *const ();
+        Some(core::mem::transmute(raw_ptr))
     }
 }
 

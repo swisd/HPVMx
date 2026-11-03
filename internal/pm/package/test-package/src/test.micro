@@ -53,19 +53,14 @@ struct Point {
 
 export fn main() {
 
-    // 
-    // ARRAY TESTING
-    // 
-    //let arr = [1, 2, 3, 4, 5];
+
+    let arr = [1, 2, 3, 4, 5];
 
     // swap arr[0] and arr[4]
-    //let temp = arr[0];
-    //arr[0] = arr[4];
-    //arr[4] = temp;
+    let temp = arr[0];
+    arr[0] = arr[4];
+    arr[4] = temp;
 
-    // 
-    // STRUCT TESTING
-    // 
     let p: ptr = alloc_struct(Point);
 
     p.x = 10;
@@ -74,15 +69,9 @@ export fn main() {
     // modify using function
     p.y = add(p.y, 5);   // 25
 
-    // 
-    // FUNCTION TESTING
-    // 
     let z = add(10, 5);        // 15
     let m = mul(3, 4);         // 12
 
-    // 
-    // LOOP + CONDITIONAL TEST
-    // 
     let counter = 0;
     let acc = 0;
 

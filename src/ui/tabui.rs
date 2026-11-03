@@ -179,6 +179,7 @@ pub mod overview {
         pub total_memory_mb: u32,
         pub disk_read_kbps: u32,
         pub disk_write_kbps: u32,
+        pub disk_usage_percent: u32,
         pub net_rx_kbps: u32,
         pub net_tx_kbps: u32,
         pub running_vms: usize,
@@ -196,6 +197,7 @@ pub mod overview {
                 total_memory_mb: 0,
                 disk_read_kbps: 0,
                 disk_write_kbps: 0,
+                disk_usage_percent: 0,
                 net_rx_kbps: 0,
                 net_tx_kbps: 0,
                 running_vms: 0,
@@ -232,7 +234,7 @@ pub mod overview {
             
             pg.draw_text(content_x + 20, curr_y, "I/O Performance:", 0xAAAAAA);
             curr_y += 20;
-            pg.draw_text(content_x + 40, curr_y, &format!("Disk:   Read {} KB/s, Write {} KB/s", self.disk_read_kbps, self.disk_write_kbps), 0xCCCCCC);
+            pg.draw_text(content_x + 40, curr_y, &format!("Disk:   Read {} KB/s, Write {} KB/s, {}% Used", self.disk_read_kbps, self.disk_write_kbps, self.disk_usage_percent), 0xCCCCCC);
             curr_y += 20;
             pg.draw_text(content_x + 40, curr_y, &format!("Network: RX {} KB/s, TX {} KB/s", self.net_rx_kbps, self.net_tx_kbps), 0xCCCCCC);
             curr_y += 30;
@@ -269,6 +271,7 @@ pub mod overview {
                 self.total_memory_mb = data.resources.total_memory_mb;
                 self.disk_read_kbps = data.resources.disk_read_kbps as u32;
                 self.disk_write_kbps = data.resources.disk_write_kbps as u32;
+                self.disk_usage_percent = data.resources.disk_usage_percent;
                 self.net_rx_kbps = data.resources.net_rx_kbps as u32;
                 self.net_tx_kbps = data.resources.net_tx_kbps as u32;
                 self.running_vms = data.vms.iter().filter(|v| v.state.contains("Running")).count();
@@ -2079,6 +2082,7 @@ pub mod resources {
                     net_rx_kbps: 0,
                     net_tx_kbps: 0,
                     gpu_usage: 0,
+                    disk_usage_percent: 0,
                     fps: 0,
                     frame_ms: 0,
                     mem_history: vec![],
@@ -3397,22 +3401,26 @@ pub mod storage {
             Key::Printable(c) => {
                 let ch = char::from(c);
                 if ch == '[' || ch == '{' {
+                    ui.filesys_pending_action = None;
                     if ui.selected_disk_idx > 0 {
                         ui.select_disk_tab(ui.selected_disk_idx - 1);
                     }
                     true
                 } else if ch == ']' || ch == '}' {
+                    ui.filesys_pending_action = None;
                     if ui.selected_disk_idx + 1 < ui.storage_disks.len() {
                         ui.select_disk_tab(ui.selected_disk_idx + 1);
                     }
                     true
                 } else if (b'1'..=b'9').contains(&(ch as u8)) {
+                    ui.filesys_pending_action = None;
                     let idx = (ch as u8 - b'1') as usize;
                     if idx < ui.storage_disks.len() {
                         ui.select_disk_tab(idx);
                     }
                     true
                 } else if ch == '\t' {
+                    ui.filesys_pending_action = None;
                     if !ui.storage_disks.is_empty() {
                         let next = (ui.selected_disk_idx + 1) % ui.storage_disks.len();
                         ui.select_disk_tab(next);
@@ -3429,12 +3437,14 @@ pub mod storage {
                 }
             }
             Key::Special(ScanCode::PAGE_UP) => {
+                ui.filesys_pending_action = None;
                 if ui.selected_disk_idx > 0 {
                     ui.select_disk_tab(ui.selected_disk_idx - 1);
                 }
                 true
             }
             Key::Special(ScanCode::PAGE_DOWN) => {
+                ui.filesys_pending_action = None;
                 if ui.selected_disk_idx + 1 < ui.storage_disks.len() {
                     ui.select_disk_tab(ui.selected_disk_idx + 1);
                 }
@@ -3633,7 +3643,7 @@ pub mod storage {
                     }
                     7 => {
                         ui.filesys_pending_action = Some(FilePendingAction::Delete);
-                        ui.status_line = format!("Confirm delete of {}", entry.name);
+                        ui.status_line = format!("⚠ Delete {}? Press END to confirm, ESC to cancel", entry.name);
                     }
                     _ => {}
                 }
@@ -3677,6 +3687,7 @@ pub mod storage {
                 let alias = self.storage_disks[idx].alias.clone();
                 self.current_path = format!("{}:\\", alias);
                 self.selected_file_idx = 0;
+                self.filesys_pending_action = None;
                 self.refresh_storage();
             }
         }
@@ -3777,6 +3788,15 @@ pub mod storage {
                 });
             }
 
+            // Sync with FileSystem's drive handles to ensure aliases match
+            // This prevents FileReadFault when switching disks
+            let fs_state = crate::FileSystem::get_state();
+            
+            // Build a map from handle to alias from FileSystem
+            let handle_to_alias: alloc::collections::BTreeMap<uefi::Handle, String> = fs_state.drive_handles.iter()
+                .map(|(alias, handle)| (*handle, alias.clone()))
+                .collect();
+
             valid_disks.sort_by(|a, b| {
                 let a_is_boot = a.volume_label.eq_ignore_ascii_case("boot");
                 let b_is_boot = b.volume_label.eq_ignore_ascii_case("boot");
@@ -3785,8 +3805,11 @@ pub mod storage {
 
             let mut detected_disks = Vec::new();
             for (idx, disk) in valid_disks.into_iter().enumerate() {
+                let alias = handle_to_alias.get(&disk.handle)
+                    .cloned()
+                    .unwrap_or_else(|| format!("dsk{}", idx));
                 detected_disks.push(DiskTabInfo {
-                    alias: format!("dsk{}", idx),
+                    alias,
                     volume_label: disk.volume_label,
                     total_bytes: disk.total_bytes,
                     free_bytes: disk.free_bytes,
@@ -3922,19 +3945,23 @@ pub mod storage {
                 Key::Printable(c) => {
                     let ch = char::from(c);
                     if ch == '[' || ch == '{' {
+                        self.filesys_pending_action = None;
                         if self.selected_disk_idx > 0 {
                             self.select_disk_tab(self.selected_disk_idx - 1);
                         }
                     } else if ch == ']' || ch == '}' {
+                        self.filesys_pending_action = None;
                         if self.selected_disk_idx + 1 < self.storage_disks.len() {
                             self.select_disk_tab(self.selected_disk_idx + 1);
                         }
                     } else if ch >= '1' && ch <= '9' {
+                        self.filesys_pending_action = None;
                         let idx = (ch as u8 - b'1') as usize;
                         if idx < self.storage_disks.len() {
                             self.select_disk_tab(idx);
                         }
                     } else if ch == '\t' {
+                        self.filesys_pending_action = None;
                         if !self.storage_disks.is_empty() {
                             let next = (self.selected_disk_idx + 1) % self.storage_disks.len();
                             self.select_disk_tab(next);
@@ -3942,11 +3969,13 @@ pub mod storage {
                     }
                 }
                 Key::Special(ScanCode::PAGE_UP) => {
+                    self.filesys_pending_action = None;
                     if self.selected_disk_idx > 0 {
                         self.select_disk_tab(self.selected_disk_idx - 1);
                     }
                 }
                 Key::Special(ScanCode::PAGE_DOWN) => {
+                    self.filesys_pending_action = None;
                     if self.selected_disk_idx + 1 < self.storage_disks.len() {
                         self.select_disk_tab(self.selected_disk_idx + 1);
                     }
@@ -4095,7 +4124,7 @@ pub mod storage {
                         }
                         7 => {
                             self.filesys_pending_action = Some(FilePendingAction::Delete);
-                            self.status_line = format!("Confirm delete of {}", entry.name);
+                            self.status_line = format!("⚠ Delete {}? Press END to confirm, ESC to cancel", entry.name);
                         }
                         _ => {}
                     }
@@ -5091,6 +5120,7 @@ pub mod settings {
                     pg_dither: false,
                     pg_glitch: false,
                     pg_aberration: 0,
+                    windows_discovery: false,
                 },
                 selected_settings_idx: 0,
                 selected_settings_category_idx: 0,
@@ -5133,6 +5163,7 @@ pub mod settings {
                     (String::from("HPVMX_NET_PROFILE"), self.option_value(&["dhcp", "static", "loopback"], self.settings.network_profile), false, false),
                     (String::from("HPVMX_NET_TARGET"), String::from("none"), false, false),
                     (String::from("HPVMX_HTTPD_PORT"), String::from("8080"), false, false),
+                    (String::from("Windows Discovery (WebDAV)"), if self.settings.windows_discovery { "on" } else { "off" }.to_string(), false, false),
                 ],
                 5 => vec![
                     (String::from("HPVMX_STORAGE_POLICY"), self.option_value(&["preserve", "confirm-delete", "developer"], self.settings.storage_policy), false, false),
@@ -5262,6 +5293,7 @@ pub mod settings {
                             },
                             4 => match self.selected_settings_idx {
                                 0 => self.settings.network_profile = (self.settings.network_profile + 1) % 3,
+                                3 => self.settings.windows_discovery = !self.settings.windows_discovery,
                                 _ => {}
                             },
                             5 => match self.selected_settings_idx {

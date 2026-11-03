@@ -161,6 +161,7 @@ pub struct UiSettings {
     pub pg_dither: bool,
     pub pg_glitch: bool,
     pub pg_aberration: usize, // 0: off, 1: low, 2: mid, 3: high
+    pub windows_discovery: bool, // Enable WebDAV for Windows File Explorer discovery (default: off)
 }
 
 #[derive(Clone, Copy, Debug, Ord, PartialEq, Eq, PartialOrd)]
@@ -525,6 +526,7 @@ impl DashboardUI {
                 pg_dither: false,
                 pg_glitch: false,
                 pg_aberration: 0,
+                windows_discovery: false,
             },
             status_line: String::from("Ready"),
             command_history: Vec::new(),
@@ -2457,11 +2459,11 @@ impl DashboardUI {
             }
             4 => {
                 crate::devices::net::httpd_start(8080);
-                self.status_line = String::from("HTTP management server started on 8080");
+                self.status_line = String::from("HTTP hypervisor server started on 8080");
             }
             5 => {
                 crate::devices::net::httpd_stop();
-                self.status_line = String::from("HTTP management server stopped");
+                self.status_line = String::from("HTTP hypervisor server stopped");
             }
             _ => {}
         }

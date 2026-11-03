@@ -1,0 +1,4 @@
+[package]
+name="packet-inspector"
+description="Hex based packet inspector and live viewer"
+version="0.0.1"

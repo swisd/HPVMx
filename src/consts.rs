@@ -24,6 +24,20 @@ pub const NULL_QWORD: &str = "\0\0\0\0\0\0\0\0";
 pub const NULL_FLOAT: &str = "\0\0\0\0";
 pub const NULL_DOUBLE: &str = "\0\0\0\0\0\0\0\0";
 pub const NULL_BOOL: &str = "\0";
+
+/// If true, bypass UEFI mouse protocols (AbsolutePointer/SimplePointer) and use the PS/2 driver
+/// directly for mouse input. Set to `true` to force PS/2 mouse on physical hardware where UEFI
+/// protocols interfere, or `false` to use the default fallback chain (UEFI first, PS/2 as fallback).
+/// Only available when the `ps2_mouse` feature is enabled.
+#[cfg(feature = "ps2_mouse")]
+pub const FORCE_PS2_MOUSE: bool = false;
+
+/// If true, force USB Tablet mode — treat SimplePointer absolute coordinates as direct cursor
+/// positions. USB Tablet is used by QEMU (`-device usb-tablet`) and VirtualBox to provide
+/// absolute mouse coordinates without grabbing the mouse. Set to `true` to force this mode,
+/// or `false` to use the default fallback chain.
+pub const FORCE_USB_TABLET_MOUSE: bool = false;
+
 use crate::consts::net::phy::Driver;
 use crate::types::*;
 

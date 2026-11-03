@@ -12,13 +12,15 @@ pub mod rqproc;
 pub mod lut;
 pub mod types;
 pub mod vmdispatch;
+pub mod vmdispatcher;
 
 pub use interface::{HostVmBackend, HostVmError, HypervisorBackend};
 pub use lut::{CidLut, ClientDataLut, InstanceLut, PortLut};
 pub use rqproc::{RequestProcessor, RequestResult};
 pub use types::*;
 pub use vmdispatch::{GuardError, HeartbeatSource, PortError, SmRingBuf, VmGuard, VmPort, VmPortResponse};
+pub use vmdispatcher::{NodeRegistry, VmDispatcher};
 
 pub fn init_hosting_subsystem() {
-    vdebug_autoprefix!("Hosting subsystem initialized (VM, Container, CVM, Port LUT, Client LUT, VirtCOM)");
+    vdebug_autoprefix!("Hosting subsystem initialized (VM, Container, CVM, Port LUT, Client LUT, VirtCOM, VmDispatcher)");
 }

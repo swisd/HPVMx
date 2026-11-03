@@ -1182,6 +1182,45 @@ impl PixelGraphics {
         }
     }
 
+    /// Draw a tooltip near the cursor that adapts to stay on-screen.
+    /// Returns the tooltip's final (x, y) position for reference.
+    pub fn draw_tooltip(&mut self, cursor_x: usize, cursor_y: usize, text: &str) -> (usize, usize) {
+        let padding = 4usize;
+        let tooltip_h = 24usize;
+        // Estimate tooltip width from text length (approx 8px per char + padding)
+        let text_w = text.len().saturating_mul(8);
+        let tooltip_w = text_w.max(40).min(300) + padding * 2;
+
+        // Default: position tooltip below and to the right of the cursor
+        let mut tx = cursor_x + 16;
+        let mut ty = cursor_y + 16;
+
+        // Adapt: if tooltip would go off the right edge, flip to the left
+        if tx + tooltip_w > self.width.saturating_sub(4) {
+            tx = cursor_x.saturating_sub(tooltip_w + 4);
+        }
+
+        // Adapt: if tooltip would go off the bottom edge, flip above
+        if ty + tooltip_h > self.height.saturating_sub(4) {
+            ty = cursor_y.saturating_sub(tooltip_h + 4);
+        }
+
+        // Final clamp to ensure tooltip stays within screen bounds
+        tx = tx.min(self.width.saturating_sub(tooltip_w + 2));
+        ty = ty.min(self.height.saturating_sub(tooltip_h + 2));
+
+        // Draw shadow
+        self.fill_rounded_rect(tx + 2, ty + 2, tooltip_w, tooltip_h, 3, 0x00000040);
+        // Draw background
+        self.fill_rounded_rect(tx, ty, tooltip_w, tooltip_h, 3, 0x1E2330);
+        // Draw border
+        self.draw_rounded_rect_outline(tx, ty, tooltip_w, tooltip_h, 3, 0x475569);
+        // Draw text
+        self.draw_text(tx + padding, ty + 7, text, 0xF1F5F9);
+
+        (tx, ty)
+    }
+
     pub fn draw_command_palette(&mut self, query: &str, results: &[&str], selected: usize, scroll_offset: usize) {
         let w = if self.width > 700 { 640 } else { self.width.saturating_sub(40).max(320) };
         let h = 280;

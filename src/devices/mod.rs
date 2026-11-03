@@ -9,3 +9,5 @@ pub mod net_stack;
 pub mod timer;
 pub mod audio;
 pub mod hda;
+#[cfg(feature = "ps2_mouse")]
+pub mod ps2;

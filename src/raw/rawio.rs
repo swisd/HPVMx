@@ -1,5 +1,4 @@
 use crate::vdebug_autoprefix;
-use crate::x4::types::{BYTE, DWORD, WORD};
 
 #[inline]
 pub unsafe fn __outbyte(port: u16, value: u8) {
@@ -13,7 +12,7 @@ pub unsafe fn __outbyte(port: u16, value: u8) {
 }
 
 #[inline]
-pub unsafe fn __inbyte(port: u16) -> BYTE {
+pub unsafe fn __inbyte(port: u16) -> u8 {
     vdebug_autoprefix!("INBYTE p{port:x}");
     let result: u8;
     core::arch::asm!(
@@ -51,7 +50,7 @@ pub unsafe fn __outdword(port: u16, value: u32) {
 
 
 #[inline]
-pub unsafe fn __inword(port: u16) -> WORD {
+pub unsafe fn __inword(port: u16) -> u16 {
     vdebug_autoprefix!("INWORD p{port:x}");
     let result: u16;
     core::arch::asm!(
@@ -65,7 +64,7 @@ pub unsafe fn __inword(port: u16) -> WORD {
 
 
 #[inline]
-pub unsafe fn __indword(port: u16) -> DWORD {
+pub unsafe fn __indword(port: u16) -> u32 {
     vdebug_autoprefix!("INDWORD p{port:x}");
     let result: u32;
     core::arch::asm!(

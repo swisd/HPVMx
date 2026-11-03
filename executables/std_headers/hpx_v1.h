@@ -4,10 +4,29 @@
 #include <stdint.h>
 
 #define HPX_EXECUTABLE_ABI_VERSION 1
-#define HPX_HOST_API_VERSION 2
+#define HPX_HOST_API_VERSION 3
+#define HPX_HEADER_SIZE 108
 
 typedef struct HpxCpuInfo HpxCpuInfo;
 typedef struct HpxPciDeviceInfo HpxPciDeviceInfo;
+typedef struct HpxHeader HpxHeader;
+
+/* HPX file header — 108 bytes, little-endian */
+struct HpxHeader {
+    uint8_t magic[4];          /* 0: "HPX1" */
+    uint16_t abi_version;      /* 4: ABI version */
+    uint16_t kind;             /* 6: executable kind */
+    uint32_t header_size;      /* 8: header size (108) */
+    uint32_t image_size;       /* 12: size of the PIC image */
+    uint32_t state_size;       /* 16: state buffer size in u64s */
+    uint32_t step_offset;      /* 20: entry point offset */
+    uint32_t draw_offset;      /* 24: draw callback offset */
+    uint32_t input_offset;     /* 28: input callback offset */
+    uint32_t width;            /* 32: app width */
+    uint32_t height;           /* 36: app height */
+    uint32_t file_version;     /* 40: file version (e.g., 0x010203 for 1.2.3) */
+    uint8_t description[64];   /* 44: null-terminated description string */
+};
 
 typedef struct _HpxHostApi {
     uint32_t abi_version;
@@ -35,9 +54,28 @@ typedef struct _HpxHostApi {
     void (*pci_write_u32)(uint8_t bus, uint8_t slot, uint8_t function,
                           uint8_t offset, uint32_t value);
     int32_t (*network_initialize)(void);
+    uint8_t (*network_is_initialized)(void);
     uint8_t (*network_link_up)(void);
     int32_t (*network_transmit)(const uint8_t *frame, size_t len);
     int64_t (*network_receive)(uint8_t *out, size_t capacity);
+    int32_t (*network_get_mac)(uint8_t *out, size_t capacity);
+    int64_t (*network_get_ip)(uint8_t *out, size_t capacity);
+    int32_t (*network_set_static_ip)(const uint8_t *ip, size_t ip_len,
+                                     const uint8_t *gw, size_t gw_len,
+                                     const uint8_t *mask, size_t mask_len);
+    int32_t (*network_ping)(const uint8_t *target, size_t target_len);
+    int32_t (*network_httpd_start)(uint16_t port);
+    void (*network_httpd_stop)(void);
+    int32_t (*network_webdav_start)(uint16_t port);
+    void (*network_webdav_stop)(void);
+    int32_t (*network_rpcd_start)(uint16_t port);
+    void (*network_rpcd_stop)(void);
+    int64_t (*network_status)(uint8_t *out, size_t capacity);
+    int32_t (*network_lanscan)(const uint8_t *prefix, size_t prefix_len);
+    int32_t (*network_save_config)(const uint8_t *ip, size_t ip_len,
+                                   const uint8_t *gw, size_t gw_len,
+                                   const uint8_t *mask, size_t mask_len);
+    int64_t (*network_load_config)(uint8_t *out, size_t capacity);
     void (*beep)(uint32_t frequency_hz);
     void (*play_tone)(uint32_t frequency_hz, uint64_t duration_ms);
     void (*mute)(void);

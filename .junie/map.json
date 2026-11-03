@@ -1,10 +1,56 @@
 {
   "project_name": "HPVMx",
-  "last_updated_by_junie": "2026-10-26T20:02",
+  "last_updated_by_junie": "2026-11-02T11:44",
   "files": {
+    "tools/hpx_pack.py": {
+      "path": "tools/hpx_pack.py",
+      "purpose": "Python CLI tool for packaging flat x86-64 images into HPX v1 .hpx files — 108-byte header with project.toml metadata support.",
+      "key_regions": [
+        {
+          "lines": "7-16",
+          "description": "HEADER_SIZE constant (108) and parse_version_to_u32() helper"
+        },
+        {
+          "lines": "19-51",
+          "description": "parse_project_toml() — simple TOML parser for [package] section"
+        },
+        {
+          "lines": "54-57",
+          "description": "fill_description() — null-terminated 64-byte description packing"
+        },
+        {
+          "lines": "60-101",
+          "description": "CLI argument parsing, validation, and header + image packing logic"
+        }
+      ],
+      "objects": {
+        "parse_version_to_u32": {
+          "type": "fn",
+          "args": {
+            "version": "str"
+          },
+          "returns": "int"
+        },
+        "parse_project_toml": {
+          "type": "fn",
+          "args": {
+            "path": "Path"
+          },
+          "returns": "dict"
+        },
+        "fill_description": {
+          "type": "fn",
+          "args": {
+            "text": "str"
+          },
+          "returns": "bytes"
+        }
+      },
+      "dependencies": []
+    },
     "tools/test_http_server.py": {
       "path": "tools/test_http_server.py",
-      "purpose": "Comprehensive Python test suite for HPVMx HTTP server — 15+ tests across 5 phases: diagnostics, endpoints, connection handling, response structure, and low-level byte analysis.",
+      "purpose": "Comprehensive Python test suite for HPVMx HTTP server — 23+ tests across 7 phases: diagnostics, endpoints, connection handling, response structure, low-level byte analysis, SSDP/UPnP discovery, and WebDAV.",
       "key_regions": [
         {
           "lines": "19-25",
@@ -51,8 +97,20 @@
           "description": "Raw socket diagnostic: byte-level hex dump of request and response"
         },
         {
-          "lines": "1041-1130",
-          "description": "main: entry point with 5-phase test execution and summary report"
+          "lines": "913-972",
+          "description": "SSDP helper functions: send_ssdp_msearch sends M-SEARCH via UDP multicast, parse_ssdp_response parses SSDP headers"
+        },
+        {
+          "lines": "999-1152",
+          "description": "SSDP/UPnP tests: M-SEARCH for ssdp:all, upnp:rootdevice, NetworkInfrastructure; GET /desc.xml validation"
+        },
+        {
+          "lines": "1250-1448",
+          "description": "WebDAV tests: PROPFIND /, OPTIONS /, MKCOL, GET / — validates status codes, DAV headers, XML body"
+        },
+        {
+          "lines": "1579-1699",
+          "description": "main: entry point with 7-phase test execution (added Phase 6: SSDP/UPnP, Phase 7: WebDAV)"
         }
       ],
       "objects": {
@@ -126,6 +184,82 @@
           "returns": "bool"
         },
         "test_raw_socket_diagnostic": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "port": "int"
+          },
+          "returns": "bool"
+        },
+        "send_ssdp_msearch": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "search_target": "str"
+          },
+          "returns": "list(tuple(raw_bytes, text, addr))"
+        },
+        "parse_ssdp_response": {
+          "type": "fn",
+          "args": {
+            "text": "str"
+          },
+          "returns": "tuple(status_code, headers_dict)"
+        },
+        "test_ssdp_msearch_all": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str"
+          },
+          "returns": "bool"
+        },
+        "test_ssdp_msearch_rootdevice": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str"
+          },
+          "returns": "bool"
+        },
+        "test_ssdp_msearch_network_infra": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str"
+          },
+          "returns": "bool"
+        },
+        "test_ssdp_desc_xml": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "port": "int"
+          },
+          "returns": "bool"
+        },
+        "test_webdav_propfind_root": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "port": "int"
+          },
+          "returns": "bool"
+        },
+        "test_webdav_options": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "port": "int"
+          },
+          "returns": "bool"
+        },
+        "test_webdav_mkcol": {
+          "type": "fn",
+          "args": {
+            "server_ip": "str",
+            "port": "int"
+          },
+          "returns": "bool"
+        },
+        "test_webdav_get_file": {
           "type": "fn",
           "args": {
             "server_ip": "str",
@@ -4251,8 +4385,12 @@
     },
     "src/consts.rs": {
       "path": "src/consts.rs",
-      "purpose": "Global hardware constants, port definitions, and memory map offsets.",
+      "purpose": "Global hardware constants, port definitions, memory map offsets, and runtime configuration flags (e.g., FORCE_USB_TABLET_MOUSE). FORCE_PS2_MOUSE is feature-gated behind ps2_mouse.",
       "key_regions": [
+        {
+          "lines": "1-38",
+          "description": "Math constants, string constants, and configuration flags like FORCE_USB_TABLET_MOUSE. FORCE_PS2_MOUSE is behind #[cfg(feature = \"ps2_mouse\")]"
+        },
         {
           "lines": "27-699",
           "description": "Module imports, extern crates, and prelude dependencies"
@@ -4267,6 +4405,16 @@
         }
       ],
       "objects": {
+        "FORCE_PS2_MOUSE": {
+          "type": "pub const (feature-gated: ps2_mouse)",
+          "args": {},
+          "returns": "bool"
+        },
+        "FORCE_USB_TABLET_MOUSE": {
+          "type": "pub const",
+          "args": {},
+          "returns": "bool"
+        },
         "Flags": {
           "type": "pub struct",
           "args": {},
@@ -4742,7 +4890,7 @@
     },
     "src/devices/mod.rs": {
       "path": "src/devices/mod.rs",
-      "purpose": "Device management and drivers.  This module provides interfaces for various hardware devices, such as network cards and timers.",
+      "purpose": "Device management and drivers. This module provides interfaces for various hardware devices, such as network cards and timers. PS/2 module is feature-gated behind ps2_mouse.",
       "key_regions": [
         {
           "lines": "1-11",
@@ -4756,7 +4904,121 @@
         "src/devices/net.rs",
         "src/devices/net_hw.rs",
         "src/devices/net_stack.rs",
+        "src/devices/ps2.rs",
         "src/devices/timer.rs"
+      ]
+    },
+    "src/devices/ps2.rs": {
+      "path": "src/devices/ps2.rs",
+      "purpose": "PS/2 keyboard and mouse driver (feature-gated: ps2_mouse) - directly interacts with PS/2 hardware ports (0x60 data, 0x64 command) using raw I/O calls from rawio.rs. Disabled by default because port polling interferes with UEFI keyboard input on VirtualBox/QEMU.",
+      "key_regions": [
+        {
+          "lines": "1-92",
+          "description": "PS/2 constants: controller ports, commands, status bits, and data structures (Ps2Keyboard, Ps2Mouse, Ps2Driver)"
+        },
+        {
+          "lines": "94-158",
+          "description": "Low-level I/O helpers: ps2_delay, wait_input_buffer_empty, wait_output_buffer_full, ps2_write_command, ps2_write_data, ps2_read_data"
+        },
+        {
+          "lines": "160-217",
+          "description": "Keyboard: keyboard_data_available, keyboard_read_scan_code, keyboard_init"
+        },
+        {
+          "lines": "219-308",
+          "description": "Mouse: mouse_init, mouse_data_available, mouse_read_packet (3-byte packet reading)"
+        },
+        {
+          "lines": "310-335",
+          "description": "ps2_init: full driver initialization returning Ps2Driver"
+        },
+        {
+          "lines": "337-400",
+          "description": "process_keyboard_scan_code: PS/2 Set 1 scan code to ASCII mapping with shift support"
+        },
+        {
+          "lines": "402-411",
+          "description": "update_mouse_state: parses mouse packet into button states and movement"
+        }
+      ],
+      "objects": {
+        "Ps2Keyboard": {
+          "type": "pub struct",
+          "args": {
+            "initialized": "bool",
+            "scan_code_set": "ScanCodeSet",
+            "make_code": "bool",
+            "shift_pressed": "bool",
+            "ctrl_pressed": "bool",
+            "alt_pressed": "bool"
+          }
+        },
+        "Ps2Mouse": {
+          "type": "pub struct",
+          "args": {
+            "initialized": "bool",
+            "left_button": "bool",
+            "right_button": "bool",
+            "middle_button": "bool",
+            "x_movement": "i8",
+            "y_movement": "i8",
+            "x_overflow": "bool",
+            "y_overflow": "bool"
+          }
+        },
+        "Ps2Driver": {
+          "type": "pub struct",
+          "args": {
+            "keyboard": "Ps2Keyboard",
+            "mouse": "Ps2Mouse"
+          }
+        },
+        "keyboard_init": {
+          "type": "pub unsafe fn",
+          "args": {},
+          "returns": "bool"
+        },
+        "mouse_init": {
+          "type": "pub unsafe fn",
+          "args": {},
+          "returns": "bool"
+        },
+        "ps2_init": {
+          "type": "pub unsafe fn",
+          "args": {},
+          "returns": "Ps2Driver"
+        },
+        "keyboard_read_scan_code": {
+          "type": "pub unsafe fn",
+          "args": {},
+          "returns": "Option<u8>"
+        },
+        "mouse_read_packet": {
+          "type": "pub unsafe fn",
+          "args": {},
+          "returns": "Option<(u8, i8, i8)>"
+        },
+        "process_keyboard_scan_code": {
+          "type": "pub fn",
+          "args": {
+            "scan_code": "u8",
+            "shift": "bool"
+          },
+          "returns": "Option<char>"
+        },
+        "update_mouse_state": {
+          "type": "pub fn",
+          "args": {
+            "mouse": "&mut Ps2Mouse",
+            "button_state": "u8",
+            "x": "i8",
+            "y": "i8"
+          },
+          "returns": "()"
+        }
+      },
+      "dependencies": [
+        "src/raw/rawio.rs"
       ]
     },
     "src/devices/net.rs": {
@@ -5009,7 +5271,7 @@
     },
     "src/devices/net_stack.rs": {
       "path": "src/devices/net_stack.rs",
-      "purpose": "UEFI Network Module - ICMP/IGMPv3/UDP/TCP over SNP with mDNS support, built-in HTTP server, IGMP multicast group management with source-specific filtering, static IP configuration, and per-protocol statistics tracking.",
+      "purpose": "UEFI Network Module - ICMP/IGMPv3/UDP/TCP over SNP with mDNS/SSDP/UPnP support, built-in HTTP server with WebDAV (PROPFIND/OPTIONS/MKCOL), RPC (MSMI) server on port 5001 for protobuf VM management, IGMP multicast group management with source-specific filtering, static IP configuration, and per-protocol statistics tracking.",
       "key_regions": [
         {
           "lines": "4-11",
@@ -5088,12 +5350,20 @@
           "description": "handle_tcp: TCP packet router — checksum validation removed (checksum offloading common in VMs); full header logging and HTTPD port matching"
         },
         {
-          "lines": "1114-1441",
-          "description": "handle_httpd: HTTP server TCP state machine — duplicate detection drops looped-back echoes by matching seq+payload_len indefinitely (no time window); fallback connections accept first data packet directly; ARP MAC resolution; SynReceived state trusts client's seq; FIN sent only after client ACKs response; enhanced debug logging for ACK handler showing conn_state, seq, ack, payload, our_seq, their_seq; Established state logs seq match check and empty payload cases"
+          "lines": "1114-1470",
+          "description": "handle_httpd: HTTP server TCP state machine — duplicate detection drops looped-back echoes by matching seq+payload_len indefinitely (no time window), but skips FinWait connections to allow the close handshake to complete; fallback connections accept first data packet directly; ARP MAC resolution; SynReceived state trusts client's seq; FIN sent only after client ACKs response; FinWait transitions to Closed silently on any incoming packet; enhanced debug logging for ACK handler showing conn_state, seq, ack, payload, our_seq, their_seq; Established state logs seq match check and empty payload cases"
         },
         {
-          "lines": "1510-1584",
-          "description": "send_tcp_packet: TCP packet construction and transmission with software-calculated TCP checksum (hardware may not support offloading); enhanced logging including dst_mac and checksum value; validate_tcp_checksum_frame: debug helper"
+          "lines": "1242-1502",
+          "description": "HTTP GET / handler: Enhanced web UI overview page with live statistics — ring graphs (CPU/GPU/MEM/NET usage), key metrics cards, I/O performance section, network statistics, virtualization section, system information section. Statistics use HYPERVISOR.get_stats() for accurate memory, BUSY_TSC for CPU usage, and link-capacity-based percentage for NET ring graph. Auto-refresh meta tag (5s), live pulse animation.",
+        },
+        {
+          "lines": "1503-1640",
+          "description": "HTTP GET /usage handler: JSON endpoint returning the same live statistics as structured data — hostname, version, time, uptime, CPU (cores, usage%), GPU (usage%), memory (total, used, usage%), network (IP, MAC, gateway, subnet, RX/TX rates and bytes and packets, usage%), disk (read/write rates and bytes and ops), virtualization (VMs running, total, hypervisor name). Content-Type: application/json."
+        },
+        {
+          "lines": "1676-1758",
+          "description": "MTU constants (MAX_FRAME_SIZE=1514, MAX_TCP_PAYLOAD=1460), send_tcp_segment: single MTU-compliant TCP segment sender with software checksum, send_tcp_packet: wrapper that segments large payloads into MTU-compliant chunks with proper sequence number advancement; validate_tcp_checksum_frame: debug helper"
         },
         {
           "lines": "2096-2114",
@@ -5106,6 +5376,10 @@
         {
           "lines": "2149-2232",
           "description": "http_poll_worker_entry and spawn_http_poll_worker: dedicated AP core poll loop — only compiled when `net-multicore` feature is enabled; uses global lock registry for exclusive SNP access coordination with BSP"
+        },
+        {
+          "lines": "2665-2971",
+          "description": "RPC (MSMI) server: RpcTcpState enum, RpcConn struct, rpc_ext module with RPC_CONNS table; rpcd_start/rpcd_stop functions; handle_rpcd TCP state machine for port 5001; process_rpc_messages deframes length-prefixed protobuf frames and delegates to network::rpc_server::process_proto_payload"
         },
         {
           "lines": "822-1062",
@@ -5359,7 +5633,7 @@
             "is_syn": "bool"
           },
           "returns": "Option<usize>",
-          "note": "Only reuses closed/empty connection slots when is_syn=true. Non-SYN packets (like lingering ACKs from closed connections) will return None and be silently dropped, preventing the infinite loop where closed connections were reused for ACK packets."
+          "note": "Four-step allocation: (1) match active connection by IP:port, (2) reuse closed/empty slot for SYN, (3) fallback for orphaned packets on closed slots, (4) if all slots full, evict the oldest stale connection idle for >10000 ticks (~10 seconds) to make room for new connections. This prevents 'no free connection slots' errors when connections get stuck."
         },
         "parse_http_request": {
           "type": "fn",
@@ -5583,19 +5857,344 @@
     },
     "src/network/mod.rs": {
       "path": "src/network/mod.rs",
-      "purpose": "Network module entry point — declares protobuf, generated, dispatcher, and transport submodules.",
+      "purpose": "Network module entry point — declares protobuf, generated, dispatcher, transport, and rpc_server submodules.",
       "key_regions": [
-        {
-          "lines": "1-10",
-          "description": "Module declarations for protobuf, generated, dispatcher, and transport"
-        }
+       {
+         "lines": "1-11",
+         "description": "Module declarations for protobuf, generated, dispatcher, transport, and rpc_server"
+       }
       ],
       "objects": {},
       "dependencies": [
         "src/network/protobuf.rs",
         "src/network/generated/mod.rs",
         "src/network/dispatcher.rs",
+        "src/network/transport.rs",
+        "src/network/rpc_server.rs"
+      ]
+    },
+    "src/network/rpc_server.rs": {
+      "path": "src/network/rpc_server.rs",
+      "purpose": "RPC server for MSMI protocol on port 5001. Handles VmActionRequest/Response for VM lifecycle AND ServerStatsRequest/Response + NodeStatsRequest/Response for stats polling. Collects system stats (CPU, memory, network, disk, VMs) and forwards to intermediate server.",
+      "key_regions": [
+        {
+          "lines": "1-28",
+          "description": "Module doc and imports — includes stats protobuf types (CpuStats, MemoryStats, NetworkStats, DiskStats, VirtualizationStats, NodeStats, ServerStatsRequest/Response, NodeStatsRequest/Response)"
+        },
+        {
+          "lines": "30-160",
+          "description": "proto_request_to_ipc: converts protobuf VmActionRequest to hosting IPCMessage"
+        },
+        {
+          "lines": "162-323",
+          "description": "process_proto_payload: dispatches ServerStatsRequest, NodeStatsRequest, and VmActionRequest (including GET_STATS/GET_NODE_STATS/GET_SERVER_STATS actions)"
+        },
+        {
+          "lines": "325-423",
+          "description": "collect_server_stats: gathers CPU, memory, network, disk, VM stats and returns ServerStatsResponse"
+        },
+        {
+          "lines": "425-470",
+          "description": "collect_node_stats: queries a specific node's stats via RPC or falls back to local registry data"
+        },
+        {
+          "lines": "472-532",
+          "description": "build_local_node_stats and query_node_stats_via_rpc: build NodeStats from registry or remote RPC query"
+        },
+        {
+          "lines": "534-553",
+          "description": "collect_node_stats_list: iterates all registered nodes and collects their stats"
+        },
+        {
+          "lines": "555-579",
+          "description": "Processor callback registration: register_processor_callback and is_processor_ready"
+        }
+      ],
+      "objects": {
+        "process_proto_payload": {
+          "type": "pub fn",
+          "args": {
+            "payload": "&[u8]"
+          },
+          "returns": "Option<Vec<u8>>"
+        },
+        "collect_server_stats": {
+          "type": "fn",
+          "args": {
+            "request_id": "&str"
+          },
+          "returns": "ServerStatsResponse"
+        },
+        "collect_node_stats": {
+          "type": "fn",
+          "args": {
+            "request_id": "&str",
+            "node_id": "&str"
+          },
+          "returns": "NodeStatsResponse"
+        },
+        "query_node_stats_via_rpc": {
+          "type": "fn",
+          "args": {
+            "node": "&NodeInfo"
+          },
+          "returns": "Option<NodeStats>"
+        },
+        "collect_node_stats_list": {
+          "type": "fn",
+          "args": {},
+          "returns": "Vec<NodeStats>"
+        },
+        "register_processor_callback": {
+          "type": "pub fn",
+          "args": {
+            "cb": "ProcessorCallback"
+          },
+          "returns": "()"
+        },
+        "is_processor_ready": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "bool"
+        },
+        "proto_request_to_ipc": {
+          "type": "fn",
+          "args": {
+            "request": "&VmActionRequest"
+          },
+          "returns": "Result<IPCMessage, String>"
+        },
+        "ProcessorCallback": {
+          "type": "type alias",
+          "args": {},
+          "returns": "fn(&IPCMessage) -> Result<RequestResult, HostVmError>"
+        }
+      },
+      "dependencies": [
+        "src/hosting/interface.rs",
+        "src/hosting/types.rs",
+        "src/hosting/vmdispatcher.rs",
+        "src/network/generated/external.rs",
+        "src/network/transport.rs",
+        "src/network/rpc_client.rs",
+        "src/devices/net_stack.rs",
+        "src/filesystem/mod.rs"
+      ]
+    },
+    "src/network/rpc_client.rs": {
+      "path": "src/network/rpc_client.rs",
+      "purpose": "RPC client for sending VmActionRequest and stats requests to remote nodes via MSMI protocol. Supports VM lifecycle actions, ServerStatsRequest/Response, and NodeStatsRequest/Response for intermediate server stats polling.",
+      "key_regions": [
+        {
+          "lines": "1-52",
+          "description": "Imports (includes stats protobuf types), constants, next_request_id generator, and parse_ip helper"
+        },
+        {
+          "lines": "54-160",
+          "description": "send_request_to_node: full TCP connect → send framed protobuf → poll for response → deframe → decode VmActionResponse"
+        },
+        {
+          "lines": "162-196",
+          "description": "ping_node: connectivity check, and build_vm_action_request helper"
+        },
+        {
+          "lines": "198-289",
+          "description": "request_server_stats: sends ServerStatsRequest to a node and returns decoded ServerStatsResponse"
+        },
+        {
+          "lines": "291-361",
+          "description": "request_node_stats: sends NodeStatsRequest for a specific node and returns NodeStatsResponse"
+        },
+        {
+          "lines": "363-400",
+          "description": "request_server_stats_legacy: sends VmActionRequest with GET_SERVER_STATS action for backward compatibility"
+        }
+      ],
+      "objects": {
+        "send_request_to_node": {
+          "type": "pub fn",
+          "args": {
+            "node": "&NodeInfo",
+            "request": "&VmActionRequest",
+            "timeout_ms": "u32"
+          },
+          "returns": "Option<VmActionResponse>"
+        },
+        "ping_node": {
+          "type": "pub fn",
+          "args": {
+            "node": "&NodeInfo"
+          },
+          "returns": "bool"
+        },
+        "build_vm_action_request": {
+          "type": "pub fn",
+          "args": {
+            "identity": "Option<VmIdentity>",
+            "environment": "i32",
+            "action": "i32",
+            "payload": "Option<ActionPayload>"
+          },
+          "returns": "VmActionRequest"
+        },
+        "request_server_stats": {
+          "type": "pub fn",
+          "args": {
+            "node": "&NodeInfo",
+            "timeout_ms": "u32"
+          },
+          "returns": "Option<ServerStatsResponse>"
+        },
+        "request_node_stats": {
+          "type": "pub fn",
+          "args": {
+            "node": "&NodeInfo",
+            "target_node_id": "&str",
+            "timeout_ms": "u32"
+          },
+          "returns": "Option<NodeStatsResponse>"
+        },
+        "request_server_stats_legacy": {
+          "type": "pub fn",
+          "args": {
+            "node": "&NodeInfo",
+            "timeout_ms": "u32"
+          },
+          "returns": "Option<ServerStatsResponse>"
+        }
+      },
+      "dependencies": [
+        "src/devices/net_stack.rs",
+        "src/hosting/types.rs",
+        "src/network/generated/external.rs",
         "src/network/transport.rs"
+      ]
+    },
+    "src/hosting/vmdispatcher.rs": {
+      "path": "src/hosting/vmdispatcher.rs",
+      "purpose": "VM Dispatcher: mode-aware request routing. In Node/Standalone mode, dispatches locally. In Manager mode, maintains NodeRegistry and forwards requests via RPC to registered nodes.",
+      "key_regions": [
+        {
+          "lines": "1-30",
+          "description": "Imports and constants (heartbeat timeout, RPC timeout)"
+        },
+        {
+          "lines": "32-153",
+          "description": "NodeRegistry: tracks connected nodes, instance-to-node mapping, capacity-based node selection, liveness checks"
+        },
+        {
+          "lines": "155-372",
+          "description": "VmDispatcher: mode-aware dispatch — local for Node/Standalone, RPC forwarding for Manager mode. Includes deploy() and forward_signal() convenience methods."
+        },
+        {
+          "lines": "374-467",
+          "description": "ipc_to_proto_request: converts IPCMessage to protobuf VmActionRequest for RPC forwarding"
+        }
+      ],
+      "objects": {
+        "NodeRegistry": {
+          "type": "pub struct",
+          "args": {
+            "nodes": "HashMap<String, NodeInfo>",
+            "instance_to_node": "HashMap<String, String>"
+          },
+          "returns": "Self"
+        },
+        "VmDispatcher": {
+          "type": "pub struct<B: HostVmBackend>",
+          "args": {
+            "mode": "OperationMode",
+            "processor": "RequestProcessor<B>",
+            "registry": "NodeRegistry"
+          },
+          "returns": "Self"
+        },
+        "NodeRegistry::register_node": {
+          "type": "pub fn",
+          "args": {
+            "node": "NodeInfo"
+          },
+          "returns": "()"
+        },
+        "NodeRegistry::find_node_with_capacity": {
+          "type": "pub fn",
+          "args": {
+            "required_cpu": "u32",
+            "required_mem_mb": "u64"
+          },
+          "returns": "Option<&NodeInfo>"
+        },
+        "NodeRegistry::iter_nodes": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "hashbrown::hash_map::Values<String, NodeInfo>"
+        },
+        "NodeRegistry::assign_instance": {
+          "type": "pub fn",
+          "args": {
+            "instance_uuid": "&str",
+            "node_id": "&str"
+          },
+          "returns": "()"
+        },
+        "VmDispatcher::new": {
+          "type": "pub fn",
+          "args": {
+            "mode": "OperationMode",
+            "backend": "B"
+          },
+          "returns": "Self"
+        },
+        "VmDispatcher::dispatch": {
+          "type": "pub fn",
+          "args": {
+            "message": "&IPCMessage"
+          },
+          "returns": "Result<RequestResult, HostVmError>"
+        },
+        "VmDispatcher::deploy": {
+          "type": "pub fn",
+          "args": {
+            "instance_uuid": "&str",
+            "env": "EnvironmentType",
+            "cfg": "ConfigPayload",
+            "target_node": "Option<String>"
+          },
+          "returns": "Result<RequestResult, HostVmError>"
+        },
+        "VmDispatcher::forward_signal": {
+          "type": "pub fn",
+          "args": {
+            "instance_uuid": "&str",
+            "action": "CommandAction",
+            "payload": "InstancePayload"
+          },
+          "returns": "Result<RequestResult, HostVmError>"
+        },
+        "VmDispatcher::set_mode": {
+          "type": "pub fn",
+          "args": {
+            "mode": "OperationMode"
+          },
+          "returns": "()"
+        },
+        "VmDispatcher::node_heartbeat": {
+          "type": "pub fn",
+          "args": {
+            "node_id": "&str",
+            "now_ms": "u64",
+            "cpu_cores": "u32",
+            "memory_mb": "u64"
+          },
+          "returns": "bool"
+        }
+      },
+      "dependencies": [
+        "src/hosting/interface.rs",
+        "src/hosting/rqproc.rs",
+        "src/hosting/types.rs",
+        "src/network/generated/external.rs",
+        "src/network/rpc_client.rs"
       ]
     },
     "src/network/transport.rs": {
@@ -6835,6 +7434,11 @@
           "args": {},
           "returns": "(u64, u64, u64, u64)"
         },
+        "get_disk_usage_percent": {
+          "type": "pub fn",
+          "args": {},
+          "returns": "u32"
+        },
         "State": {
           "type": "pub struct",
           "args": {
@@ -7106,7 +7710,7 @@
     },
     "src/graphics.rs": {
       "path": "src/graphics.rs",
-      "purpose": "High-level 2D graphics context and drawing primitives.",
+      "purpose": "High-level 2D graphics context, cursor/mouse input handling, and drawing primitives — supports UEFI mouse protocols, USB Tablet, and PS/2 direct hardware fallback. try_update_usb_tablet checks mode before reading state to avoid consuming input data. try_update_relative includes 10% resolution tolerance for VirtualBox USB mouse.",
       "key_regions": [
         {
           "lines": "1-340",
@@ -7336,9 +7940,32 @@
             "bg": "Color"
           },
           "returns": "()"
+        },
+        "try_update_ps2_mouse": {
+          "type": "unsafe fn",
+          "args": {
+            "screen_width": "usize",
+            "screen_height": "usize"
+          },
+          "returns": "bool"
+        },
+        "try_update_usb_tablet": {
+          "type": "unsafe fn",
+          "args": {
+            "screen_width": "usize",
+            "screen_height": "usize"
+          },
+          "returns": "bool"
+        },
+        "scan_mouse_handles": {
+          "type": "unsafe fn",
+          "args": {},
+          "returns": "Option<ScopedProtocol<SimplePointer>>"
         }
       },
-      "dependencies": []
+      "dependencies": [
+        "src/devices/ps2.rs"
+      ]
     },
     "src/hardware/apic.rs": {
       "path": "src/hardware/apic.rs",
@@ -11297,6 +11924,94 @@
       "objects": {},
       "dependencies": []
     },
+    "src/tools/hpx_pack.rs": {
+      "path": "src/tools/hpx_pack.rs",
+      "purpose": "On-device HPX v1 packer — creates .hpx files from PIC images with 108-byte header, import relocations, and project.toml metadata support.",
+      "key_regions": [
+        {
+          "lines": "12-33",
+          "description": "Constants (HEADER_SIZE=108) and PackOptions struct with file_version and description fields"
+        },
+        {
+          "lines": "34-70",
+          "description": "pack() and pack_with_imports() — write 108-byte HPX header including file_version and description[64]"
+        },
+        {
+          "lines": "68-113",
+          "description": "Import relocation encoding and decoding (HPR1 format)"
+        },
+        {
+          "lines": "125-198",
+          "description": "ProjectMetadata struct, parse_project_toml() for reading [package] section, parse_version_to_u32(), and fill_description()"
+        }
+      ],
+      "objects": {
+        "PackOptions": {
+          "type": "pub struct (Clone, Copy)",
+          "args": {
+            "kind": "u16",
+            "state_size": "u32",
+            "step_offset": "u32",
+            "draw_offset": "u32",
+            "input_offset": "u32",
+            "width": "u32",
+            "height": "u32",
+            "file_version": "u32",
+            "description": "[u8; 64]"
+          }
+        },
+        "ProjectMetadata": {
+          "type": "pub struct (Clone)",
+          "args": {
+            "name": "String",
+            "version": "String",
+            "description": "String"
+          }
+        },
+        "pack": {
+          "type": "pub fn",
+          "args": {
+            "image": "&[u8]",
+            "options": "PackOptions"
+          },
+          "returns": "Result<Vec<u8>, String>"
+        },
+        "pack_with_imports": {
+          "type": "pub fn",
+          "args": {
+            "image": "&[u8]",
+            "options": "PackOptions",
+            "imports": "&[ImportRelocation]"
+          },
+          "returns": "Result<Vec<u8>, String>"
+        },
+        "parse_project_toml": {
+          "type": "pub fn",
+          "args": {
+            "content": "&str"
+          },
+          "returns": "Result<ProjectMetadata, String>"
+        },
+        "parse_version_to_u32": {
+          "type": "pub fn",
+          "args": {
+            "version": "&str"
+          },
+          "returns": "u32"
+        },
+        "fill_description": {
+          "type": "pub fn",
+          "args": {
+            "dest": "&mut [u8; 64]",
+            "text": "&str"
+          },
+          "returns": "()"
+        }
+      },
+      "dependencies": [
+        "src/disk_executable.rs"
+      ]
+    },
     "src/types.rs": {
       "path": "src/types.rs",
       "purpose": "Core primitive type aliases, handles, and shared data representations.",
@@ -11766,6 +12481,10 @@
         {
           "lines": "800-1100",
           "description": "DashboardUI drawing routine and tab rendering delegation"
+        },
+        {
+          "lines": "2360-2600",
+          "description": "DashboardUI refresh_storage - syncs with FileSystem drive_handles to ensure aliases match, preventing FileReadFault when switching disks"
         },
         {
           "lines": "4350-4550",
@@ -13911,8 +14630,24 @@
           "description": "Unified tab dispatchers: draw_tab, handle_tab_input, update_tab_logic"
         },
         {
+          "lines": "174-288",
+          "description": "overview module: X_Overview struct with system stats (CPU, memory, disk I/O with usage%, network, VMs) and Runnable impl for dashboard overview tab"
+        },
+        {
           "lines": "430-800",
           "description": "virtualization module: draw_vms, draw_containers, draw_cvms, draw_architecture, input, logic, and X_Virtualization"
+        },
+        {
+          "lines": "3199-3644",
+          "description": "storage module (dashboard): draw, input, logic — file browser with disk tab switching, file actions (Open, Props, New File, New Dir, Rename, Copy, Move, Delete), pending action confirmation flow"
+        },
+        {
+          "lines": "3646-3690",
+          "description": "X_Storage struct and impl: select_disk_tab (clears pending action on switch), refresh_storage (syncs with FileSystem drive_handles to prevent FileReadFault)"
+        },
+        {
+          "lines": "3896-4223",
+          "description": "X_Storage Runnable impl (standalone app mode): logic, input, draw, AppInfo — mirrors dashboard storage module with independent state"
         }
       ],
       "objects": {
@@ -13946,6 +14681,41 @@
         "X_Virtualization": {
           "type": "pub struct",
           "args": {},
+          "returns": "()"
+        },
+        "storage": {
+          "type": "pub mod",
+          "args": {},
+          "returns": "()"
+        },
+        "X_Storage": {
+          "type": "pub struct",
+          "args": {
+            "current_path": "String",
+            "files": "Vec<FileEntry>",
+            "selected_file_idx": "usize",
+            "storage_disks": "Vec<DiskTabInfo>",
+            "selected_disk_idx": "usize",
+            "filesys_action_idx": "usize",
+            "filesys_pending_action": "Option<FilePendingAction>",
+            "status_line": "String",
+            "filesys_new_counter": "usize"
+          },
+          "returns": "()"
+        },
+        "select_disk_tab": {
+          "type": "pub fn (impl X_Storage)",
+          "args": {
+            "self": "&mut self",
+            "idx": "usize"
+          },
+          "returns": "()"
+        },
+        "refresh_storage": {
+          "type": "pub fn (impl X_Storage)",
+          "args": {
+            "self": "&mut self"
+          },
           "returns": "()"
         }
       },
@@ -16946,14 +17716,41 @@
     },
     "src/hosting/types.rs": {
       "path": "src/hosting/types.rs",
-      "purpose": "Data models, enums, IPC messages, TID.UUID structures, and VirtCOM buffers.",
+      "purpose": "Data models, enums, IPC messages, TID.UUID structures, VirtCOM buffers, OperationMode, and NodeInfo for node/manager mode.",
       "key_regions": [
         {
-          "lines": "1-244",
-          "description": "Types, IPC messages, VirtComRingBuf, and payload formats"
+          "lines": "1-73",
+          "description": "OperationMode enum (Standalone/Node/Manager) and NodeInfo struct with liveness and capacity checks"
+        },
+        {
+          "lines": "74-244",
+          "description": "EnvironmentType, CommandAction, TidUuid, IPCHeader, IPCMessage, ConfigPayload, VirtComRingBuf, and payload formats"
         }
       ],
       "objects": {
+        "OperationMode": {
+          "type": "pub enum",
+          "args": {
+            "Standalone": "Unit",
+            "Node": "Unit",
+            "Manager": "Unit"
+          },
+          "returns": "Self"
+        },
+        "NodeInfo": {
+          "type": "pub struct",
+          "args": {
+            "node_id": "String",
+            "ip": "String",
+            "port": "u16",
+            "online": "bool",
+            "last_heartbeat_ms": "u64",
+            "cpu_cores": "u32",
+            "memory_mb": "u64",
+            "deployed_instances": "Vec<String>"
+          },
+          "returns": "Self"
+        },
         "EnvironmentType": {
           "type": "pub enum",
           "args": {},
@@ -17417,8 +18214,8 @@
           "description": "handle_tcp: TCP packet router — checksum validation removed (offloading common in VMs); routes to HTTP server or client handlers based on destination port"
         },
         {
-          "lines": "865-978",
-          "description": "find_http_conn: Find or create HTTP connection slot with fallback for lost SYN packets — fallback creates connection in Established state with their_seq=0 so the first data packet initializes sequence tracking"
+          "lines": "865-1038",
+          "description": "find_http_conn: Find or create HTTP connection slot — three steps: (1) match active connection by IP:port, (2) reuse closed/empty slot for SYN, (3) fallback for orphaned packets; if all slots full, evict the oldest stale connection (idle >10000 ticks, ~10 seconds) to make room for new connections"
         },
         {
           "lines": "1056-1425",
@@ -17427,9 +18224,51 @@
         {
           "lines": "1369-1421",
           "description": "send_tcp_packet: Construct and transmit TCP packet with Ethernet, IPv4, and TCP headers"
+        },
+        {
+          "lines": "1126-1160",
+          "description": "WebDAV helper functions: webdav_fs_path converts URL paths to filesystem paths with URL decoding; webdav_href formats WebDAV HREFs"
+        },
+        {
+          "lines": "1216-1306",
+          "description": "WebDAV response handling in build_http_response: PROPFIND returns D:multistatus XML directory listings; OPTIONS advertises DAV:1,2; MKCOL creates directories; GET serves files with content-type detection"
+        },
+        {
+          "lines": "1225-1266",
+          "description": "UPnP device description XML endpoint: /desc.xml returns NetworkInfrastructure device description"
+        },
+        {
+          "lines": "1950-1954",
+          "description": "SSDP UDP port 1900 handler: dispatches to handle_ssdp for M-SEARCH responses"
+        },
+        {
+          "lines": "2035-2138",
+          "description": "handle_ssdp: Parse M-SEARCH, match ST header, respond to multicast 239.255.255.250:1900"
         }
       ],
       "objects": {
+        "handle_ssdp": {
+          "type": "fn",
+          "args": {
+            "src_ip": "[u8; 4]",
+            "data": "&[u8]"
+          },
+          "returns": "()"
+        },
+        "webdav_fs_path": {
+          "type": "fn",
+          "args": {
+            "url_path": "&str"
+          },
+          "returns": "String"
+        },
+        "webdav_href": {
+          "type": "fn",
+          "args": {
+            "path": "&str"
+          },
+          "returns": "String"
+        },
         "HttpTcpState": {
           "type": "enum",
           "args": {
@@ -17519,6 +18358,672 @@
       },
       "dependencies": [
         "src/devices/mod.rs"
+      ]
+    },
+    "src/ui/graphics.rs": {
+      "path": "src/ui/graphics.rs",
+      "purpose": "Cursor and mouse input handling for the UI — supports absolute pointer (virtualized: VBox/QEMU), USB Tablet (QEMU usb-tablet), relative pointer (physical hardware) UEFI protocols, and PS/2 mouse as a direct hardware fallback. try_update_usb_tablet checks mode before reading state to avoid consuming input data. try_update_relative includes 10% resolution tolerance for VirtualBox USB mouse.",
+      "key_regions": [
+        {
+          "lines": "82-111",
+          "description": "Cursor struct definition: x, y, visible, left/right button state, mouse_object, last_raw_abs_x/y tracking"
+        },
+        {
+          "lines": "138-177",
+          "description": "update_from_mouse: fallback chain — FORCE_PS2 check, FORCE_USB_TABLET check, absolute pointer (virtualized), USB Tablet (QEMU usb-tablet), relative pointer (physical), PS/2 mouse (hardware)"
+        },
+        {
+          "lines": "180-220",
+          "description": "try_update_ps2_mouse: reads PS/2 mouse packets directly from hardware ports via devices::ps2 module, handles Y-axis inversion and overflow flags, updates cursor position and button states"
+        },
+        {
+          "lines": "223-306",
+          "description": "try_update_usb_tablet: checks mode resolution BEFORE reading state to avoid consuming input data on non-tablet handles; detects SimplePointer handles reporting absolute coordinates (USB Tablet mode) and directly sets cursor position — used by QEMU -device usb-tablet and VirtualBox"
+        },
+        {
+          "lines": "298-367",
+          "description": "try_update_absolute: AbsolutePointer protocol handling with screen-coordinate normalization"
+        },
+        {
+          "lines": "372-562",
+          "description": "try_update_relative: SimplePointer protocol handling — always reads mouse state regardless of event signal, with dynamic resolution engine for VBox/QEMU absolute-in-relative detection (65536x65536, screen-matching, or within 10% tolerance for VirtualBox USB mouse). Protocol opened with GetProtocol (shared) instead of Exclusive to avoid conflicts with AbsolutePointer."
+        }
+      ],
+      "objects": {
+        "Cursor": {
+          "type": "pub struct",
+          "args": {
+            "x": "i32",
+            "y": "i32",
+            "visible": "bool",
+            "left_button": "bool",
+            "right_button": "bool",
+            "prev_left_button": "bool",
+            "prev_right_button": "bool",
+            "poll_count": "usize",
+            "mouse_object": "Option<ScopedProtocol<Pointer>>",
+            "last_raw_abs_x": "Option<f32>",
+            "last_raw_abs_y": "Option<f32>"
+          }
+        },
+        "update_from_mouse": {
+          "type": "pub unsafe fn",
+          "args": {
+            "screen_width": "usize",
+            "screen_height": "usize"
+          },
+          "returns": "bool"
+        },
+        "try_update_ps2_mouse": {
+          "type": "unsafe fn",
+          "args": {
+            "screen_width": "usize",
+            "screen_height": "usize"
+          },
+          "returns": "bool"
+        },
+        "try_update_usb_tablet": {
+          "type": "unsafe fn",
+          "args": {
+            "screen_width": "usize",
+            "screen_height": "usize"
+          },
+          "returns": "bool"
+        },
+        "scan_mouse_handles": {
+          "type": "unsafe fn",
+          "args": {},
+          "returns": "Option<ScopedProtocol<SimplePointer>>"
+        }
+      },
+      "dependencies": [
+        "src/ui/pixel_graphics.rs"
+      ]
+    },
+    "src/ui/pixel_graphics.rs": {
+      "path": "src/ui/pixel_graphics.rs",
+      "purpose": "Pixel-level graphics rendering engine — provides drawing primitives, cursor rendering, toast notifications, and screen-edge-adaptive tooltips.",
+      "key_regions": [
+        {
+          "lines": "694-735",
+          "description": "draw_cursor: renders a 19x12 bitmap arrow cursor at the given position"
+        },
+        {
+          "lines": "1168-1183",
+          "description": "draw_toast: fixed-position toast notification with rounded rect and accent bar"
+        },
+        {
+          "lines": "1185-1222",
+          "description": "draw_tooltip: cursor-adjacent tooltip that adapts to screen edges — flips left/right and above/below to stay on-screen"
+        }
+      ],
+      "objects": {
+        "draw_tooltip": {
+          "type": "pub fn",
+          "args": {
+            "cursor_x": "usize",
+            "cursor_y": "usize",
+            "text": "&str"
+          },
+          "returns": "(usize, usize)"
+        },
+        "draw_cursor": {
+          "type": "pub fn",
+          "args": {
+            "x": "usize",
+            "y": "usize"
+          },
+          "returns": "()"
+        },
+        "draw_toast": {
+          "type": "pub fn",
+          "args": {
+            "text": "&str",
+            "duration_frames": "&mut usize",
+            "yadj": "usize"
+          },
+          "returns": "()"
+        }
+      },
+      "dependencies": [
+        "src/ui/graphics.rs"
+      ]
+    },
+    "src/devices/net_stack.rs": {
+      "path": "src/devices/net_stack.rs",
+      "purpose": "Network stack and HTTP server — handles TCP/IP, ARP, HTTP requests, SSDP/UPnP, and WebDAV.",
+      "key_regions": [
+        {
+          "lines": "1242-1383",
+          "description": "HTTP GET / handler: Web UI overview page with JavaScript polling — polls /usage endpoint every 2 seconds via fetch() to update ring graphs (CPU/GPU/MEM/NET), key metrics, I/O performance, network stats, virtualization, and system info. No meta refresh; all stats come from /usage JSON."
+        },
+        {
+          "lines": "1384-1518",
+          "description": "HTTP GET /usage handler: JSON endpoint using GLOBAL_SYSTEM_TRACKER for accurate real-time stats — CPU usage, GPU usage, memory (total/used), disk I/O rates, network I/O rates from the UI's SystemResources tracker. Falls back to defaults if tracker not yet initialized. Also includes network cumulative stats, disk cumulative stats, and VM counts from hypervisor."
+        }
+      ],
+      "objects": {},
+      "dependencies": [
+        "src/main.rs",
+        "src/ui.rs"
+      ]
+    },
+    "src/disk_executable.rs": {
+      "path": "src/disk_executable.rs",
+      "purpose": "Loader and ABI for position-independent .hpx executables — defines PluginHostApi and HpxHeader structs. Header is 108 bytes with file_version and description fields.",
+      "key_regions": [
+        {
+          "lines": "54-97",
+          "description": "PluginHostApi struct: C ABI with all host function pointers including 18 network functions"
+        },
+        {
+          "lines": "129-172",
+          "description": "HOST_API static initialization with all function pointer assignments"
+        },
+        {
+          "lines": "256-353",
+          "description": "Host function implementations for all network externals"
+        },
+        {
+          "lines": "432-477",
+          "description": "HpxHeader struct (108 bytes): magic, abi_version, kind, header_size, image_size, state_size, step_offset, draw_offset, input_offset, width, height, file_version, description[64]"
+        }
+      ],
+      "objects": {
+        "HpxHeader": {
+          "type": "pub struct (repr C)",
+          "args": {
+            "magic": "[u8; 4]",
+            "abi_version": "u16",
+            "kind": "u16",
+            "header_size": "u32",
+            "image_size": "u32",
+            "state_size": "u32",
+            "step_offset": "u32",
+            "draw_offset": "u32",
+            "input_offset": "u32",
+            "width": "u32",
+            "height": "u32",
+            "file_version": "u32",
+            "description": "[u8; 64]"
+          }
+        },
+        "PluginHostApi": {
+          "type": "pub struct (repr C)",
+          "args": {
+            "abi_version": "u32",
+            "network_initialize": "unsafe extern \"C\" fn() -> i32",
+            "network_is_initialized": "unsafe extern \"C\" fn() -> u8",
+            "network_link_up": "unsafe extern \"C\" fn() -> u8",
+            "network_transmit": "unsafe extern \"C\" fn(*const u8, usize) -> i32",
+            "network_receive": "unsafe extern \"C\" fn(*mut u8, usize) -> i64",
+            "network_get_mac": "unsafe extern \"C\" fn(*mut u8, usize) -> i32",
+            "network_get_ip": "unsafe extern \"C\" fn(*mut u8, usize) -> i64",
+            "network_set_static_ip": "unsafe extern \"C\" fn(*const u8, usize, *const u8, usize, *const u8, usize) -> i32",
+            "network_ping": "unsafe extern \"C\" fn(*const u8, usize) -> i32",
+            "network_httpd_start": "unsafe extern \"C\" fn(u16) -> i32",
+            "network_httpd_stop": "unsafe extern \"C\" fn()",
+            "network_webdav_start": "unsafe extern \"C\" fn(u16) -> i32",
+            "network_webdav_stop": "unsafe extern \"C\" fn()",
+            "network_rpcd_start": "unsafe extern \"C\" fn(u16) -> i32",
+            "network_rpcd_stop": "unsafe extern \"C\" fn()",
+            "network_status": "unsafe extern \"C\" fn(*mut u8, usize) -> i64",
+            "network_lanscan": "unsafe extern \"C\" fn(*const u8, usize) -> i32",
+            "network_save_config": "unsafe extern \"C\" fn(*const u8, usize, *const u8, usize, *const u8, usize) -> i32",
+            "network_load_config": "unsafe extern \"C\" fn(*mut u8, usize) -> i64"
+          }
+        }
+      },
+      "dependencies": [
+        "src/devices/net.rs",
+        "src/devices/net_hw.rs",
+        "src/filesystem.rs"
+      ]
+    },
+    "src/micro_c_externs.rs": {
+      "path": "src/micro_c_externs.rs",
+      "purpose": "Stable C ABI service symbols for Micro-C HPX programs — provides resolve_import and all hpx_* extern functions including network features.",
+      "key_regions": [
+        {
+          "lines": "10-56",
+          "description": "resolve_import function: maps string names to function pointers for all hpx_* symbols including 18 network functions"
+        },
+        {
+          "lines": "174-298",
+          "description": "Network extern function implementations: hpx_network_initialize through hpx_network_load_config"
+        }
+      ],
+      "objects": {
+        "resolve_import": {
+          "type": "pub fn",
+          "args": {
+            "name": "&str"
+          },
+          "returns": "Option<usize>"
+        },
+        "hpx_network_ping": {
+          "type": "pub extern \"C\" fn",
+          "args": {
+            "target": "*const u8",
+            "target_len": "i64"
+          },
+          "returns": "i64"
+        },
+        "hpx_network_httpd_start": {
+          "type": "pub extern \"C\" fn",
+          "args": {
+            "port": "i64"
+          },
+          "returns": "i64"
+        }
+      },
+      "dependencies": [
+        "src/devices/net.rs",
+        "src/devices/net_hw.rs"
+      ]
+    },
+    "executables/std_headers/hpx_v1.h": {
+      "path": "executables/std_headers/hpx_v1.h",
+      "purpose": "C header file defining HpxHeader (108 bytes) and HpxHostApi structs for HPX executables — includes file_version and description fields.",
+      "key_regions": [
+        {
+          "lines": "14-29",
+          "description": "HpxHeader struct: 108-byte file header with magic, abi_version, kind, sizes, offsets, dimensions, file_version, and description[64]"
+        },
+        {
+          "lines": "31-83",
+          "description": "HpxHostApi struct with all function pointers including 18 network functions"
+        }
+      ],
+      "objects": {
+        "HpxHeader": {
+          "type": "struct",
+          "args": {
+            "magic": "uint8_t[4]",
+            "abi_version": "uint16_t",
+            "kind": "uint16_t",
+            "header_size": "uint32_t",
+            "image_size": "uint32_t",
+            "state_size": "uint32_t",
+            "step_offset": "uint32_t",
+            "draw_offset": "uint32_t",
+            "input_offset": "uint32_t",
+            "width": "uint32_t",
+            "height": "uint32_t",
+            "file_version": "uint32_t",
+            "description": "uint8_t[64]"
+          }
+        }
+      },
+      "dependencies": []
+    },
+    "src/ui.rs": {
+      "path": "src/ui.rs",
+      "purpose": "Main DashboardUI — manages the dashboard, windowing system, user input routing, and hover tooltip display.",
+      "key_regions": [
+        {
+          "lines": "89-172",
+          "description": "DashboardUI struct definition with all fields including hover_text for cursor-adjacent tooltips"
+        },
+        {
+          "lines": "162-163",
+          "description": "hover_text field: Option<String> — when set, renders a tooltip near the cursor via draw_tooltip"
+        },
+        {
+          "lines": "497-524",
+          "description": "SystemResources struct: holds live system stats — cpu_usage, gpu_usage, used_memory_mb, total_memory_mb, disk_read_kbps, disk_write_kbps, net_rx_kbps, net_tx_kbps, plus history vectors for graphs"
+        },
+        {
+          "lines": "931",
+          "description": "GLOBAL_SYSTEM_TRACKER update: each UI frame clones SystemResources into the global tracker so HTTP /usage endpoint can read accurate real-time stats"
+        },
+        {
+          "lines": "2163-2173",
+          "description": "Render loop: always calls update_from_mouse (removed MOUSE.as_ref() guard) so mouse works even if global MOUSE is None; draws tooltip if hover_text is set, then draws cursor on top"
+        },
+        {
+          "lines": "3730-3832",
+          "description": "handle_mouse: processes mouse clicks for window dragging, taskbar, and window interactions"
+        }
+      ],
+      "objects": {
+        "DashboardUI": {
+          "type": "pub struct",
+          "args": {
+            "cursor": "Cursor",
+            "hover_text": "Option<String>",
+            "active_apps": "Vec<SteppedApplicationContext>",
+            "dragging_window": "Option<(usize, usize, usize)>"
+          }
+        }
+      },
+      "dependencies": [
+        "src/ui/graphics.rs",
+        "src/ui/pixel_graphics.rs",
+        "src/ui/qt.rs"
+      ]
+    },
+    "rackhosting-intserver/src/db.rs": {
+      "path": "rackhosting-intserver/src/db.rs",
+      "purpose": "SQLite database layer — 23 typed tables (hypervisors with rpc_port and http_port typed columns, others with id/data columns) plus legacy entities table fallback. Hypervisor CRUD uses typed SQL; other collections route through generic functions.",
+      "key_regions": [
+        {
+          "lines": "1-13",
+          "description": "TYPED_COLLECTIONS constant listing all 23 collection names with dedicated tables"
+        },
+        {
+          "lines": "15-232",
+          "description": "get_table_ddl: match expression returning CREATE TABLE DDL for each collection; hypervisors has typed columns (rpc_port, http_port), others use id/data pattern"
+        },
+        {
+          "lines": "234-268",
+          "description": "init_db: creates all typed tables plus legacy entities table"
+        },
+        {
+          "lines": "270-395",
+          "description": "Typed hypervisor CRUD: get_all_hypervisors (returns rpcPort + httpPort), get_hypervisor_by_id, save_hypervisor (accepts rpcPort/httpPort, backward compat with apiPort), delete_hypervisor"
+        },
+        {
+          "lines": "397-563",
+          "description": "Generic CRUD: get_all_entities, get_entity_by_id, save_entity, delete_entity — route to typed tables or legacy entities fallback"
+        }
+      ],
+      "objects": {
+        "init_db": {
+          "type": "pub async fn",
+          "args": {
+            "db_url": "&str"
+          },
+          "returns": "Result<Pool<Sqlite>, Box<dyn Error>>"
+        },
+        "get_all_hypervisors": {
+          "type": "pub async fn",
+          "args": {
+            "pool": "&Pool<Sqlite>"
+          },
+          "returns": "Result<Vec<serde_json::Value>, sqlx::Error>"
+        },
+        "get_hypervisor_by_id": {
+          "type": "pub async fn",
+          "args": {
+            "pool": "&Pool<Sqlite>",
+            "id": "&str"
+          },
+          "returns": "Result<Option<serde_json::Value>, sqlx::Error>"
+        },
+        "save_hypervisor": {
+          "type": "pub async fn",
+          "args": {
+            "pool": "&Pool<Sqlite>",
+            "id": "&str",
+            "val": "&serde_json::Value"
+          },
+          "returns": "Result<(), sqlx::Error>"
+        },
+        "delete_hypervisor": {
+          "type": "pub async fn",
+          "args": {
+            "pool": "&Pool<Sqlite>",
+            "id": "&str"
+          },
+          "returns": "Result<bool, sqlx::Error>"
+        },
+        "get_all_entities": {
+          "type": "pub async fn",
+          "args": {
+            "pool": "&Pool<Sqlite>",
+            "collection": "&str"
+          },
+          "returns": "Result<Vec<serde_json::Value>, sqlx::Error>"
+        },
+        "save_entity": {
+          "type": "pub async fn",
+          "args": {
+            "pool": "&Pool<Sqlite>",
+            "collection": "&str",
+            "id": "&str",
+            "val": "&serde_json::Value"
+          },
+          "returns": "Result<(), sqlx::Error>"
+        }
+      },
+      "dependencies": []
+    },
+    "rackhosting-intserver/src/handlers.rs": {
+      "path": "rackhosting-intserver/src/handlers.rs",
+      "purpose": "HTTP request handlers — polls ALL registered hypervisors using RPC first (rpcPort), then falls back to HTTP (httpPort). Updates online/offline status, extensive info-level logging. No fake data returned. Includes telemetry history tracking via Arc<DashMap>.",
+      "key_regions": [
+        {
+          "lines": "14-24",
+          "description": "AppState struct with pool, hypervisor_url, and hv_history (Arc<DashMap>)"
+        },
+        {
+          "lines": "24-127",
+          "description": "get_instances: reads rpcPort + httpPort from each hypervisor, tries RPC first, falls back to HTTP, tags instances, updates status"
+        },
+        {
+          "lines": "891-983",
+          "description": "get_host_nodes: reads rpcPort + httpPort from each hypervisor, tries RPC first, falls back to HTTP for nodes, tags with hypervisorId"
+        },
+        {
+          "lines": "1046-1068",
+          "description": "parse_stats_json helper and DEFAULT_STATS constant — extracts CPU/RAM/network/disk/GPU stats from JSON"
+        },
+        {
+          "lines": "1070-1200",
+          "description": "get_management_servers: tries RPC first, falls back to HTTP if RPC fails; records telemetry history points; returns Hypervisor format with hardware specs and history"
+        },
+        {
+          "lines": "1688-1814",
+          "description": "Hypervisor CRUD: get_hypervisors (typed), create_hypervisor (defaults rpcPort=5001, httpPort=8080), update_hypervisor (typed), delete_hypervisor (typed)"
+        }
+      ],
+      "objects": {
+        "AppState": {
+          "type": "pub struct",
+          "args": {
+            "pool": "Pool<Sqlite>",
+            "hypervisor_url": "Option<String>"
+          }
+        },
+        "get_instances": {
+          "type": "pub async fn",
+          "args": {
+            "State(state)": "State<AppState>"
+          },
+          "returns": "impl IntoResponse"
+        },
+        "get_host_nodes": {
+          "type": "pub async fn",
+          "args": {
+            "State(state)": "State<AppState>"
+          },
+          "returns": "impl IntoResponse"
+        },
+        "get_hypervisors": {
+          "type": "pub async fn",
+          "args": {
+            "State(state)": "State<AppState>"
+          },
+          "returns": "impl IntoResponse"
+        },
+        "create_hypervisor": {
+          "type": "pub async fn",
+          "args": {
+            "State(state)": "State<AppState>",
+            "Json(payload)": "Json<serde_json::Value>"
+          },
+          "returns": "impl IntoResponse"
+        }
+      },
+      "dependencies": [
+        "rackhosting-intserver/src/db.rs",
+        "rackhosting-intserver/src/hypervisor.rs"
+      ]
+    },
+    "rackhosting-intserver/src/hypervisor.rs": {
+      "path": "rackhosting-intserver/src/hypervisor.rs",
+      "purpose": "HTTP polling module for the HPVMx hypervisor — fetches /api/stats and /api/nodes with info-level logging, transforms JSON to frontend-compatible formats.",
+      "key_regions": [
+        {
+          "lines": "1-35",
+          "description": "fetch_server_stats: HTTP GET to /api/stats with info-level logging for all outcomes"
+        },
+        {
+          "lines": "37-64",
+          "description": "fetch_node_stats: HTTP GET to /api/nodes with info-level logging for all outcomes"
+        },
+        {
+          "lines": "67-136",
+          "description": "stats_to_instances: transforms /api/stats JSON into instance list"
+        },
+        {
+          "lines": "139-178",
+          "description": "nodes_to_host_nodes: transforms /api/nodes JSON into host node entries"
+        }
+      ],
+      "objects": {
+        "fetch_server_stats": {
+          "type": "pub async fn",
+          "args": {
+            "base_url": "&str"
+          },
+          "returns": "Option<Value>"
+        },
+        "fetch_node_stats": {
+          "type": "pub async fn",
+          "args": {
+            "base_url": "&str"
+          },
+          "returns": "Option<Vec<Value>>"
+        },
+        "stats_to_instances": {
+          "type": "pub fn",
+          "args": {
+            "stats": "&Value"
+          },
+          "returns": "Vec<Value>"
+        },
+        "nodes_to_host_nodes": {
+          "type": "pub fn",
+          "args": {
+            "nodes": "&[Value]"
+          },
+          "returns": "Vec<Value>"
+        }
+      },
+      "dependencies": []
+    },
+    "rackhosting-intserver/src/config.rs": {
+      "path": "rackhosting-intserver/src/config.rs",
+      "purpose": "Configuration for the intermediate server — reads PORT, DATABASE_URL, CORS_ORIGINS, and HYPERVISOR_URL environment variables.",
+      "key_regions": [
+        {
+          "lines": "1-50",
+          "description": "Config struct and load() method reading env vars including HYPERVISOR_URL"
+        }
+      ],
+      "objects": {
+        "Config": {
+          "type": "pub struct",
+          "args": {
+            "port": "u16",
+            "db_url": "String",
+            "cors_origins": "Vec<String>",
+            "hypervisor_url": "Option<String>"
+          }
+        }
+      },
+      "dependencies": []
+    },
+    "rackhosting-intserver/src/types.rs": {
+      "path": "rackhosting-intserver/src/types.rs",
+      "purpose": "Type definitions for the intermediate server — all entity structs serialized to/from JSON for the unified entities table.",
+      "key_regions": [
+        {
+          "lines": "522-537",
+          "description": "HypervisorEntry struct — stores registered hypervisor info (name, IP, port, RPC status, notes)"
+        }
+      ],
+      "objects": {
+        "HypervisorEntry": {
+          "type": "pub struct",
+          "args": {
+            "id": "String",
+            "name": "String",
+            "ip": "String",
+            "api_port": "u16",
+            "status": "String",
+            "rpc_enabled": "bool",
+            "created_at": "Option<String>",
+            "notes": "Option<String>"
+          }
+        }
+      },
+      "dependencies": []
+    },
+    "rackhosting-intserver/src/lib.rs": {
+      "path": "rackhosting-intserver/src/lib.rs",
+      "purpose": "Router setup for the intermediate server — defines all API routes and CORS configuration.",
+      "key_regions": [
+        {
+          "lines": "181-189",
+          "description": "Hypervisor CRUD routes: GET/POST /api/admin/hypervisors, PATCH/DELETE /api/admin/hypervisors/:id"
+        }
+      ],
+      "objects": {},
+      "dependencies": [
+        "rackhosting-intserver/src/handlers.rs",
+        "rackhosting-intserver/src/config.rs",
+        "rackhosting-intserver/src/db.rs"
+      ]
+    },
+    "rackhosting-intserver/src/rpc_client.rs": {
+      "path": "rackhosting-intserver/src/rpc_client.rs",
+      "purpose": "RPC client for communicating with HPVMx hypervisors over the MSMI protocol on port 5001. Sends protobuf ServerStatsRequest/NodeStatsRequest messages and decodes responses.",
+      "key_regions": [
+        {
+          "lines": "1-77",
+          "description": "fetch_server_stats: TCP connection, protobuf encode, send framed message, decode ServerStatsResponse"
+        },
+        {
+          "lines": "79-126",
+          "description": "fetch_node_stats: TCP connection, protobuf encode, send framed NodeStatsRequest, decode response"
+        },
+        {
+          "lines": "128-149",
+          "description": "tokio_net_stream: blocking TCP connection with timeout for use in spawn_blocking"
+        },
+        {
+          "lines": "151-211",
+          "description": "stats_response_to_json: converts protobuf ServerStatsResponse to JSON for handlers"
+        },
+        {
+          "lines": "213-253",
+          "description": "node_stats_response_to_json: converts protobuf NodeStatsResponse to JSON"
+        }
+      ],
+      "objects": {
+        "fetch_server_stats": {
+          "type": "pub fn",
+          "args": {
+            "ip": "&str",
+            "port": "u16"
+          },
+          "returns": "Option<Value>"
+        },
+        "fetch_node_stats": {
+          "type": "pub fn",
+          "args": {
+            "ip": "&str",
+            "port": "u16",
+            "node_id": "&str"
+          },
+          "returns": "Option<Value>"
+        }
+      },
+      "dependencies": [
+        "rackhosting-intserver/grpc.proto"
       ]
     }
   }

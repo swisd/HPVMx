@@ -5,6 +5,73 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::vdebug_autoprefix;
 
+/// HPVMx operation mode determines how VM dispatch works.
+/// - Standalone: single instance, local dispatch only.
+/// - Node: receives RPC commands from a Manager, dispatches locally.
+/// - Manager: maintains a registry of Nodes, routes deploy/signal requests via RPC.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OperationMode {
+    Standalone,
+    Node,
+    Manager,
+}
+
+impl core::fmt::Display for OperationMode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            OperationMode::Standalone => write!(f, "Standalone"),
+            OperationMode::Node => write!(f, "Node"),
+            OperationMode::Manager => write!(f, "Manager"),
+        }
+    }
+}
+
+/// Describes a registered node in Manager mode.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NodeInfo {
+    /// Unique node identifier.
+    pub node_id: String,
+    /// Node IP address (e.g. "192.168.1.10").
+    pub ip: String,
+    /// MSMI RPC port on the node (default 5001).
+    pub port: u16,
+    /// Whether the node is currently reachable.
+    pub online: bool,
+    /// Last heartbeat timestamp in milliseconds.
+    pub last_heartbeat_ms: u64,
+    /// Total capacity in CPU cores available on this node.
+    pub cpu_cores: u32,
+    /// Total capacity in memory (MB) available on this node.
+    pub memory_mb: u64,
+    /// Set of instance UUIDs currently deployed on this node.
+    pub deployed_instances: Vec<String>,
+}
+
+impl NodeInfo {
+    pub fn new(node_id: &str, ip: &str, port: u16) -> Self {
+        Self {
+            node_id: String::from(node_id),
+            ip: String::from(ip),
+            port,
+            online: false,
+            last_heartbeat_ms: 0,
+            cpu_cores: 0,
+            memory_mb: 0,
+            deployed_instances: Vec::new(),
+        }
+    }
+
+    /// Check if the node is considered online within the given timeout window.
+    pub fn is_alive(&self, now_ms: u64, timeout_ms: u64) -> bool {
+        self.online && (now_ms - self.last_heartbeat_ms <= timeout_ms)
+    }
+
+    /// Check available capacity for a new instance.
+    pub fn has_capacity(&self, required_cpu: u32, required_mem_mb: u64) -> bool {
+        self.cpu_cores >= required_cpu && self.memory_mb >= required_mem_mb
+    }
+}
+
 #[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EnvironmentType {
     VM,

@@ -26,9 +26,24 @@ pub(crate) fn resolve_import(name: &str) -> Option<usize> {
         "hpx_pci_read_u32" => hpx_pci_read_u32 as *const () as usize,
         "hpx_pci_write_u32" => hpx_pci_write_u32 as *const () as usize,
         "hpx_network_initialize" => hpx_network_initialize as *const () as usize,
+        "hpx_network_is_initialized" => hpx_network_is_initialized as *const () as usize,
         "hpx_network_link_up" => hpx_network_link_up as *const () as usize,
         "hpx_network_transmit" => hpx_network_transmit as *const () as usize,
         "hpx_network_receive" => hpx_network_receive as *const () as usize,
+        "hpx_network_get_mac" => hpx_network_get_mac as *const () as usize,
+        "hpx_network_get_ip" => hpx_network_get_ip as *const () as usize,
+        "hpx_network_set_static_ip" => hpx_network_set_static_ip as *const () as usize,
+        "hpx_network_ping" => hpx_network_ping as *const () as usize,
+        "hpx_network_httpd_start" => hpx_network_httpd_start as *const () as usize,
+        "hpx_network_httpd_stop" => hpx_network_httpd_stop as *const () as usize,
+        "hpx_network_webdav_start" => hpx_network_webdav_start as *const () as usize,
+        "hpx_network_webdav_stop" => hpx_network_webdav_stop as *const () as usize,
+        "hpx_network_rpcd_start" => hpx_network_rpcd_start as *const () as usize,
+        "hpx_network_rpcd_stop" => hpx_network_rpcd_stop as *const () as usize,
+        "hpx_network_status" => hpx_network_status as *const () as usize,
+        "hpx_network_lanscan" => hpx_network_lanscan as *const () as usize,
+        "hpx_network_save_config" => hpx_network_save_config as *const () as usize,
+        "hpx_network_load_config" => hpx_network_load_config as *const () as usize,
         "hpx_beep" => hpx_beep as *const () as usize,
         "hpx_mute" => hpx_mute as *const () as usize,
         "hpx_sleep_ms" => hpx_sleep_ms as *const () as usize,
@@ -159,6 +174,8 @@ pub extern "C" fn hpx_pci_write_u32(bdf: i64, offset: i64, value: i64) -> i64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn hpx_network_initialize() -> i64 { devices::net_hw::init().map(|_| 0).unwrap_or(-1) }
 #[unsafe(no_mangle)]
+pub extern "C" fn hpx_network_is_initialized() -> i64 { devices::net::is_initialized() as i64 }
+#[unsafe(no_mangle)]
 pub extern "C" fn hpx_network_link_up() -> i64 { devices::net_hw::link_up() as i64 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hpx_network_transmit(frame: *const u8, len: i64) -> i64 {
@@ -170,6 +187,114 @@ pub unsafe extern "C" fn hpx_network_receive(out: *mut u8, capacity: i64) -> i64
     if out.is_null() || !(1..=65535).contains(&capacity) { return -1; }
     devices::net_hw::rx(unsafe { core::slice::from_raw_parts_mut(out, capacity as usize) })
         .map(|size| size as i64).unwrap_or(-1)
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hpx_network_get_mac(out: *mut u8, capacity: i64) -> i64 {
+    if out.is_null() || capacity < 6 { return -1; }
+    let mac = devices::net_hw::get_mac();
+    let len = 6.min(capacity as usize);
+    unsafe { core::ptr::copy_nonoverlapping(mac.as_ptr(), out, len); }
+    0
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hpx_network_get_ip(out: *mut u8, capacity: i64) -> i64 {
+    if out.is_null() || capacity == 0 { return -1; }
+    let ip_str = b"0.0.0.0";
+    if ip_str.len() > capacity as usize { return -2; }
+    unsafe { core::ptr::copy_nonoverlapping(ip_str.as_ptr(), out, ip_str.len()); }
+    ip_str.len() as i64
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hpx_network_set_static_ip(ip: *const u8, ip_len: i64, gw: *const u8, gw_len: i64, mask: *const u8, mask_len: i64) -> i64 {
+    if ip_len <= 0 || gw_len <= 0 || mask_len <= 0 { return -1; }
+    let (Ok(ip), Ok(gw), Ok(mask)) = (
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(ip, ip_len as usize) }),
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(gw, gw_len as usize) }),
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(mask, mask_len as usize) }),
+    ) else { return -1; };
+    crate::devices::net::save_network_config(ip, gw, mask).map(|_| 0).unwrap_or(-1)
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hpx_network_ping(target: *const u8, target_len: i64) -> i64 {
+    if target.is_null() || target_len <= 0 || target_len > 64 { return -1; }
+    let Ok(target) = core::str::from_utf8(unsafe { core::slice::from_raw_parts(target, target_len as usize) }) else { return -1; };
+    crate::devices::net::ping(target, 1, 1000).map(|_| 0).unwrap_or(-1)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn hpx_network_httpd_start(port: i64) -> i64 {
+    if !(1..=65535).contains(&port) { return -1; }
+    crate::devices::net::httpd_start(port as u16);
+    0
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn hpx_network_httpd_stop() -> i64 {
+    crate::devices::net::httpd_stop();
+    0
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn hpx_network_webdav_start(port: i64) -> i64 {
+    if !(1..=65535).contains(&port) { return -1; }
+    crate::devices::net::webdav_start(port as u16);
+    0
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn hpx_network_webdav_stop() -> i64 {
+    crate::devices::net::webdav_stop();
+    0
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn hpx_network_rpcd_start(port: i64) -> i64 {
+    if !(1..=65535).contains(&port) { return -1; }
+    crate::devices::net::rpcd_start(port as u16);
+    0
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn hpx_network_rpcd_stop() -> i64 {
+    crate::devices::net::rpcd_stop();
+    0
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hpx_network_status(out: *mut u8, capacity: i64) -> i64 {
+    if out.is_null() || capacity == 0 { return -1; }
+    let mut status = alloc::string::String::new();
+    if crate::devices::net::is_initialized() {
+        if let Some(info) = crate::devices::net_hw::get_info() {
+            status = alloc::format!("MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} MTU: {} Link: {}",
+                info.mac[0], info.mac[1], info.mac[2], info.mac[3], info.mac[4], info.mac[5],
+                info.mtu, if crate::devices::net_hw::link_up() { "UP" } else { "DOWN" });
+        }
+    } else {
+        status = alloc::string::String::from("Not initialized");
+    }
+    if status.len() > capacity as usize { return -2; }
+    unsafe { core::ptr::copy_nonoverlapping(status.as_ptr(), out, status.len()); }
+    status.len() as i64
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hpx_network_lanscan(prefix: *const u8, prefix_len: i64) -> i64 {
+    if prefix.is_null() || prefix_len <= 0 || prefix_len > 64 { return -1; }
+    let Ok(prefix) = core::str::from_utf8(unsafe { core::slice::from_raw_parts(prefix, prefix_len as usize) }) else { return -1; };
+    crate::devices::net::lanscan(prefix);
+    0
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hpx_network_save_config(ip: *const u8, ip_len: i64, gw: *const u8, gw_len: i64, mask: *const u8, mask_len: i64) -> i64 {
+    if ip_len <= 0 || gw_len <= 0 || mask_len <= 0 { return -1; }
+    let (Ok(ip), Ok(gw), Ok(mask)) = (
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(ip, ip_len as usize) }),
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(gw, gw_len as usize) }),
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(mask, mask_len as usize) }),
+    ) else { return -1; };
+    crate::devices::net::save_network_config(ip, gw, mask).map(|_| 0).unwrap_or(-1)
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hpx_network_load_config(out: *mut u8, capacity: i64) -> i64 {
+    if out.is_null() || capacity == 0 { return -1; }
+    let Some((ip, gw, mask)) = crate::devices::net::load_network_config() else { return -1; };
+    let config = alloc::format!("{};{};{}", ip, gw, mask);
+    if config.len() > capacity as usize { return -2; }
+    unsafe { core::ptr::copy_nonoverlapping(config.as_ptr(), out, config.len()); }
+    config.len() as i64
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn hpx_beep(frequency_hz: i64) { if (0..=u32::MAX as i64).contains(&frequency_hz) { devices::audio::beep(frequency_hz as u32); } }

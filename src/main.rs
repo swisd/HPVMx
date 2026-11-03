@@ -70,6 +70,8 @@ mod crypto;
 mod neural;
 mod keys;
 mod network;
+mod raw;
+mod wrappers;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;
@@ -94,6 +96,7 @@ pub fn get_total_physical_memory_mb() -> u32 {
     unsafe { TOTAL_PHYSICAL_MEMORY_MB }
 }
 
+static mut GLOBAL_SYSTEM_TRACKER: Option<SystemResources> = None;
 
 //extern crate alloc;
 use alloc::string::{String, ToString};
@@ -128,13 +131,14 @@ use ui::DashboardUI;
 use types::*;
 use crate::paging::PagingManager;
 use crate::rng::XorShiftRng;
-use crate::ui::{DashboardTab, VectorSyncState};
+use crate::ui::{DashboardTab, SystemResources, VectorSyncState};
 use pm::PackageManager;
 use crate::devices::timer::sleep_ms;
 use crate::env::{GlobalEnvironment, GlobalEnvironmentData};
 use crate::page::{Pagefile, PagefileHeader};
 use crate::terminal::load_boot_media;
 use crate::version::VersionGroup;
+use crate::wrappers::func::time_execution;
 
 //#[global_allocator]
 #[allow(dead_code, unused)]
@@ -163,6 +167,9 @@ pub static mut GLOBALENV: Option<GlobalEnvironment> = None;
 pub static mut HYPERVISOR: Option<HypervisorManager> = None;
 static mut TOTAL_PHYSICAL_MEMORY_MB: u32 = 0;
 static mut VERSION_DATA: Option<VersionGroup> = None;
+
+/// Global VM Dispatcher for RPC request routing. Initialized after the hypervisor.
+static mut VM_DISPATCHER: Option<hosting::vmdispatcher::VmDispatcher<hosting::interface::HypervisorBackend<'static>>> = None;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wcslen(mut s: *const u16) -> usize {
@@ -328,7 +335,8 @@ fn main() -> Status {
     PACKAGE_MANAGER.load_registry();
 
     vdebug!("CPU", "calibrating tsc");
-    calibrate_tsc();
+    unsafe { time_execution("calibrate_tsc", || {calibrate_tsc();} ); }
+
     vdebug!("CPU", "tsc cyc/us {}", TSC_PER_US);
     let _cpu_info = hardware::cpu::CpuInfo::detect();
 
@@ -341,6 +349,16 @@ fn main() -> Status {
                 },
                 Err(e) => hpvm_warn!("VMM", "hypervisor init failed: {}", e),
             }
+        }
+    }
+
+    // Initialize the global VM Dispatcher in Standalone mode (can be switched to Node/Manager later)
+    unsafe {
+        if let Some(ref mut hv) = HYPERVISOR {
+            let backend = hosting::interface::HypervisorBackend::new(hv);
+            let mode = hosting::types::OperationMode::Standalone;
+            VM_DISPATCHER = Some(hosting::vmdispatcher::VmDispatcher::new(mode, backend));
+            vdebug_autoprefix!(10, "VmDispatcher initialized in Standalone mode");
         }
     }
 
@@ -381,7 +399,25 @@ fn main() -> Status {
     // Start HTTP server AFTER MP and async executor are ready so the AP poll worker can spawn
     if devices::net::is_initialized() {
         devices::net::httpd_start(8080);
-        vdebug_autoprefix!(10, "HTTP management server started on port 8080");
+        vdebug_autoprefix!(10, "HTTP hypervisor server started on port 8080");
+
+        // Start RPC (MSMI) server on port 5001 for intermediate server communication
+        devices::net::rpcd_start(5001);
+        vdebug_autoprefix!(10, "RPC (MSMI) server started on port 5001");
+
+        // Wire up the RPC processor callback so incoming RPC requests are dispatched
+        // through the global VmDispatcher. In Standalone/Node mode, requests are processed
+        // locally; in Manager mode, they are forwarded to registered nodes.
+        network::rpc_server::register_processor_callback(|msg: &hosting::types::IPCMessage| {
+            unsafe {
+                if let Some(ref mut dispatcher) = VM_DISPATCHER {
+                    dispatcher.dispatch(msg)
+                } else {
+                    Err(hosting::interface::HostVmError::InvalidConfiguration("VmDispatcher not initialized"))
+                }
+            }
+        });
+        vdebug_autoprefix!(10, "RPC processor callback registered");
     }
 
     vdebug!("HPVMx", "ready");
@@ -395,6 +431,25 @@ fn main() -> Status {
     /_//_/_/   |___/_/  /_//_\\_\\      \n\n";
 
     message!("", "{}", icon_ascii);
+    //todo: make a node if cpu_cores > 4 and mem>1024 with (cpu cores)-4 and mem-1024 current host statistics, as the hypervisot itself can be a node.
+    if unsafe { TOTAL_PHYSICAL_MEMORY_MB } > 1024 && _cpu_info.cores > 4 {
+        vdebug!("HPVMx", "auto-starting node with {} cores and {} MB RAM", _cpu_info.cores - 4, unsafe { TOTAL_PHYSICAL_MEMORY_MB } - 1024);
+        let node_id = format!("{}{}", SYSTEMNAME, "-node-0");
+        let ip = "127.0.0.1";
+        let host_mem = unsafe { TOTAL_PHYSICAL_MEMORY_MB } - 1024;
+        unsafe {
+        VM_DISPATCHER.as_mut().unwrap().register_node(hosting::types::NodeInfo {
+            node_id: node_id.clone(),
+            ip: ip.to_string(),
+            port: 5000,
+            online: true,
+            last_heartbeat_ms: 0,
+            cpu_cores: _cpu_info.cores - 4,
+            memory_mb: host_mem as u64,
+            deployed_instances: Vec::new(),
+        });
+        }
+    }
 
 
     // Auto-start dashboard if configured in config.cfg or if hypervisor is available (default behavior)

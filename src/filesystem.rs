@@ -50,6 +50,53 @@ pub fn disk_stats() -> (u64, u64, u64, u64) {
     )
 }
 
+/// Get disk usage percentage by querying the UEFI SimpleFileSystem volume info.
+/// Returns 0 if the filesystem is not available or info cannot be read.
+pub fn get_disk_usage_percent() -> u32 {
+    unsafe {
+        // Try to get the root directory handle
+        let state = FileSystem::get_state();
+        let handle = state.root_handle.or_else(|| {
+            state.drive_handles.first().map(|(_, h)| *h)
+        }).or_else(|| {
+            uefi::boot::get_handle_for_protocol::<SimpleFileSystem>().ok()
+        });
+        let handle = match handle {
+            Some(h) => h,
+            None => return 0,
+        };
+
+        // Open the SimpleFileSystem protocol
+        let mut fs = match uefi::boot::open_protocol_exclusive::<SimpleFileSystem>(handle) {
+            Ok(f) => f,
+            Err(_) => return 0,
+        };
+
+        // Open the volume to get the root directory
+        let mut root = match fs.open_volume() {
+            Ok(r) => r,
+            Err(_) => return 0,
+        };
+
+        // Get FileSystemInfo to obtain volume size and free space
+        let mut info_buffer = [0u8; 1024];
+        let fs_info = match root.get_info::<uefi::proto::media::file::FileSystemInfo>(&mut info_buffer) {
+            Ok(i) => i,
+            Err(_) => return 0,
+        };
+
+        let volume_size = fs_info.volume_size();
+        let free_space = fs_info.free_space();
+
+        if volume_size > 0 {
+            let used = volume_size.saturating_sub(free_space);
+            (used as f64 / volume_size as f64 * 100.0).min(100.0) as u32
+        } else {
+            0
+        }
+    }
+}
+
 /// Global file system state.
 ///
 /// Holds the current working directory, device mappings, and drive information.

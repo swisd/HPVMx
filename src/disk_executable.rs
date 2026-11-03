@@ -11,8 +11,8 @@ use crate::ui::pixel_graphics::PixelGraphics;
 
 pub const HPX_MAGIC: [u8; 4] = *b"HPX1";
 pub const HPX_ABI_VERSION: u16 = 1;
-pub const HPX_HOST_API_VERSION: u32 = 2;
-pub const HPX_HEADER_SIZE: usize = 40;
+pub const HPX_HOST_API_VERSION: u32 = 3;
+pub const HPX_HEADER_SIZE: usize = 108;
 pub const KIND_STEPPED_APP: u16 = 1;
 pub const KIND_STEPPED_BACKGROUND: u16 = 2;
 
@@ -71,9 +71,24 @@ pub struct PluginHostApi {
     pub pci_read_u32: unsafe extern "C" fn(u8, u8, u8, u8) -> u32,
     pub pci_write_u32: unsafe extern "C" fn(u8, u8, u8, u8, u32),
     pub network_initialize: unsafe extern "C" fn() -> i32,
+    pub network_is_initialized: unsafe extern "C" fn() -> u8,
     pub network_link_up: unsafe extern "C" fn() -> u8,
     pub network_transmit: unsafe extern "C" fn(*const u8, usize) -> i32,
     pub network_receive: unsafe extern "C" fn(*mut u8, usize) -> i64,
+    pub network_get_mac: unsafe extern "C" fn(*mut u8, usize) -> i32,
+    pub network_get_ip: unsafe extern "C" fn(*mut u8, usize) -> i64,
+    pub network_set_static_ip: unsafe extern "C" fn(*const u8, usize, *const u8, usize, *const u8, usize) -> i32,
+    pub network_ping: unsafe extern "C" fn(*const u8, usize) -> i32,
+    pub network_httpd_start: unsafe extern "C" fn(u16) -> i32,
+    pub network_httpd_stop: unsafe extern "C" fn(),
+    pub network_webdav_start: unsafe extern "C" fn(u16) -> i32,
+    pub network_webdav_stop: unsafe extern "C" fn(),
+    pub network_rpcd_start: unsafe extern "C" fn(u16) -> i32,
+    pub network_rpcd_stop: unsafe extern "C" fn(),
+    pub network_status: unsafe extern "C" fn(*mut u8, usize) -> i64,
+    pub network_lanscan: unsafe extern "C" fn(*const u8, usize) -> i32,
+    pub network_save_config: unsafe extern "C" fn(*const u8, usize, *const u8, usize, *const u8, usize) -> i32,
+    pub network_load_config: unsafe extern "C" fn(*mut u8, usize) -> i64,
     pub beep: unsafe extern "C" fn(u32),
     pub play_tone: unsafe extern "C" fn(u32, u64),
     pub mute: unsafe extern "C" fn(),
@@ -132,9 +147,24 @@ static HOST_API: PluginHostApi = PluginHostApi {
     pci_read_u32: host_pci_read_u32,
     pci_write_u32: host_pci_write_u32,
     network_initialize: host_network_initialize,
+    network_is_initialized: host_network_is_initialized,
     network_link_up: host_network_link_up,
     network_transmit: host_network_transmit,
     network_receive: host_network_receive,
+    network_get_mac: host_network_get_mac,
+    network_get_ip: host_network_get_ip,
+    network_set_static_ip: host_network_set_static_ip,
+    network_ping: host_network_ping,
+    network_httpd_start: host_network_httpd_start,
+    network_httpd_stop: host_network_httpd_stop,
+    network_webdav_start: host_network_webdav_start,
+    network_webdav_stop: host_network_webdav_stop,
+    network_rpcd_start: host_network_rpcd_start,
+    network_rpcd_stop: host_network_rpcd_stop,
+    network_status: host_network_status,
+    network_lanscan: host_network_lanscan,
+    network_save_config: host_network_save_config,
+    network_load_config: host_network_load_config,
     beep: host_beep,
     play_tone: host_play_tone,
     mute: host_mute,
@@ -234,6 +264,93 @@ unsafe extern "C" fn host_network_receive(out: *mut u8, capacity: usize) -> i64 
     crate::devices::net_hw::rx(unsafe { core::slice::from_raw_parts_mut(out, capacity) })
         .map(|len| len as i64).unwrap_or(-1)
 }
+unsafe extern "C" fn host_network_is_initialized() -> u8 { crate::devices::net::is_initialized() as u8 }
+unsafe extern "C" fn host_network_get_mac(out: *mut u8, capacity: usize) -> i32 {
+    if out.is_null() || capacity < 6 { return -1; }
+    let mac = crate::devices::net_hw::get_mac();
+    let len = 6.min(capacity);
+    unsafe { core::ptr::copy_nonoverlapping(mac.as_ptr(), out, len); }
+    0
+}
+unsafe extern "C" fn host_network_get_ip(out: *mut u8, capacity: usize) -> i64 {
+    if out.is_null() || capacity == 0 { return -1; }
+    let ip_str = alloc::string::String::from("0.0.0.0");
+    if ip_str.len() > capacity { return -2; }
+    unsafe { core::ptr::copy_nonoverlapping(ip_str.as_ptr(), out, ip_str.len()); }
+    ip_str.len() as i64
+}
+unsafe extern "C" fn host_network_set_static_ip(ip: *const u8, ip_len: usize, gw: *const u8, gw_len: usize, mask: *const u8, mask_len: usize) -> i32 {
+    let (Ok(ip), Ok(gw), Ok(mask)) = (
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(ip, ip_len) }),
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(gw, gw_len) }),
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(mask, mask_len) }),
+    ) else { return -1; };
+    crate::devices::net::save_network_config(ip, gw, mask).map(|_| 0).unwrap_or(-1)
+}
+unsafe extern "C" fn host_network_ping(target: *const u8, target_len: usize) -> i32 {
+    if target.is_null() || target_len == 0 || target_len > 64 { return -1; }
+    let Ok(target) = core::str::from_utf8(unsafe { core::slice::from_raw_parts(target, target_len) }) else { return -1; };
+    crate::devices::net::ping(target, 1, 1000).map(|_| 0).unwrap_or(-1)
+}
+unsafe extern "C" fn host_network_httpd_start(port: u16) -> i32 {
+    crate::devices::net::httpd_start(port);
+    0
+}
+unsafe extern "C" fn host_network_httpd_stop() {
+    crate::devices::net::httpd_stop();
+}
+unsafe extern "C" fn host_network_webdav_start(port: u16) -> i32 {
+    crate::devices::net::webdav_start(port);
+    0
+}
+unsafe extern "C" fn host_network_webdav_stop() {
+    crate::devices::net::webdav_stop();
+}
+unsafe extern "C" fn host_network_rpcd_start(port: u16) -> i32 {
+    crate::devices::net::rpcd_start(port);
+    0
+}
+unsafe extern "C" fn host_network_rpcd_stop() {
+    crate::devices::net::rpcd_stop();
+}
+unsafe extern "C" fn host_network_status(out: *mut u8, capacity: usize) -> i64 {
+    if out.is_null() || capacity == 0 { return -1; }
+    let mut status = alloc::string::String::new();
+    if crate::devices::net::is_initialized() {
+        if let Some(info) = crate::devices::net_hw::get_info() {
+            status = alloc::format!("MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} MTU: {} Link: {}",
+                info.mac[0], info.mac[1], info.mac[2], info.mac[3], info.mac[4], info.mac[5],
+                info.mtu, if crate::devices::net_hw::link_up() { "UP" } else { "DOWN" });
+        }
+    } else {
+        status = alloc::string::String::from("Not initialized");
+    }
+    if status.len() > capacity { return -2; }
+    unsafe { core::ptr::copy_nonoverlapping(status.as_ptr(), out, status.len()); }
+    status.len() as i64
+}
+unsafe extern "C" fn host_network_lanscan(prefix: *const u8, prefix_len: usize) -> i32 {
+    if prefix.is_null() || prefix_len == 0 || prefix_len > 64 { return -1; }
+    let Ok(prefix) = core::str::from_utf8(unsafe { core::slice::from_raw_parts(prefix, prefix_len) }) else { return -1; };
+    crate::devices::net::lanscan(prefix);
+    0
+}
+unsafe extern "C" fn host_network_save_config(ip: *const u8, ip_len: usize, gw: *const u8, gw_len: usize, mask: *const u8, mask_len: usize) -> i32 {
+    let (Ok(ip), Ok(gw), Ok(mask)) = (
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(ip, ip_len) }),
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(gw, gw_len) }),
+        core::str::from_utf8(unsafe { core::slice::from_raw_parts(mask, mask_len) }),
+    ) else { return -1; };
+    crate::devices::net::save_network_config(ip, gw, mask).map(|_| 0).unwrap_or(-1)
+}
+unsafe extern "C" fn host_network_load_config(out: *mut u8, capacity: usize) -> i64 {
+    if out.is_null() || capacity == 0 { return -1; }
+    let Some((ip, gw, mask)) = crate::devices::net::load_network_config() else { return -1; };
+    let config = alloc::format!("{};{};{}", ip, gw, mask);
+    if config.len() > capacity { return -2; }
+    unsafe { core::ptr::copy_nonoverlapping(config.as_ptr(), out, config.len()); }
+    config.len() as i64
+}
 unsafe extern "C" fn host_beep(frequency: u32) { crate::devices::audio::beep(frequency); }
 unsafe extern "C" fn host_play_tone(frequency: u32, duration_ms: u64) { crate::devices::audio::play_tone_nb(frequency, duration_ms); }
 unsafe extern "C" fn host_mute() { crate::devices::audio::mute(); }
@@ -326,6 +443,8 @@ pub struct HpxHeader {
     pub input_offset: u32,
     pub width: u32,
     pub height: u32,
+    pub file_version: u32,
+    pub description: [u8; 64],
 }
 
 impl HpxHeader {
@@ -345,6 +464,15 @@ impl HpxHeader {
             input_offset: read_u32(bytes, 28)?,
             width: read_u32(bytes, 32)?,
             height: read_u32(bytes, 36)?,
+            file_version: read_u32(bytes, 40)?,
+            description: {
+                let mut desc = [0u8; 64];
+                let desc_len = 64.min(bytes.len().saturating_sub(44));
+                if desc_len > 0 {
+                    desc[..desc_len].copy_from_slice(&bytes[44..44 + desc_len]);
+                }
+                desc
+            },
         };
         if !matches!(header.kind, KIND_STEPPED_APP | KIND_STEPPED_BACKGROUND) { return Err("unknown HPX executable kind"); }
         if header.header_size as usize != HPX_HEADER_SIZE { return Err("unsupported HPX header size"); }
