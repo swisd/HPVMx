@@ -72,6 +72,7 @@ mod keys;
 mod network;
 mod raw;
 mod wrappers;
+mod scripting;
 
 pub use crate::micro_c::lexer;
 pub use crate::micro_c::parser;

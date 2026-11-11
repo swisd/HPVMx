@@ -1,6 +1,6 @@
 [package]
 name = "HPVMx"
-version = "1.42.24"
+version = "1.42.35"
 edition = "2024"
 
 [[bin]]

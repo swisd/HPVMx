@@ -933,7 +933,6 @@ impl DashboardUI {
         unsafe { GLOBAL_SYSTEM_TRACKER = Some(self.resources.clone()); }
     }
 
-    //noinspection GrazieInspectionRunner
     pub unsafe fn draw(&mut self) {
         if let Some(pg) = PixelGraphics::new() {
             self.iter += 1;
@@ -2016,6 +2015,7 @@ impl DashboardUI {
                             let dec_syn = ["json", "xml", "toml", "yaml", "yml"];
                             let sys_syn = ["sys", "efi", "asm", "bytex"];
                             let prog_syn = ["micro", "dmx", "bin", "rs"];
+                            let script_syn = ["sh", "bat", "cmd", "ps1", "sp"];
 
 
                             let ext = name.split('.').last().unwrap_or("");
@@ -2029,6 +2029,10 @@ impl DashboardUI {
                                     .expect("Vector did not have exactly 1024 elements");
                             } else if prog_syn.contains(&ext) {
                                 ico = pixel_graphics::icons::upscale_icon(&pixel_graphics::icons::CODE_ICON_DATA, 16, 2)
+                                    .try_into()
+                                    .expect("Vector did not have exactly 1024 elements");
+                            } else if script_syn.contains(&ext) {
+                                ico = pixel_graphics::icons::SCRIPT_YELLOW_32_ICON_DATA
                                     .try_into()
                                     .expect("Vector did not have exactly 1024 elements");
                             } else {

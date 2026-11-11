@@ -1,6 +1,6 @@
 {
   "project_name": "HPVMx",
-  "last_updated_by_junie": "2026-11-02T11:44",
+  "last_updated_by_junie": "2026-11-10T10:17",
   "files": {
     "tools/hpx_pack.py": {
       "path": "tools/hpx_pack.py",
@@ -827,6 +827,44 @@
       ],
       "objects": {},
       "dependencies": []
+    },
+    "internal/sample.sp": {
+      "path": "internal/sample.sp",
+      "purpose": "Sample HPVMx script demonstrating all scripting engine features: arguments, variables, while loops, for loops, if/elif/else chains, break/continue, and exit.",
+      "key_regions": [
+        {
+          "lines": "1-7",
+          "description": "Header comment and argument display using %%1 and %%2"
+        },
+        {
+          "lines": "9-13",
+          "description": "Variable assignments — name, limit, counter, sum"
+        },
+        {
+          "lines": "15-29",
+          "description": "While loop with nested if/elif/else conditionals counting down"
+        },
+        {
+          "lines": "31-39",
+          "description": "For loop summing 1 to 5 with running total display"
+        },
+        {
+          "lines": "41-52",
+          "description": "If/elif/else chain evaluating sum magnitude"
+        },
+        {
+          "lines": "54-65",
+          "description": "For loop with break/continue finding first even number"
+        },
+        {
+          "lines": "67-70",
+          "description": "Final echo and exit 0"
+        }
+      ],
+      "objects": {},
+      "dependencies": [
+        "src/scripting/mod.rs"
+      ]
     },
     "internal/pm/features/features.prg": {
       "path": "internal/pm/features/features.prg",
@@ -19025,6 +19063,307 @@
       "dependencies": [
         "rackhosting-intserver/grpc.proto"
       ]
-    }
+    },
+    "src/scripting/mod.rs": {
+      "path": "src/scripting/mod.rs",
+      "purpose": "Scripting engine module entry point — exposes run_script(), run_script_from_file(), and print_script_error() for the HPVMx built-in scripting language.",
+      "key_regions": [
+        {
+          "lines": "1-17",
+          "description": "Module documentation and sub-module declarations (error, lexer, ast, parser, interpreter)"
+        },
+        {
+          "lines": "35-47",
+          "description": "run_script() — three-phase pipeline: lex, parse, execute"
+        },
+        {
+          "lines": "50-62",
+          "description": "run_script_from_file() — reads script from filesystem and delegates to run_script()"
+        },
+        {
+          "lines": "65-68",
+          "description": "print_script_error() — formats and prints detailed script errors via vdebug_autoprefix! (only visible when VERBOSE_DEBUG_ENABLED)"
+        }
+      ],
+      "objects": {
+        "run_script": {
+          "type": "pub fn",
+          "args": {
+            "source": "&str",
+            "file": "&str",
+            "arguments": "Vec<String>"
+          },
+          "returns": "ScriptResult<Option<i64>>"
+        },
+        "run_script_from_file": {
+          "type": "pub fn",
+          "args": {
+            "path": "&str",
+            "arguments": "Vec<String>"
+          },
+          "returns": "ScriptResult<Option<i64>>"
+        },
+        "print_script_error": {
+          "type": "pub fn",
+          "args": {
+            "error": "&ScriptError"
+          },
+          "returns": "()"
+        }
+      },
+      "dependencies": [
+        "src/scripting/error.rs",
+        "src/scripting/lexer.rs",
+        "src/scripting/parser.rs",
+        "src/scripting/interpreter.rs",
+        "src/filesystem.rs"
+      ]
+    },
+    "src/scripting/error.rs": {
+      "path": "src/scripting/error.rs",
+      "purpose": "Advanced error reporting system for the scripting engine — 10 error categories with source context, caret pointers, and diagnostic hints.",
+      "key_regions": [
+        {
+          "lines": "1-60",
+          "description": "ScriptErrorKind enum — 10 categories: Syntax, Semantic, Runtime, Parse, Loop, Conditional, Variable, Argument, File, Recursion"
+        },
+        {
+          "lines": "62-95",
+          "description": "ScriptError struct — rich error with file, line, column, source_line, and hint fields"
+        },
+        {
+          "lines": "97-153",
+          "description": "format_detailed() — multi-line error output with category header, source snippet, caret pointer, and hint"
+        }
+      ],
+      "objects": {
+        "ScriptErrorKind": {
+          "type": "pub enum",
+          "args": {
+            "variants": "SyntaxError, SemanticError, RuntimeError, ParseError, LoopError, ConditionalError, VariableError, ArgumentError, FileError, RecursionError"
+          }
+        },
+        "ScriptError": {
+          "type": "pub struct",
+          "args": {
+            "kind": "ScriptErrorKind",
+            "message": "String",
+            "file": "String",
+            "line": "usize",
+            "column": "usize",
+            "source_line": "Option<String>",
+            "hint": "Option<String>"
+          }
+        }
+      },
+      "dependencies": []
+    },
+    "src/scripting/lexer.rs": {
+      "path": "src/scripting/lexer.rs",
+      "purpose": "Tokenizer for the scripting language — produces positioned tokens including keywords, operators, literals, %%N argument references, and % modulo operator.",
+      "key_regions": [
+        {
+          "lines": "1-58",
+          "description": "Token enum — keywords (if, else, for, while, set, echo, exit), operators including ++ and --, delimiters, literals, ArgRef"
+        },
+        {
+          "lines": "68-131",
+          "description": "Lexer struct and navigation helpers: peek(), advance(), skip_whitespace(), skip_comment()"
+        },
+        {
+          "lines": "133-345",
+          "description": "tokenize() — main tokenization loop handling all character classes with position tracking; explicit # comment fallback in match statement"
+        },
+        {
+          "lines": "160-210",
+          "description": "%%N argument reference parsing — %%1 maps to index 0, %%2 to index 1; single % produces Percent (modulo) token"
+        },
+        {
+          "lines": "396-442",
+          "description": "read_string() — handles escape sequences: \\n \\t \\\\ \\\" \\%"
+        }
+      ],
+      "objects": {
+        "Token": {
+          "type": "pub enum",
+          "args": {
+            "variants": "KeywordIf, KeywordElse, KeywordFor, KeywordWhile, KeywordSet, KeywordEcho, KeywordExit, KeywordBreak, KeywordContinue, Equal, NotEqual, LessThan, GreaterThan, Plus, Minus, Increment, Decrement, Star, Slash, Percent, And, Or, LParen, RParen, LBrace, RBrace, Newline, Eof, Identifier(String), Number(i64), StringLit(String), ArgRef(usize)"
+          }
+        },
+        "Lexer": {
+          "type": "pub struct",
+          "args": {
+            "source": "String",
+            "chars": "Vec<char>",
+            "pos": "usize",
+            "line": "usize",
+            "column": "usize",
+            "file": "String"
+          }
+        }
+      },
+      "dependencies": [
+        "src/scripting/error.rs"
+      ]
+    },
+    "src/scripting/ast.rs": {
+      "path": "src/scripting/ast.rs",
+      "purpose": "AST node definitions for the scripting language — expressions, statements, and top-level script structure.",
+      "key_regions": [
+        {
+          "lines": "1-22",
+          "description": "Expr enum — Number, StringLit, Variable, ArgRef, BinaryOp, UnaryMinus, Increment(String), Decrement(String)"
+        },
+        {
+          "lines": "19-34",
+          "description": "BinOp enum — Eq, NotEq, Lt, Gt, Le, Ge, Add, Sub, Mul, Div, Mod, And, Or"
+        },
+        {
+          "lines": "36-74",
+          "description": "Stmt enum — Set, Echo, If (with elif/else), For, While, Break, Continue, Exit, Command, Block"
+        },
+        {
+          "lines": "76-81",
+          "description": "Script struct — top-level AST with a vector of statements"
+        }
+      ],
+      "objects": {
+        "Expr": {
+          "type": "pub enum",
+          "args": {
+            "variants": "Number(i64), StringLit(String), Variable(String), ArgRef(usize), BinaryOp{left, op, right}, UnaryMinus(Box<Expr>), Increment(String), Decrement(String)"
+          }
+        },
+        "Stmt": {
+          "type": "pub enum",
+          "args": {
+            "variants": "Set{name, value}, Echo(Vec<Expr>), If{condition, then_body, elif_branches, else_body}, For{init_var, init_value, condition, increment, body}, While{condition, body}, Break, Continue, Exit(Option<Expr>), Command(Vec<Expr>), Block(Vec<Stmt>)"
+          }
+        },
+        "Script": {
+          "type": "pub struct",
+          "args": {
+            "statements": "Vec<Stmt>"
+          }
+        }
+      },
+      "dependencies": []
+    },
+    "src/scripting/parser.rs": {
+      "path": "src/scripting/parser.rs",
+      "purpose": "Recursive descent parser for the scripting language — builds AST from token stream with detailed error reporting.",
+      "key_regions": [
+        {
+          "lines": "1-141",
+          "description": "Parser struct and helpers: current(), peek_token(), advance(), expect(), check() (fixed to properly match EOF), match_token(), source_line(), token_name()"
+        },
+        {
+          "lines": "143-156",
+          "description": "parse() — top-level parse loop producing Script AST"
+        },
+        {
+          "lines": "158-198",
+          "description": "parse_statement() — dispatches to if, for, while, set, echo, exit, break, continue, block, or command"
+        },
+        {
+          "lines": "201-238",
+          "description": "parse_if() — handles if/elif/else chains with block bodies"
+        },
+        {
+          "lines": "240-276",
+          "description": "parse_for() — parses 'for (set var = init; cond; incr) { body }' syntax"
+        },
+        {
+          "lines": "278-290",
+          "description": "parse_while() — parses 'while (cond) { body }' syntax"
+        },
+        {
+          "lines": "382-584",
+          "description": "Expression parsing — recursive descent with precedence: or > and > comparison > addition > multiplication (*, /, %) > unary > primary; postfix ++ and -- on identifiers"
+        }
+      ],
+      "objects": {
+        "Parser": {
+          "type": "pub struct",
+          "args": {
+            "tokens": "Vec<TokenWithPos>",
+            "pos": "usize",
+            "file": "String",
+            "source_lines": "Vec<String>"
+          }
+        }
+      },
+      "dependencies": [
+        "src/scripting/error.rs",
+        "src/scripting/lexer.rs",
+        "src/scripting/ast.rs"
+      ]
+    },
+    "src/scripting/interpreter.rs": {
+      "path": "src/scripting/interpreter.rs",
+      "purpose": "Script engine interpreter — executes parsed AST with variable scoping, control flow, argument resolution, and terminal command delegation.",
+      "key_regions": [
+        {
+          "lines": "1-45",
+          "description": "Value enum — Int, Str, Bool with to_string() and to_i64() conversion"
+        },
+        {
+          "lines": "47-125",
+          "description": "ExecutionContext — variable storage (HashMap), argument access, loop state, exit control"
+        },
+        {
+          "lines": "136-156",
+          "description": "Interpreter struct and execute_script() — top-level execution loop"
+        },
+        {
+          "lines": "158-336",
+          "description": "execute_stmt() — dispatches all statement types; Echo uses interpolate_string() to resolve %%N and variable names in string literals"
+        },
+        {
+          "lines": "338-382",
+          "description": "execute_command() — resolves command arguments and delegates to terminal output using vdebug_autoprefix!"
+        },
+        {
+          "lines": "384-643",
+          "description": "eval_expr() and apply_binop() — expression evaluation; interpolate_string() resolves %%N args and variable names in echo strings; to_bool() for condition evaluation"
+        }
+      ],
+      "objects": {
+        "Value": {
+          "type": "pub enum",
+          "args": {
+            "variants": "Int(i64), Str(String), Bool(bool)"
+          }
+        },
+        "ExecutionContext": {
+          "type": "pub struct",
+          "args": {
+            "variables": "HashMap<String, Value>",
+            "arguments": "Vec<String>",
+            "in_loop": "bool",
+            "exit_code": "Option<i64>",
+            "should_exit": "bool"
+          }
+        },
+        "Interpreter": {
+          "type": "pub struct",
+          "args": {
+            "context": "ExecutionContext"
+          }
+        },
+        "interpolate_string": {
+          "type": "fn",
+          "args": {
+            "input": "&str"
+          },
+          "returns": "String"
+        }
+      },
+      "dependencies": [
+        "src/scripting/error.rs",
+        "src/scripting/ast.rs",
+        "src/hpvmlog.rs"
+      ]
+    },
   }
 }

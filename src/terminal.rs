@@ -70,7 +70,7 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                         message!("\n", "\nHPX Executables:\n  exec [file.hpx] [name] - execute a disk application or background task\n  run-hpx [file.hpx] [name] - alias for exec\n  hpx-link [input.o|input.asm ...] [image.bin]\n  hpx-pack [app|background] [image.bin] [out.hpx] [step] [state-size] [draw] [input] [width] [height] [image.bin.hrel]\n  Header kind selects a stepped app or background task. See docs/HPX_EXECUTABLES.md for ABI v1.\n")
                     }
                     "misc" => {
-                        message!("\n", "\n Misc / Other:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\n  vdebug [on|off|status] - toggle verbose debug console logs\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n  beep [freq] [ms] - play a sound\n")
+                        message!("\n", "\n Misc / Other:\n  devs - list drives\n  info - show system info\n  sysinfo - show detailed system information\n  start [kernel] - load kernel\n  shutdown [s|r] - shutdown(s) or reboot(r)\n  BIOS - exit to BIOS\n  mouse-debug - debug mouse protocols and data\n  vdebug [on|off|status] - toggle verbose debug console logs\n  run-efi [path] [args...] - run EFI application\n  dashboard - show management dashboard\n  beep [freq] [ms] - play a sound\n  script run [file.sp] [args...] - run a script file\n  script eval \"code\" - evaluate inline script\n  script help - scripting language reference\n")
                     }
                     "prog" => {
                         message!("\n", "no help for '{}' (yet)", parts[2])
@@ -600,6 +600,140 @@ pub fn cmd(command: Vec<&str>, parts: &Vec<&str>, body: Vec<&str>, package_manag
                 message!("\n", "[+] Startup & Boot OS Tests: ALL TESTS PASSED");
             } else {
                 message!("\n", "[-] Startup & Boot OS Tests: FAILURE DETECTED");
+            }
+        }
+
+        "script" => {
+            if parts.len() < 2 {
+                message!("\n", "Scripting Engine — HPVMx built-in scripting language");
+                message!("\n", "Usage:");
+                message!("\n", "  script run [file.sp] [arg1] [arg2] ...  - Run a script file");
+                message!("\n", "  script eval \"code\"                       - Evaluate inline script code");
+                message!("\n", "  script help                              - Show scripting language reference");
+                message!("\n", "Language features:");
+                message!("\n", "  set x = 42              - Variable assignment");
+                message!("\n", "  echo x, \"hello %%1\"     - Output values and arguments");
+                message!("\n", "  if (x > 0) {{ ... }}     - Conditional branching");
+                message!("\n", "  elif (x < 0) {{ ... }}   - Else-if branch");
+                message!("\n", "  else {{ ... }}           - Else branch");
+                message!("\n", "  for (set i = 0; i < 10; i++) {{ ... }}  - For loop");
+                message!("\n", "  while (x > 0) {{ ... }}  - While loop");
+                message!("\n", "  break / continue         - Loop control");
+                message!("\n", "  exit [code]              - Exit script with code");
+                message!("\n", "  %%0 %%1 %%2 ...          - Script arguments (argc/argv)");
+                message!("\n", "  # comment                - Line comments");
+            } else {
+                match parts[1] {
+                    "run" => {
+                        if parts.len() < 3 {
+                            message!("\n", "Usage: script run [file.sp] [arg1] [arg2] ...");
+                        } else {
+                            let script_path = parts[2];
+                            let args: Vec<String> = parts[3..].iter().map(|s| s.to_string()).collect();
+                            match crate::scripting::run_script_from_file(script_path, args) {
+                                Ok(exit_code) => {
+                                    if let Some(code) = exit_code {
+                                        crate::vdebug!("script", "script exited with code {}", code);
+                                    } else {
+                                        crate::vdebug!("script", "script completed successfully");
+                                    }
+                                }
+                                Err(e) => {
+                                    crate::scripting::print_script_error(&e);
+                                }
+                            }
+                        }
+                    }
+                    "eval" => {
+                        if parts.len() < 3 {
+                            message!("\n", "Usage: script eval \"code\" [arg1] [arg2] ...");
+                        } else {
+                            // Collect the inline code (may contain spaces)
+                            let code = parts[2];
+                            let args: Vec<String> = parts[3..].iter().map(|s| s.to_string()).collect();
+                            match crate::scripting::run_script(code, "<inline>", args) {
+                                Ok(exit_code) => {
+                                    if let Some(code) = exit_code {
+                                        crate::vdebug!("script", "eval exited with code {}", code);
+                                    }
+                                }
+                                Err(e) => {
+                                    crate::scripting::print_script_error(&e);
+                                }
+                            }
+                        }
+                    }
+                    "help" => {
+                        message!("\n", "=== HPVMx Scripting Language Reference ===");
+                        message!("\n", "# Comments — everything after # to end of line is ignored");
+                        message!("\n", "");
+                        message!("\n", "## Variables");
+                        message!("\n", "  set name = value        # Assign a value to a variable");
+                        message!("\n", "  set count = 0");
+                        message!("\n", "  set greeting = \"Hello\"");
+                        message!("\n", "");
+                        message!("\n", "## Arguments (argc/argv)");
+                        message!("\n", "  %%0                    # Script name");
+                        message!("\n", "  %%1 %%2 %%3 ...        # Positional arguments");
+                        message!("\n", "  echo \"First arg: %%1\"  # Print first argument");
+                        message!("\n", "");
+                        message!("\n", "## Output");
+                        message!("\n", "  echo \"Hello, World!\"   # Print a string");
+                        message!("\n", "  echo x, y              # Print multiple values");
+                        message!("\n", "");
+                        message!("\n", "## Conditionals");
+                        message!("\n", "  if (x > 0) {{");
+                        message!("\n", "    echo \"positive\"");
+                        message!("\n", "  }} elif (x < 0) {{");
+                        message!("\n", "    echo \"negative\"");
+                        message!("\n", "  }} else {{");
+                        message!("\n", "    echo \"zero\"");
+                        message!("\n", "  }}");
+                        message!("\n", "");
+                        message!("\n", "## For Loops");
+                        message!("\n", "  for (set i = 0; i < 10; i++) {{");
+                        message!("\n", "    echo i");
+                        message!("\n", "  }}");
+                        message!("\n", "");
+                        message!("\n", "## While Loops");
+                        message!("\n", "  while (count > 0) {{");
+                        message!("\n", "    echo count");
+                        message!("\n", "    set count = count - 1");
+                        message!("\n", "  }}");
+                        message!("\n", "");
+                        message!("\n", "## Loop Control");
+                        message!("\n", "  break                  # Exit the current loop");
+                        message!("\n", "  continue               # Skip to next iteration");
+                        message!("\n", "");
+                        message!("\n", "## Operators");
+                        message!("\n", "  == != < > <= >=        # Comparison");
+                        message!("\n", "  + - * / %               # Arithmetic (including modulo)");
+                        message!("\n", "  ++ --                    # Increment / Decrement");
+                        message!("\n", "  && ||                  # Logical AND / OR");
+                        message!("\n", "");
+                        message!("\n", "## Exit");
+                        message!("\n", "  exit                   # Exit with code 0");
+                        message!("\n", "  exit 1                 # Exit with code 1");
+                        message!("\n", "");
+                        message!("\n", "## Terminal Commands");
+                        message!("\n", "  ls                     # Run any terminal command");
+                        message!("\n", "  pwd                    # Commands are passed to terminal::cmd()");
+                        message!("\n", "");
+                        message!("\n", "## Example Script");
+                        message!("\n", "# greet.sp — greet a user by name");
+                        message!("\n", "echo \"Hello, %%1!\"");
+                        message!("\n", "set count = 3");
+                        message!("\n", "while (count > 0) {{");
+                        message!("\n", "  echo count");
+                        message!("\n", "  set count = count - 1");
+                        message!("\n", "}}");
+                        message!("\n", "echo \"Done!\"");
+                    }
+                    _ => {
+                        message!("\n", "Unknown script subcommand: '{}'", parts[1]);
+                        message!("\n", "Use 'script help' for usage information.");
+                    }
+                }
             }
         }
 
